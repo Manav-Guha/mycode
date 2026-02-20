@@ -39,6 +39,8 @@ from mycode.interface import (
     InterfaceResult,
     OperationalIntent,
     ScenarioReview,
+    TerminalIO,
+    UserIO,
     summarize_ingestion,
 )
 from mycode.report import (
@@ -126,6 +128,8 @@ __all__ = [
     "OperationalIntent",
     "ScenarioReview",
     "InterfaceError",
+    "TerminalIO",
+    "UserIO",
     "summarize_ingestion",
     # Report Generator (E2)
     "ReportGenerator",

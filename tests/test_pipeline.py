@@ -1,16 +1,19 @@
-"""Tests for Pipeline (D3) — orchestrates the full stress-testing flow.
+"""Tests for Pipeline (D3/E4) — orchestrates the full stress-testing flow.
 
 Tests cover:
   - Language detection (Python, JavaScript, ambiguous, empty)
   - PipelineConfig / PipelineResult data classes
   - Stage-level error handling (each stage can fail independently)
-  - Full end-to-end pipeline on the expense_tracker example project
+  - Conversational interface integration (E1)
+  - Report generation integration (E2)
+  - Interaction recorder integration (E3)
+  - Full 9-stage end-to-end pipeline on the expense_tracker example project
+  - CLI entry point
 """
 
-import shutil
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -28,6 +31,43 @@ from mycode.pipeline import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXPENSE_TRACKER = REPO_ROOT / "examples" / "expense_tracker"
+
+# All 9 stage names in the full pipeline
+_ALL_STAGES = {
+    "language_detection",
+    "session_setup",
+    "ingestion",
+    "library_matching",
+    "conversation",
+    "scenario_generation",
+    "scenario_review",
+    "execution",
+    "report_generation",
+}
+
+
+# ── Test Helpers ──
+
+
+class MockIO:
+    """Injectable I/O that records displays and returns scripted responses."""
+
+    def __init__(self, responses: list[str] | None = None):
+        self.responses = list(responses) if responses else []
+        self.displays: list[str] = []
+        self.prompts: list[str] = []
+        self._response_idx = 0
+
+    def display(self, message: str) -> None:
+        self.displays.append(message)
+
+    def prompt(self, message: str) -> str:
+        self.prompts.append(message)
+        if self._response_idx < len(self.responses):
+            resp = self.responses[self._response_idx]
+            self._response_idx += 1
+            return resp
+        return ""
 
 
 # ── Fixtures ──
@@ -180,6 +220,12 @@ class TestPipelineResult:
         ])
         assert r.failed_stage == "a"
 
+    def test_new_result_fields_default_none(self):
+        r = PipelineResult()
+        assert r.interface_result is None
+        assert r.report is None
+        assert r.recording_path is None
+
 
 # ── Pipeline with forced language (skips detection) ──
 
@@ -217,7 +263,7 @@ class TestPipelineMinimalPython:
 
     @pytest.mark.slow
     def test_pipeline_runs_all_stages(self, py_project, tmp_path):
-        """Pipeline completes all stages (some scenarios may fail — that's ok)."""
+        """Pipeline completes all 9 stages."""
         config = PipelineConfig(
             project_path=py_project,
             operational_intent="Simple web server handling GET requests",
@@ -228,14 +274,9 @@ class TestPipelineMinimalPython:
         )
         result = run_pipeline(config)
 
-        # Check all stages were attempted
-        stage_names = [s.stage for s in result.stages]
-        assert "language_detection" in stage_names
-        assert "session_setup" in stage_names
-        assert "ingestion" in stage_names
-        assert "library_matching" in stage_names
-        assert "scenario_generation" in stage_names
-        assert "execution" in stage_names
+        # Check all 9 stages were attempted
+        stage_names = {s.stage for s in result.stages}
+        assert _ALL_STAGES == stage_names
 
         # Language should be set
         assert result.language == "python"
@@ -251,6 +292,10 @@ class TestPipelineMinimalPython:
         # Execution should produce results (even if some fail)
         assert result.execution is not None
         assert len(result.execution.scenario_results) > 0
+
+        # Report should be generated
+        assert result.report is not None
+        assert result.report.scenarios_run > 0
 
         # Total duration should be positive
         assert result.total_duration_ms > 0
@@ -284,14 +329,9 @@ class TestPipelineExpenseTracker:
         # Language auto-detected as Python
         assert result.language == "python"
 
-        # All stages should be attempted
-        stage_names = [s.stage for s in result.stages]
-        assert "language_detection" in stage_names
-        assert "session_setup" in stage_names
-        assert "ingestion" in stage_names
-        assert "library_matching" in stage_names
-        assert "scenario_generation" in stage_names
-        assert "execution" in stage_names
+        # All 9 stages should be attempted
+        stage_names = {s.stage for s in result.stages}
+        assert _ALL_STAGES == stage_names
 
         # Ingestion finds app.py
         assert result.ingestion is not None
@@ -319,6 +359,11 @@ class TestPipelineExpenseTracker:
         # Execution produced results
         assert result.execution is not None
         assert len(result.execution.scenario_results) > 0
+
+        # Report generated
+        assert result.report is not None
+        report_text = result.report.as_text()
+        assert "myCode Diagnostic Report" in report_text
 
         # At least one scenario should have steps with real measurements
         has_measurements = False
@@ -444,6 +489,8 @@ class TestPipelineErrorHandling:
             offline=True,
             skip_version_check=True,
             temp_base=tmp_path,
+            auto_approve_scenarios=True,
+            io=MockIO(responses=["A data app", "Speed"]),
         )
         result = run_pipeline(config)
         assert result.scenarios is not None
@@ -469,3 +516,312 @@ class TestJavaScriptDetection:
         (tmp_path / "main.js").write_text("console.log('x');\n")
         (tmp_path / "utils.mjs").write_text("export const x = 1;\n")
         assert detect_language(tmp_path) == "javascript"
+
+
+# ── Conversational Interface Integration (E1) ──
+
+
+class TestPipelineConversation:
+    """Tests for the conversational interface stage."""
+
+    @pytest.mark.slow
+    def test_conversation_produces_intent(self, py_project, tmp_path):
+        """Pipeline runs conversation when no operational_intent given."""
+        io = MockIO(responses=[
+            "A simple data tracker app",
+            "Speed and data handling",
+            "y",  # approve all scenarios
+        ])
+        config = PipelineConfig(
+            project_path=py_project,
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+            io=io,
+        )
+        result = run_pipeline(config)
+
+        assert result.interface_result is not None
+        assert result.interface_result.intent.summary
+        stage_names = [s.stage for s in result.stages]
+        assert "conversation" in stage_names
+        conv_stage = next(s for s in result.stages if s.stage == "conversation")
+        assert conv_stage.success
+
+    @pytest.mark.slow
+    def test_operational_intent_override_skips_conversation(
+        self, py_project, tmp_path,
+    ):
+        """Providing operational_intent skips conversation."""
+        config = PipelineConfig(
+            project_path=py_project,
+            operational_intent="Test API under load",
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+        )
+        result = run_pipeline(config)
+
+        assert result.interface_result is None  # Conversation was skipped
+        conv_stage = next(s for s in result.stages if s.stage == "conversation")
+        assert conv_stage.success
+
+    @pytest.mark.slow
+    def test_conversation_failure_nonfatal(self, py_project, tmp_path):
+        """Conversation failure falls back to default intent."""
+        with patch(
+            "mycode.pipeline.ConversationalInterface",
+            side_effect=RuntimeError("conversation exploded"),
+        ):
+            config = PipelineConfig(
+                project_path=py_project,
+                language="python",
+                offline=True,
+                skip_version_check=True,
+                temp_base=tmp_path,
+                auto_approve_scenarios=True,
+            )
+            result = run_pipeline(config)
+
+        # Pipeline should continue despite conversation failure
+        conv_stage = next(s for s in result.stages if s.stage == "conversation")
+        assert not conv_stage.success
+        # Scenarios should still be generated with default intent
+        assert result.scenarios is not None
+        assert len(result.scenarios.scenarios) > 0
+
+
+# ── Scenario Review Integration ──
+
+
+class TestPipelineScenarioReview:
+    """Tests for the scenario review stage."""
+
+    @pytest.mark.slow
+    def test_auto_approve_with_operational_intent(self, py_project, tmp_path):
+        """Scenarios auto-approved when operational_intent is provided."""
+        config = PipelineConfig(
+            project_path=py_project,
+            operational_intent="Test app",
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+        )
+        result = run_pipeline(config)
+
+        review_stage = next(s for s in result.stages if s.stage == "scenario_review")
+        assert review_stage.success
+        # All scenarios should have been run (auto-approved)
+        assert result.execution is not None
+
+    @pytest.mark.slow
+    def test_auto_approve_flag(self, py_project, tmp_path):
+        """auto_approve_scenarios=True skips review."""
+        io = MockIO(responses=["A data app", "Speed"])
+        config = PipelineConfig(
+            project_path=py_project,
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+            io=io,
+            auto_approve_scenarios=True,
+        )
+        result = run_pipeline(config)
+
+        review_stage = next(s for s in result.stages if s.stage == "scenario_review")
+        assert review_stage.success
+        assert result.execution is not None
+
+
+# ── Report Generation Integration (E2) ──
+
+
+class TestPipelineReport:
+    """Tests for the report generation stage."""
+
+    @pytest.mark.slow
+    def test_report_generated(self, py_project, tmp_path):
+        """Pipeline generates a diagnostic report."""
+        config = PipelineConfig(
+            project_path=py_project,
+            operational_intent="Simple app",
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+        )
+        result = run_pipeline(config)
+
+        assert result.report is not None
+        assert result.report.scenarios_run > 0
+        report_text = result.report.as_text()
+        assert "myCode Diagnostic Report" in report_text
+
+        report_stage = next(
+            s for s in result.stages if s.stage == "report_generation"
+        )
+        assert report_stage.success
+
+    @pytest.mark.slow
+    def test_report_failure_nonfatal(self, py_project, tmp_path):
+        """Report failure doesn't crash the pipeline."""
+        config = PipelineConfig(
+            project_path=py_project,
+            operational_intent="Simple app",
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+        )
+        with patch(
+            "mycode.pipeline.ReportGenerator",
+            side_effect=RuntimeError("report exploded"),
+        ):
+            result = run_pipeline(config)
+
+        # Execution should still succeed
+        assert result.execution is not None
+        # Report should be None
+        assert result.report is None
+        report_stage = next(
+            s for s in result.stages if s.stage == "report_generation"
+        )
+        assert not report_stage.success
+
+
+# ── Interaction Recorder Integration (E3) ──
+
+
+class TestPipelineRecorder:
+    """Tests for the interaction recorder integration."""
+
+    @pytest.mark.slow
+    def test_recorder_with_consent(self, py_project, tmp_path):
+        """Pipeline records session data when consent is given."""
+        data_dir = tmp_path / "recordings"
+        config = PipelineConfig(
+            project_path=py_project,
+            operational_intent="Test app",
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+            consent=True,
+            data_dir=data_dir,
+        )
+        result = run_pipeline(config)
+
+        assert result.recording_path is not None
+        assert result.recording_path.exists()
+
+    @pytest.mark.slow
+    def test_recorder_without_consent(self, py_project, tmp_path):
+        """Pipeline does not record when consent is not given."""
+        config = PipelineConfig(
+            project_path=py_project,
+            operational_intent="Test app",
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+            consent=False,
+        )
+        result = run_pipeline(config)
+
+        assert result.recording_path is None
+
+    @pytest.mark.slow
+    def test_recorder_failure_nonfatal(self, py_project, tmp_path):
+        """Recorder failure doesn't block pipeline."""
+        config = PipelineConfig(
+            project_path=py_project,
+            operational_intent="Test app",
+            language="python",
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+            consent=True,
+            data_dir=Path("/nonexistent/readonly/path"),
+        )
+        # Even if recorder can't save, pipeline should complete
+        result = run_pipeline(config)
+        assert result.execution is not None
+
+
+# ── Full 9-stage end-to-end with conversation ──
+
+
+class TestPipelineFullFlow:
+    """Full pipeline with conversation, report, and recorder."""
+
+    @pytest.mark.slow
+    def test_full_flow_with_conversation_and_report(self, tmp_path):
+        """Full 9-stage pipeline on expense_tracker with MockIO."""
+        if not EXPENSE_TRACKER.exists():
+            pytest.skip("expense_tracker example not found")
+
+        io = MockIO(responses=[
+            "It's a personal expense tracker web app",
+            "I care about handling lots of entries and speed",
+            "y",  # approve all scenarios
+        ])
+        data_dir = tmp_path / "recordings"
+
+        config = PipelineConfig(
+            project_path=EXPENSE_TRACKER,
+            offline=True,
+            skip_version_check=True,
+            temp_base=tmp_path,
+            io=io,
+            consent=True,
+            data_dir=data_dir,
+        )
+        result = run_pipeline(config)
+
+        # All 9 stages attempted
+        stage_names = {s.stage for s in result.stages}
+        assert _ALL_STAGES == stage_names
+
+        # Conversation produced intent
+        assert result.interface_result is not None
+        assert result.interface_result.intent.summary
+
+        # Report generated
+        assert result.report is not None
+        assert result.report.scenarios_run > 0
+        assert "myCode Diagnostic Report" in result.report.as_text()
+
+        # Recording saved
+        assert result.recording_path is not None
+        assert result.recording_path.exists()
+
+
+# ── CLI entry point ──
+
+
+class TestCLI:
+    """Tests for the CLI entry point."""
+
+    def test_cli_help(self):
+        """CLI parser builds without error."""
+        from mycode.cli import build_parser
+        parser = build_parser()
+        assert parser.prog == "mycode"
+
+    def test_cli_nonexistent_path(self):
+        """CLI returns error for nonexistent path."""
+        from mycode.cli import main
+        exit_code = main(["/nonexistent/path"])
+        assert exit_code == 1
+
+    def test_cli_not_a_directory(self, tmp_path):
+        """CLI returns error for a file path."""
+        from mycode.cli import main
+        f = tmp_path / "file.txt"
+        f.write_text("x")
+        exit_code = main([str(f)])
+        assert exit_code == 1

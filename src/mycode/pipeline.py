@@ -1,9 +1,23 @@
-"""Pipeline (D3) — Orchestrates the full myCode stress-testing flow.
+"""Pipeline (D3/E4) — Orchestrates the full myCode stress-testing flow.
 
-Wires Session Manager → Project Ingester → Component Library → Scenario
-Generator → Execution Engine into a single entry point.  Detects project
-language (Python / JavaScript) from project contents, handles errors
-gracefully at each stage, and returns structured results.
+Wires Session Manager → Project Ingester → Component Library →
+Conversational Interface → Scenario Generator → Execution Engine →
+Report Generator into a single entry point.  Optionally records
+anonymized session data via the Interaction Recorder.
+
+Detects project language (Python / JavaScript) from project contents,
+handles errors gracefully at each stage, and returns structured results.
+
+Nine stages:
+  1. Language Detection
+  2. Session Setup
+  3. Project Ingestion
+  4. Component Library Matching
+  5. Conversational Interface (or skip with operational_intent override)
+  6. Scenario Generation
+  7. Scenario Review (or auto-approve in headless mode)
+  8. Execution
+  9. Report Generation
 
 Pure orchestration layer — no LLM dependency of its own.
 """
@@ -16,18 +30,33 @@ from typing import Optional
 
 from mycode.engine import ExecutionEngine, ExecutionEngineResult
 from mycode.ingester import IngestionResult, ProjectIngester
+from mycode.interface import (
+    ConversationalInterface,
+    InterfaceResult,
+    TerminalIO,
+    UserIO,
+)
 from mycode.js_ingester import JsProjectIngester
 from mycode.library import ComponentLibrary, ProfileMatch
+from mycode.recorder import InteractionRecorder
+from mycode.report import DiagnosticReport, ReportGenerator
 from mycode.scenario import (
     LLMConfig,
     ScenarioGenerator,
     ScenarioGeneratorResult,
+    StressTestScenario,
 )
 from mycode.session import ResourceCaps, SessionManager
 
 logger = logging.getLogger(__name__)
 
 # ── Constants ──
+
+_DEFAULT_INTENT = (
+    "General-purpose application — test for common failure modes "
+    "including data scaling, memory issues, edge cases, and "
+    "concurrency problems."
+)
 
 # Files that indicate a Python project
 _PYTHON_INDICATORS = frozenset({
@@ -72,8 +101,10 @@ class PipelineConfig:
 
     Attributes:
         project_path: Path to the user's project directory.
-        operational_intent: Plain-language description of what the project
-            does and how it will be used (from conversational interface).
+        operational_intent: Optional override — if non-empty, the
+            conversational interface is skipped and this string is used
+            as the intent for scenario generation.  Scenarios are
+            auto-approved in this headless mode.
         language: Force language ("python" or "javascript"). Auto-detected
             if not provided.
         resource_caps: Resource limits for the session sandbox.
@@ -81,6 +112,10 @@ class PipelineConfig:
         offline: Use offline scenario generation (no LLM calls).
         skip_version_check: Skip PyPI/npm version lookups (faster, for testing).
         temp_base: Override temp directory base for session workspace.
+        consent: Opt-in for anonymous interaction recording.
+        data_dir: Override data directory for interaction recorder.
+        io: Injectable I/O handler for conversational interface.
+        auto_approve_scenarios: Skip interactive scenario review.
     """
 
     project_path: str | Path = ""
@@ -91,6 +126,10 @@ class PipelineConfig:
     offline: bool = True
     skip_version_check: bool = False
     temp_base: Optional[str | Path] = None
+    consent: bool = False
+    data_dir: Optional[Path] = None
+    io: Optional[UserIO] = None
+    auto_approve_scenarios: bool = False
 
 
 @dataclass
@@ -121,6 +160,9 @@ class PipelineResult:
         profile_matches: Component library matches (empty if matching failed).
         scenarios: Scenario generator result (None if generation failed).
         execution: Execution engine result (None if execution failed).
+        interface_result: Conversational interface output (None if skipped).
+        report: Diagnostic report (None if generation failed or skipped).
+        recording_path: Path to saved recording (None if consent not given).
         total_duration_ms: Wall-clock time for the entire pipeline.
         warnings: Accumulated warnings from all stages.
     """
@@ -131,6 +173,9 @@ class PipelineResult:
     profile_matches: list[ProfileMatch] = field(default_factory=list)
     scenarios: Optional[ScenarioGeneratorResult] = None
     execution: Optional[ExecutionEngineResult] = None
+    interface_result: Optional[InterfaceResult] = None
+    report: Optional[DiagnosticReport] = None
+    recording_path: Optional[Path] = None
     total_duration_ms: float = 0.0
     warnings: list[str] = field(default_factory=list)
 
@@ -217,8 +262,14 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         2. Create Session Manager sandbox (venv for Python)
         3. Run Project Ingester on copied project
         4. Match dependencies against Component Library
-        5. Generate stress test scenarios (Scenario Generator)
-        6. Execute scenarios (Execution Engine)
+        5. Conversational Interface (or skip if operational_intent provided)
+        6. Generate stress test scenarios (Scenario Generator)
+        7. User reviews scenarios (or auto-approve in headless mode)
+        8. Execute approved scenarios (Execution Engine)
+        9. Generate diagnostic report (Report Generator)
+
+    The Interaction Recorder captures anonymized data after relevant
+    stages when consent is given.
 
     Each stage is wrapped in error handling. If a stage fails, the pipeline
     records the error and returns partial results — downstream stages are
@@ -233,6 +284,12 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     project_path = Path(config.project_path).resolve()
     result = PipelineResult()
     pipeline_start = time.monotonic()
+
+    # Initialize recorder (always created; consent checked internally)
+    recorder = InteractionRecorder(
+        consent=config.consent,
+        data_dir=config.data_dir,
+    )
 
     # ── Stage 1: Language Detection ──
     stage_start = time.monotonic()
@@ -262,7 +319,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         result.total_duration_ms = _elapsed_ms(pipeline_start)
         return result
 
-    # ── Stages 2–6 run inside the Session Manager context ──
+    # ── Stages 2–9 run inside the Session Manager context ──
     try:
         with SessionManager(
             project_path,
@@ -288,16 +345,54 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                 ingestion, language, result,
             )
 
-            # ── Stage 5: Scenario Generation ──
+            # Record dependencies (after library matching)
+            _safe_record(
+                recorder.record_dependencies, ingestion, matches, language,
+            )
+
+            # ── Stage 5: Conversational Interface ──
+            intent = _run_conversation(ingestion, config, language, result)
+
+            # Record conversation
+            if result.interface_result:
+                _safe_record(
+                    recorder.record_conversation,
+                    result.interface_result.intent.as_intent_string(),
+                    result.interface_result.intent.raw_responses,
+                )
+
+            # ── Stage 6: Scenario Generation ──
             scenarios = _run_scenario_generation(
-                ingestion, matches, config, language, result,
+                ingestion, matches, config, language, result, intent,
             )
             if scenarios is None:
                 result.total_duration_ms = _elapsed_ms(pipeline_start)
+                _safe_save(recorder, result)
                 return result
 
-            # ── Stage 6: Execution ──
-            _run_execution(session, ingestion, scenarios, result)
+            # Record scenarios
+            _safe_record(recorder.record_scenarios, scenarios)
+
+            # ── Stage 7: Scenario Review ──
+            approved = _run_scenario_review(scenarios, config, result)
+
+            # ── Stage 8: Execution ──
+            _run_execution(session, ingestion, approved, result)
+
+            # Record execution
+            if result.execution is not None:
+                _safe_record(recorder.record_execution, result.execution)
+
+            # ── Stage 9: Report Generation ──
+            if result.execution is not None:
+                _run_report_generation(
+                    result.execution, ingestion, matches, intent,
+                    config, result,
+                )
+
+                # Record report
+                if result.report is not None:
+                    _safe_record(recorder.record_report, result.report)
 
     except Exception as exc:
         # Session Manager setup/teardown failure
@@ -311,6 +406,9 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
         else:
             result.warnings.append(f"Unexpected error during pipeline: {exc}")
         logger.exception("Pipeline error")
+
+    # Save recorder
+    _safe_save(recorder, result)
 
     result.total_duration_ms = _elapsed_ms(pipeline_start)
     return result
@@ -445,25 +543,84 @@ def _run_library_matching(
         return []
 
 
+def _run_conversation(
+    ingestion: IngestionResult,
+    config: PipelineConfig,
+    language: str,
+    result: PipelineResult,
+) -> str:
+    """Stage 5: Run conversational interface to extract operational intent.
+
+    Returns the intent string for the Scenario Generator.  If
+    ``config.operational_intent`` is provided, the conversation is skipped.
+    """
+    stage_start = time.monotonic()
+
+    # Headless mode — skip conversation
+    if config.operational_intent:
+        result.stages.append(StageResult(
+            stage="conversation",
+            duration_ms=_elapsed_ms(stage_start),
+        ))
+        logger.info("Conversation skipped — operational intent provided.")
+        return config.operational_intent
+
+    try:
+        io = config.io or TerminalIO()
+        interface = ConversationalInterface(
+            llm_config=config.llm_config,
+            offline=config.offline,
+            io=io,
+        )
+        interface_result = interface.run(ingestion, language)
+        result.interface_result = interface_result
+
+        if interface_result.warnings:
+            result.warnings.extend(interface_result.warnings)
+
+        intent_string = interface_result.intent.as_intent_string()
+        if not intent_string:
+            intent_string = _DEFAULT_INTENT
+            result.warnings.append(
+                "Empty operational intent from conversation — using default."
+            )
+
+        result.stages.append(StageResult(
+            stage="conversation",
+            duration_ms=_elapsed_ms(stage_start),
+        ))
+        logger.info("Conversation complete, intent: %s", intent_string[:80])
+        return intent_string
+
+    except Exception as exc:
+        # Conversation failure is non-fatal — fall back to default intent
+        result.stages.append(StageResult(
+            stage="conversation",
+            success=False,
+            duration_ms=_elapsed_ms(stage_start),
+            error=f"Conversational interface failed: {exc}",
+        ))
+        result.warnings.append(
+            "Conversation failed. Using generic stress testing profile."
+        )
+        logger.exception("Conversation failed")
+        return _DEFAULT_INTENT
+
+
 def _run_scenario_generation(
     ingestion: IngestionResult,
     matches: list[ProfileMatch],
     config: PipelineConfig,
     language: str,
     result: PipelineResult,
+    intent: str,
 ) -> Optional[ScenarioGeneratorResult]:
-    """Stage 5: Generate stress test scenarios."""
+    """Stage 6: Generate stress test scenarios."""
     stage_start = time.monotonic()
     try:
         generator = ScenarioGenerator(
             llm_config=config.llm_config,
             offline=config.offline,
-        )
-
-        intent = config.operational_intent or (
-            "General-purpose application — test for common failure modes "
-            "including data scaling, memory issues, edge cases, and "
-            "concurrency problems."
         )
 
         scenarios = generator.generate(
@@ -503,16 +660,79 @@ def _run_scenario_generation(
         return None
 
 
+def _run_scenario_review(
+    scenarios: ScenarioGeneratorResult,
+    config: PipelineConfig,
+    result: PipelineResult,
+) -> list[StressTestScenario]:
+    """Stage 7: Present scenarios for user review before execution.
+
+    Returns the list of approved scenarios.  Auto-approves when
+    ``operational_intent`` was provided or ``auto_approve_scenarios`` is set.
+    """
+    stage_start = time.monotonic()
+
+    # Auto-approve in headless mode
+    if config.auto_approve_scenarios or config.operational_intent:
+        result.stages.append(StageResult(
+            stage="scenario_review",
+            duration_ms=_elapsed_ms(stage_start),
+        ))
+        return list(scenarios.scenarios)
+
+    try:
+        io = config.io or TerminalIO()
+        interface = ConversationalInterface(
+            llm_config=config.llm_config,
+            offline=True,  # Review doesn't need LLM
+            io=io,
+        )
+        review = interface.review_scenarios(scenarios.scenarios)
+
+        if result.interface_result:
+            result.interface_result.review = review
+
+        if review.skipped:
+            result.warnings.append(
+                f"User skipped {len(review.skipped)} scenario(s): "
+                f"{', '.join(review.skipped)}"
+            )
+        if review.user_notes:
+            result.warnings.append(f"User feedback: {review.user_notes}")
+
+        result.stages.append(StageResult(
+            stage="scenario_review",
+            duration_ms=_elapsed_ms(stage_start),
+        ))
+        logger.info(
+            "Scenario review: %d approved, %d skipped",
+            len(review.approved), len(review.skipped),
+        )
+        return review.approved
+
+    except Exception as exc:
+        # Review failure is non-fatal — approve all
+        result.stages.append(StageResult(
+            stage="scenario_review",
+            success=False,
+            duration_ms=_elapsed_ms(stage_start),
+            error=f"Scenario review failed: {exc}",
+        ))
+        result.warnings.append("Scenario review failed. Running all scenarios.")
+        logger.exception("Scenario review failed")
+        return list(scenarios.scenarios)
+
+
 def _run_execution(
     session: SessionManager,
     ingestion: IngestionResult,
-    scenarios: ScenarioGeneratorResult,
+    approved_scenarios: list[StressTestScenario],
     result: PipelineResult,
 ) -> None:
-    """Stage 6: Execute generated scenarios."""
+    """Stage 8: Execute approved scenarios."""
     stage_start = time.monotonic()
 
-    if not scenarios.scenarios:
+    if not approved_scenarios:
         result.stages.append(StageResult(
             stage="execution",
             duration_ms=_elapsed_ms(stage_start),
@@ -522,7 +742,7 @@ def _run_execution(
 
     try:
         engine = ExecutionEngine(session=session, ingestion=ingestion)
-        execution = engine.execute(scenarios=scenarios.scenarios)
+        execution = engine.execute(scenarios=approved_scenarios)
         result.execution = execution
 
         if execution.warnings:
@@ -549,9 +769,72 @@ def _run_execution(
         logger.exception("Execution failed")
 
 
+def _run_report_generation(
+    execution: ExecutionEngineResult,
+    ingestion: IngestionResult,
+    matches: list[ProfileMatch],
+    intent: str,
+    config: PipelineConfig,
+    result: PipelineResult,
+) -> None:
+    """Stage 9: Generate the diagnostic report."""
+    stage_start = time.monotonic()
+    try:
+        generator = ReportGenerator(
+            llm_config=config.llm_config,
+            offline=config.offline,
+        )
+        report = generator.generate(
+            execution=execution,
+            ingestion=ingestion,
+            profile_matches=matches,
+            operational_intent=intent,
+        )
+        result.report = report
+
+        result.stages.append(StageResult(
+            stage="report_generation",
+            duration_ms=_elapsed_ms(stage_start),
+        ))
+        logger.info("Report generated (model: %s)", report.model_used)
+
+    except Exception as exc:
+        # Report generation failure is non-fatal
+        result.stages.append(StageResult(
+            stage="report_generation",
+            success=False,
+            duration_ms=_elapsed_ms(stage_start),
+            error=f"Report generation failed: {exc}",
+        ))
+        result.warnings.append(
+            "Report generation failed. Raw execution results are still available."
+        )
+        logger.exception("Report generation failed")
+
+
 # ── Helpers ──
 
 
 def _elapsed_ms(start: float) -> float:
     """Milliseconds elapsed since *start* (monotonic)."""
     return (time.monotonic() - start) * 1000.0
+
+
+def _safe_record(func: object, *args: object, **kwargs: object) -> None:
+    """Call a recorder method, swallowing all errors."""
+    try:
+        func(*args, **kwargs)
+    except Exception as exc:
+        logger.debug("Recorder call failed (non-blocking): %s", exc)
+
+
+def _safe_save(recorder: InteractionRecorder, result: PipelineResult) -> None:
+    """Save recorder to disk if consent given. Never blocks pipeline."""
+    if not recorder.consent:
+        return
+    if result.recording_path is not None:
+        return  # Already saved
+    try:
+        result.recording_path = recorder.save()
+    except Exception as exc:
+        logger.debug("Recorder save failed (non-blocking): %s", exc)
