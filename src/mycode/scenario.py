@@ -1,0 +1,884 @@
+"""Scenario Generator (D1) — LLM-powered stress test scenario generation.
+
+Core LLM layer. Takes full ingester output + component library matches +
+operational intent. Tests dependency interaction chains as systems, not
+individual components in isolation.
+
+Generates stress test configurations across categories:
+  Shared: data_volume_scaling, memory_profiling, edge_case_input, concurrent_execution
+  Python: blocking_io, gil_contention
+  JavaScript: async_failures, event_listener_accumulation, state_management_degradation
+
+Supports Gemini Flash (free tier default), BYOK for any OpenAI-compatible
+endpoint, and offline mode for testing without API calls.
+
+LLM-dependent component (one of three).
+"""
+
+import json
+import logging
+import re
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from typing import Optional
+
+from mycode.ingester import CouplingPoint, FunctionFlow, IngestionResult
+from mycode.library.loader import DependencyProfile, ProfileMatch
+
+logger = logging.getLogger(__name__)
+
+# ── Constants ──
+
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+DEFAULT_MODEL = "gemini-2.0-flash"
+
+SHARED_CATEGORIES = frozenset({
+    "data_volume_scaling",
+    "memory_profiling",
+    "edge_case_input",
+    "concurrent_execution",
+})
+
+PYTHON_CATEGORIES = SHARED_CATEGORIES | frozenset({
+    "blocking_io",
+    "gil_contention",
+})
+
+JAVASCRIPT_CATEGORIES = SHARED_CATEGORIES | frozenset({
+    "async_failures",
+    "event_listener_accumulation",
+    "state_management_degradation",
+})
+
+ALL_CATEGORIES = PYTHON_CATEGORIES | JAVASCRIPT_CATEGORIES
+
+
+# ── Exceptions ──
+
+
+class ScenarioError(Exception):
+    """Base exception for scenario generator errors."""
+
+
+class LLMError(ScenarioError):
+    """Failed to communicate with LLM backend."""
+
+
+class LLMResponseError(ScenarioError):
+    """LLM returned an unparseable or invalid response."""
+
+
+# ── Data Classes ──
+
+
+@dataclass
+class LLMConfig:
+    """Configuration for the LLM backend.
+
+    Attributes:
+        api_key: API key for the provider. Required unless offline.
+        base_url: Base URL for the OpenAI-compatible API endpoint.
+            Defaults to Gemini Flash endpoint.
+        model: Model identifier. Defaults to gemini-2.0-flash.
+        max_tokens: Maximum output tokens for the LLM response.
+        temperature: Sampling temperature. Lower = more deterministic.
+        timeout_seconds: HTTP request timeout.
+        max_retries: Number of retry attempts on transient errors.
+    """
+
+    api_key: Optional[str] = None
+    base_url: str = GEMINI_BASE_URL
+    model: str = DEFAULT_MODEL
+    max_tokens: int = 4096
+    temperature: float = 0.3
+    timeout_seconds: float = 60.0
+    max_retries: int = 2
+
+
+@dataclass
+class LLMResponse:
+    """Raw response from the LLM backend."""
+
+    content: str
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+@dataclass
+class StressTestScenario:
+    """A single stress test scenario for the Execution Engine.
+
+    Attributes:
+        name: Descriptive test name (e.g. "concurrent_db_queries").
+        category: Stress category (e.g. "concurrent_execution").
+        description: What this test does and why.
+        target_dependencies: Which dependencies this scenario stresses.
+        test_config: Parameters for the Execution Engine — target files,
+            synthetic data spec, measurement config, resource limits.
+        expected_behavior: What should happen under this stress.
+        failure_indicators: Signals that indicate a problem.
+        priority: high / medium / low.
+        source: "llm" or "offline" — how this scenario was generated.
+    """
+
+    name: str
+    category: str
+    description: str
+    target_dependencies: list[str] = field(default_factory=list)
+    test_config: dict = field(default_factory=dict)
+    expected_behavior: str = ""
+    failure_indicators: list[str] = field(default_factory=list)
+    priority: str = "medium"
+    source: str = "offline"
+
+
+@dataclass
+class ScenarioGeneratorResult:
+    """Complete output from the Scenario Generator.
+
+    Attributes:
+        scenarios: Generated stress test scenarios.
+        reasoning: LLM's reasoning about what to test and why (empty in offline mode).
+        warnings: Non-fatal issues encountered during generation.
+        model_used: Which model produced the scenarios (or "offline").
+        token_usage: Input/output token counts (zero in offline mode).
+    """
+
+    scenarios: list[StressTestScenario] = field(default_factory=list)
+    reasoning: str = ""
+    warnings: list[str] = field(default_factory=list)
+    model_used: str = "offline"
+    token_usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0})
+
+
+# ── LLM Backend ──
+
+
+class LLMBackend:
+    """Sends requests to an OpenAI-compatible chat completions endpoint.
+
+    Supports Gemini Flash (default), OpenAI, DeepSeek, or any OpenAI-compatible
+    provider via base_url configuration. Uses urllib (no external dependencies).
+    """
+
+    def __init__(self, config: LLMConfig) -> None:
+        self._config = config
+        if not config.api_key:
+            raise LLMError(
+                "API key required. Set api_key in LLMConfig, or use offline mode."
+            )
+
+    def generate(self, messages: list[dict]) -> LLMResponse:
+        """Send a chat completion request and return the response.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys.
+
+        Returns:
+            LLMResponse with the assistant's reply.
+
+        Raises:
+            LLMError: On network, auth, or provider errors after retries.
+        """
+        url = f"{self._config.base_url.rstrip('/')}/chat/completions"
+        payload = {
+            "model": self._config.model,
+            "messages": messages,
+            "temperature": self._config.temperature,
+            "max_tokens": self._config.max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        body = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._config.api_key}",
+        }
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1 + self._config.max_retries):
+            if attempt > 0:
+                wait = 2 ** (attempt - 1)
+                logger.info("Retry %d/%d after %ds", attempt, self._config.max_retries, wait)
+                time.sleep(wait)
+
+            try:
+                return self._send_request(url, body, headers)
+            except LLMError as exc:
+                last_error = exc
+                if not self._is_retryable(exc):
+                    raise
+
+        raise last_error  # type: ignore[misc]
+
+    def _send_request(self, url: str, body: bytes, headers: dict) -> LLMResponse:
+        """Execute a single HTTP request."""
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self._config.timeout_seconds) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            try:
+                error_body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                error_body = ""
+            raise LLMError(
+                f"LLM API returned HTTP {exc.code}: {error_body[:500]}"
+            ) from exc
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            raise LLMError(f"LLM API request failed: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"LLM API returned invalid JSON: {exc}") from exc
+
+        # Extract response
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as exc:
+            raise LLMError(f"Unexpected LLM response structure: {exc}") from exc
+
+        usage = data.get("usage", {})
+        return LLMResponse(
+            content=content,
+            model=data.get("model", self._config.model),
+            input_tokens=usage.get("prompt_tokens", 0),
+            output_tokens=usage.get("completion_tokens", 0),
+        )
+
+    @staticmethod
+    def _is_retryable(exc: LLMError) -> bool:
+        """Determine if an error is transient and worth retrying."""
+        msg = str(exc)
+        if "HTTP 429" in msg or "HTTP 5" in msg:
+            return True
+        if "request failed" in msg.lower():
+            return True
+        return False
+
+
+# ── Scenario Generator ──
+
+
+class ScenarioGenerator:
+    """Generates stress test scenarios from project analysis and component profiles.
+
+    Usage::
+
+        generator = ScenarioGenerator(llm_config=LLMConfig(api_key="..."))
+        result = generator.generate(ingestion_result, profile_matches, intent)
+
+    For testing without API calls::
+
+        generator = ScenarioGenerator(offline=True)
+        result = generator.generate(ingestion_result, profile_matches, intent)
+
+    Args:
+        llm_config: LLM backend configuration. Ignored when offline=True.
+        offline: If True, generate scenarios from component library templates
+            only — no LLM calls. Useful for testing and fallback.
+    """
+
+    def __init__(
+        self,
+        llm_config: Optional[LLMConfig] = None,
+        offline: bool = False,
+    ) -> None:
+        self._llm_config = llm_config or LLMConfig()
+        self._offline = offline
+        self._backend: Optional[LLMBackend] = None
+        if not offline:
+            self._backend = LLMBackend(self._llm_config)
+
+    def generate(
+        self,
+        ingestion_result: IngestionResult,
+        profile_matches: list[ProfileMatch],
+        operational_intent: str,
+        language: str = "python",
+    ) -> ScenarioGeneratorResult:
+        """Generate stress test scenarios for the analyzed project.
+
+        Args:
+            ingestion_result: Full output from the Project Ingester (C2).
+            profile_matches: Dependency matches from the Component Library (C4).
+            operational_intent: User's description of what the project does,
+                who it's for, and under what conditions it operates.
+            language: Target language ('python' or 'javascript').
+
+        Returns:
+            ScenarioGeneratorResult with generated scenarios and metadata.
+        """
+        valid_categories = self._get_categories(language)
+        recognized = [m for m in profile_matches if m.profile is not None]
+        unrecognized = [m.dependency_name for m in profile_matches if m.profile is None]
+
+        if self._offline:
+            return self._generate_offline(
+                ingestion_result, recognized, unrecognized,
+                operational_intent, language, valid_categories,
+            )
+
+        return self._generate_with_llm(
+            ingestion_result, recognized, unrecognized,
+            operational_intent, language, valid_categories,
+        )
+
+    # ── LLM Generation ──
+
+    def _generate_with_llm(
+        self,
+        ingestion: IngestionResult,
+        recognized: list[ProfileMatch],
+        unrecognized: list[str],
+        intent: str,
+        language: str,
+        valid_categories: frozenset[str],
+    ) -> ScenarioGeneratorResult:
+        """Generate scenarios using the LLM backend."""
+        messages = self._build_prompt(
+            ingestion, recognized, unrecognized, intent, language, valid_categories,
+        )
+
+        warnings: list[str] = []
+        try:
+            assert self._backend is not None
+            response = self._backend.generate(messages)
+        except LLMError as exc:
+            logger.warning("LLM call failed, falling back to offline: %s", exc)
+            warnings.append(f"LLM unavailable ({exc}); used offline generation")
+            result = self._generate_offline(
+                ingestion, recognized, unrecognized,
+                intent, language, valid_categories,
+            )
+            result.warnings = warnings + result.warnings
+            return result
+
+        # Parse LLM response
+        try:
+            scenarios, reasoning = self._parse_llm_response(
+                response.content, valid_categories,
+            )
+        except LLMResponseError as exc:
+            logger.warning("LLM response unparseable, falling back to offline: %s", exc)
+            warnings.append(f"LLM response invalid ({exc}); used offline generation")
+            result = self._generate_offline(
+                ingestion, recognized, unrecognized,
+                intent, language, valid_categories,
+            )
+            result.warnings = warnings + result.warnings
+            return result
+
+        for s in scenarios:
+            s.source = "llm"
+
+        return ScenarioGeneratorResult(
+            scenarios=scenarios,
+            reasoning=reasoning,
+            warnings=warnings,
+            model_used=response.model,
+            token_usage={
+                "input_tokens": response.input_tokens,
+                "output_tokens": response.output_tokens,
+            },
+        )
+
+    # ── Prompt Construction ──
+
+    def _build_prompt(
+        self,
+        ingestion: IngestionResult,
+        recognized: list[ProfileMatch],
+        unrecognized: list[str],
+        intent: str,
+        language: str,
+        valid_categories: frozenset[str],
+    ) -> list[dict]:
+        """Construct the system and user messages for the LLM."""
+        system = self._build_system_prompt(valid_categories)
+        user = self._build_user_prompt(
+            ingestion, recognized, unrecognized, intent, language,
+        )
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+
+    def _build_system_prompt(self, valid_categories: frozenset[str]) -> str:
+        """Build the system prompt establishing the LLM's role and output format."""
+        categories_str = ", ".join(sorted(valid_categories))
+        return f"""\
+You are the Scenario Generator for myCode, a stress-testing tool for AI-generated code.
+
+Your task: analyze a project's structure, dependencies, and the user's operational intent, then generate targeted stress test scenarios.
+
+CRITICAL RULES:
+1. Test dependency INTERACTION CHAINS as systems — not individual components in isolation.
+2. Focus on where components interact and where one failure cascades into another.
+3. Prioritize scenarios that match the user's operational context.
+4. Generate scenarios the user can understand in plain language.
+
+OUTPUT FORMAT: Respond with a single JSON object:
+{{
+  "reasoning": "Your analysis of the project architecture, key risks, and testing strategy.",
+  "scenarios": [
+    {{
+      "name": "descriptive_test_name",
+      "category": "one of: {categories_str}",
+      "description": "What this test does and why it matters for this project.",
+      "target_dependencies": ["dep1", "dep2"],
+      "test_config": {{
+        "target_files": ["file.py"],
+        "parameters": {{}},
+        "synthetic_data": {{}},
+        "measurements": ["memory_mb", "execution_time_ms", "error_count"],
+        "resource_limits": {{"memory_mb": 512, "timeout_seconds": 60}}
+      }},
+      "expected_behavior": "What should happen under this stress.",
+      "failure_indicators": ["indicator1", "indicator2"],
+      "priority": "high|medium|low"
+    }}
+  ]
+}}
+
+Generate 5-15 scenarios covering different categories. Prioritize high-impact scenarios."""
+
+    def _build_user_prompt(
+        self,
+        ingestion: IngestionResult,
+        recognized: list[ProfileMatch],
+        unrecognized: list[str],
+        intent: str,
+        language: str,
+    ) -> str:
+        """Build the user prompt with full project context."""
+        sections = []
+
+        # 1. Project overview
+        sections.append(f"## Project Overview\n- Language: {language}")
+        sections.append(f"- Files analyzed: {ingestion.files_analyzed}")
+        sections.append(f"- Total lines: {ingestion.total_lines}")
+        if ingestion.files_failed > 0:
+            sections.append(f"- Files with parse errors: {ingestion.files_failed}")
+
+        # 2. User's operational intent
+        sections.append(f"\n## Operational Intent\n{intent}")
+
+        # 3. Project structure (files, classes, key functions)
+        sections.append("\n## Project Structure")
+        sections.append(_serialize_file_analyses(ingestion.file_analyses))
+
+        # 4. Dependencies
+        sections.append("\n## Dependencies")
+        if recognized:
+            sections.append("### Recognized (have profiles):")
+            for match in recognized:
+                assert match.profile is not None
+                version_str = f" v{match.installed_version}" if match.installed_version else ""
+                status = ""
+                if match.version_match is False:
+                    status = f" [OUTDATED: {match.version_notes}]"
+                sections.append(f"- {match.dependency_name}{version_str}{status}")
+        if unrecognized:
+            sections.append("### Unrecognized (no profile — generic testing):")
+            for name in unrecognized:
+                sections.append(f"- {name}")
+
+        # 5. Component library profiles for recognized deps
+        if recognized:
+            sections.append("\n## Dependency Profiles")
+            sections.append(_serialize_profiles(recognized))
+
+        # 6. Function flows and coupling points
+        if ingestion.function_flows:
+            sections.append("\n## Function Call Graph (sampled)")
+            sections.append(_serialize_function_flows(ingestion.function_flows))
+
+        if ingestion.coupling_points:
+            sections.append("\n## Coupling Points (failure cascade risks)")
+            sections.append(_serialize_coupling_points(ingestion.coupling_points))
+
+        return "\n".join(sections)
+
+    # ── Response Parsing ──
+
+    def _parse_llm_response(
+        self,
+        content: str,
+        valid_categories: frozenset[str],
+    ) -> tuple[list[StressTestScenario], str]:
+        """Parse the LLM's JSON response into validated scenarios.
+
+        Returns:
+            (scenarios, reasoning) tuple.
+
+        Raises:
+            LLMResponseError: If the response cannot be parsed as valid JSON.
+        """
+        data = _extract_json(content)
+        reasoning = data.get("reasoning", "")
+
+        scenarios: list[StressTestScenario] = []
+        raw_scenarios = data.get("scenarios", [])
+        if not isinstance(raw_scenarios, list):
+            raise LLMResponseError("'scenarios' field is not a list")
+
+        for i, raw in enumerate(raw_scenarios):
+            if not isinstance(raw, dict):
+                logger.warning("Scenario %d is not a dict, skipping", i)
+                continue
+            name = raw.get("name", "")
+            category = raw.get("category", "")
+            description = raw.get("description", "")
+            if not name or not category or not description:
+                logger.warning("Scenario %d missing required fields, skipping", i)
+                continue
+            if category not in valid_categories:
+                logger.warning(
+                    "Scenario '%s' has invalid category '%s', skipping", name, category,
+                )
+                continue
+
+            scenarios.append(StressTestScenario(
+                name=name,
+                category=category,
+                description=description,
+                target_dependencies=raw.get("target_dependencies", []),
+                test_config=raw.get("test_config", {}),
+                expected_behavior=raw.get("expected_behavior", ""),
+                failure_indicators=raw.get("failure_indicators", []),
+                priority=raw.get("priority", "medium"),
+                source="llm",
+            ))
+
+        if not scenarios:
+            raise LLMResponseError("LLM produced zero valid scenarios")
+
+        return scenarios, reasoning
+
+    # ── Offline Generation ──
+
+    def _generate_offline(
+        self,
+        ingestion: IngestionResult,
+        recognized: list[ProfileMatch],
+        unrecognized: list[str],
+        intent: str,
+        language: str,
+        valid_categories: frozenset[str],
+    ) -> ScenarioGeneratorResult:
+        """Generate scenarios from component library templates without LLM.
+
+        Uses stress_test_templates and known_failure_modes from matched profiles,
+        coupling points from the ingester, and generic scenarios for coverage.
+        """
+        scenarios: list[StressTestScenario] = []
+
+        # 1. Profile-based scenarios from stress_test_templates
+        for match in recognized:
+            profile = match.profile
+            assert profile is not None
+            for template in profile.stress_test_templates:
+                cat = template.get("category", "")
+                if cat not in valid_categories:
+                    continue
+                scenarios.append(StressTestScenario(
+                    name=f"{profile.name}_{template['name']}",
+                    category=cat,
+                    description=template.get("description", ""),
+                    target_dependencies=[match.dependency_name],
+                    test_config={
+                        "parameters": template.get("parameters", {}),
+                        "measurements": _infer_measurements(cat),
+                        "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                    },
+                    expected_behavior=template.get("expected_behavior", ""),
+                    failure_indicators=template.get("failure_indicators", []),
+                    priority=_infer_priority_from_template(template),
+                    source="offline",
+                ))
+
+        # 2. Failure-mode scenarios for critical/high severity issues
+        for match in recognized:
+            profile = match.profile
+            assert profile is not None
+            for mode in profile.known_failure_modes:
+                if mode.get("severity") not in ("critical", "high"):
+                    continue
+                scenarios.append(StressTestScenario(
+                    name=f"{profile.name}_{mode['name']}_check",
+                    category="edge_case_input",
+                    description=(
+                        f"Test for known failure mode: {mode.get('description', '')}. "
+                        f"Trigger: {mode.get('trigger_conditions', 'N/A')}"
+                    ),
+                    target_dependencies=[match.dependency_name],
+                    test_config={
+                        "detection_hint": mode.get("detection_hint", ""),
+                        "severity": mode.get("severity", ""),
+                        "versions_affected": mode.get("versions_affected", ""),
+                        "measurements": ["error_count", "error_type"],
+                        "resource_limits": {"memory_mb": 512, "timeout_seconds": 30},
+                    },
+                    expected_behavior="Known failure mode should be detected or mitigated.",
+                    failure_indicators=[mode["name"]],
+                    priority="high" if mode.get("severity") == "critical" else "medium",
+                    source="offline",
+                ))
+
+        # 3. Coupling point scenarios
+        for cp in ingestion.coupling_points:
+            cat = "concurrent_execution"
+            if cp.coupling_type == "high_fan_in":
+                cat = "data_volume_scaling"
+            if cat not in valid_categories:
+                continue
+            scenarios.append(StressTestScenario(
+                name=f"coupling_{cp.coupling_type}_{_safe_name(cp.source)}",
+                category=cat,
+                description=cp.description,
+                target_dependencies=[],
+                test_config={
+                    "coupling_source": cp.source,
+                    "coupling_targets": cp.targets,
+                    "coupling_type": cp.coupling_type,
+                    "measurements": _infer_measurements(cat),
+                    "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                },
+                expected_behavior=(
+                    f"Stressing '{cp.source}' should not cascade failures to "
+                    f"{len(cp.targets)} dependent components."
+                ),
+                failure_indicators=["cascade_failure", "error_propagation", "timeout"],
+                priority="medium",
+                source="offline",
+            ))
+
+        # 4. Version discrepancy scenarios
+        for match in recognized:
+            if match.version_match is False and match.version_notes:
+                scenarios.append(StressTestScenario(
+                    name=f"{match.dependency_name}_version_discrepancy",
+                    category="edge_case_input",
+                    description=(
+                        f"Dependency {match.dependency_name} is outdated: "
+                        f"{match.version_notes}. Test for version-specific issues."
+                    ),
+                    target_dependencies=[match.dependency_name],
+                    test_config={
+                        "installed_version": match.installed_version,
+                        "current_stable": (
+                            match.profile.current_stable_version if match.profile else ""
+                        ),
+                        "measurements": ["error_count", "deprecation_warnings"],
+                        "resource_limits": {"memory_mb": 512, "timeout_seconds": 30},
+                    },
+                    expected_behavior="Outdated version may exhibit known regressions.",
+                    failure_indicators=["deprecation_warning", "version_specific_bug"],
+                    priority="medium",
+                    source="offline",
+                ))
+
+        # 5. Unrecognized dependency generic scenarios
+        if unrecognized:
+            scenarios.append(StressTestScenario(
+                name="unrecognized_deps_generic_stress",
+                category="data_volume_scaling",
+                description=(
+                    f"Generic stress test for unrecognized dependencies: "
+                    f"{', '.join(unrecognized[:10])}. No profile available — "
+                    f"test with progressively larger inputs."
+                ),
+                target_dependencies=unrecognized[:10],
+                test_config={
+                    "parameters": {
+                        "data_sizes": [100, 1000, 10000],
+                        "iterations": 50,
+                    },
+                    "measurements": ["memory_mb", "execution_time_ms", "error_count"],
+                    "resource_limits": {"memory_mb": 512, "timeout_seconds": 120},
+                },
+                expected_behavior="Performance should degrade gracefully with data size.",
+                failure_indicators=["crash", "memory_growth_unbounded", "timeout"],
+                priority="low",
+                source="offline",
+            ))
+
+        return ScenarioGeneratorResult(
+            scenarios=scenarios,
+            reasoning="",
+            warnings=[],
+            model_used="offline",
+        )
+
+    # ── Helpers ──
+
+    @staticmethod
+    def _get_categories(language: str) -> frozenset[str]:
+        """Return valid stress test categories for the given language."""
+        if language.lower() == "javascript":
+            return JAVASCRIPT_CATEGORIES
+        return PYTHON_CATEGORIES
+
+
+# ── Module-Level Helpers ──
+
+
+def _extract_json(content: str) -> dict:
+    """Extract a JSON object from LLM response content.
+
+    Handles raw JSON, markdown code blocks, and leading/trailing noise.
+
+    Raises:
+        LLMResponseError: If no valid JSON object can be extracted.
+    """
+    content = content.strip()
+
+    # Try direct parse
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting from markdown code block
+    match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", content, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+    # Try finding the outermost { ... }
+    first_brace = content.find("{")
+    last_brace = content.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        try:
+            data = json.loads(content[first_brace : last_brace + 1])
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+
+    raise LLMResponseError(
+        f"Could not extract JSON from LLM response (length={len(content)})"
+    )
+
+
+def _serialize_file_analyses(file_analyses: list) -> str:
+    """Summarize file analyses into a compact string for the prompt."""
+    lines = []
+    for analysis in file_analyses:
+        if analysis.parse_error:
+            lines.append(f"  {analysis.file_path}: [PARSE ERROR] {analysis.parse_error}")
+            continue
+        classes = [c.name for c in analysis.classes]
+        funcs = [
+            f.name for f in analysis.functions
+            if not f.is_method
+        ]
+        loc = analysis.lines_of_code
+        parts = [f"{analysis.file_path} ({loc} lines)"]
+        if classes:
+            parts.append(f"classes: {', '.join(classes)}")
+        if funcs:
+            parts.append(f"functions: {', '.join(funcs[:10])}")
+            if len(funcs) > 10:
+                parts.append(f"... +{len(funcs) - 10} more")
+        lines.append("  " + " | ".join(parts))
+    return "\n".join(lines)
+
+
+def _serialize_profiles(recognized: list[ProfileMatch]) -> str:
+    """Serialize matched profiles' key info for the prompt."""
+    lines = []
+    for match in recognized:
+        profile = match.profile
+        assert profile is not None
+        lines.append(f"\n### {profile.name} ({profile.category})")
+
+        if profile.known_failure_modes:
+            lines.append("Known failure modes:")
+            for mode in profile.known_failure_modes:
+                sev = mode.get("severity", "?")
+                lines.append(
+                    f"  - [{sev}] {mode.get('name', '?')}: "
+                    f"{mode.get('description', '')}"
+                )
+
+        if profile.edge_case_sensitivities:
+            lines.append("Edge case sensitivities:")
+            for edge in profile.edge_case_sensitivities:
+                lines.append(f"  - {edge.get('name', '?')}: {edge.get('description', '')}")
+
+        if profile.stress_test_templates:
+            template_names = [t.get("name", "?") for t in profile.stress_test_templates]
+            lines.append(f"Stress templates: {', '.join(template_names)}")
+
+        interactions = profile.interaction_patterns
+        if interactions.get("known_conflicts"):
+            lines.append("Known conflicts:")
+            for conflict in interactions["known_conflicts"]:
+                lines.append(
+                    f"  - {conflict.get('dependency', '?')}: "
+                    f"{conflict.get('description', '')}"
+                )
+
+    return "\n".join(lines)
+
+
+def _serialize_function_flows(flows: list[FunctionFlow], limit: int = 30) -> str:
+    """Serialize function flows for the prompt, sampled to limit."""
+    lines = []
+    shown = flows[:limit]
+    for flow in shown:
+        lines.append(f"  {flow.caller} -> {flow.callee}  [{flow.file_path}:{flow.lineno}]")
+    if len(flows) > limit:
+        lines.append(f"  ... +{len(flows) - limit} more flows")
+    return "\n".join(lines)
+
+
+def _serialize_coupling_points(coupling_points: list[CouplingPoint]) -> str:
+    """Serialize coupling points for the prompt."""
+    lines = []
+    for cp in coupling_points:
+        lines.append(
+            f"  [{cp.coupling_type}] {cp.source} -> "
+            f"{len(cp.targets)} dependents: {cp.description}"
+        )
+    return "\n".join(lines)
+
+
+def _infer_measurements(category: str) -> list[str]:
+    """Infer what to measure based on scenario category."""
+    base = ["execution_time_ms", "error_count"]
+    if category in ("memory_profiling", "event_listener_accumulation"):
+        return base + ["memory_mb", "memory_growth_mb"]
+    if category == "data_volume_scaling":
+        return base + ["memory_mb", "throughput"]
+    if category in ("concurrent_execution", "blocking_io", "gil_contention"):
+        return base + ["memory_mb", "concurrent_active", "latency_p99_ms"]
+    if category == "async_failures":
+        return base + ["unhandled_rejections", "promise_chain_depth"]
+    if category == "state_management_degradation":
+        return base + ["memory_mb", "state_size_bytes"]
+    return base + ["memory_mb"]
+
+
+def _infer_priority_from_template(template: dict) -> str:
+    """Infer scenario priority from a profile's stress test template."""
+    indicators = template.get("failure_indicators", [])
+    indicator_str = " ".join(str(i).lower() for i in indicators)
+    if any(kw in indicator_str for kw in ("crash", "data_loss", "security", "corruption")):
+        return "high"
+    if any(kw in indicator_str for kw in ("timeout", "memory", "error", "blocked")):
+        return "medium"
+    return "low"
+
+
+def _safe_name(source: str) -> str:
+    """Convert a qualified name to a safe identifier for scenario naming."""
+    return re.sub(r"[^a-zA-Z0-9]", "_", source)[:60].strip("_")

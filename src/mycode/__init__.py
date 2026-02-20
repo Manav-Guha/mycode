@@ -17,6 +17,15 @@ from mycode.library import (
     ProfileMatch,
     ProfileNotFoundError,
 )
+from mycode.scenario import (
+    LLMConfig,
+    LLMError,
+    LLMResponseError,
+    ScenarioError,
+    ScenarioGenerator,
+    ScenarioGeneratorResult,
+    StressTestScenario,
+)
 from mycode.session import (
     DependencyInstallError,
     EnvironmentInfo,
@@ -52,4 +61,12 @@ __all__ = [
     "ProfileMatch",
     "LibraryError",
     "ProfileNotFoundError",
+    # Scenario Generator (D1)
+    "ScenarioGenerator",
+    "ScenarioGeneratorResult",
+    "StressTestScenario",
+    "LLMConfig",
+    "ScenarioError",
+    "LLMError",
+    "LLMResponseError",
 ]
