@@ -1,0 +1,232 @@
+{
+  "identity": {
+    "name": "sqlalchemy",
+    "pypi_name": "SQLAlchemy",
+    "category": "database",
+    "description": "SQL toolkit and Object-Relational Mapper providing full power of SQL with Pythonic interface",
+    "current_stable_version": "2.0.36",
+    "min_supported_version": "2.0.0",
+    "version_notes": {
+      "2.0.36": "Bug fixes, performance improvements in ORM bulk operations",
+      "2.0.0": "Major rewrite: 2.0-style query API mandatory, Session.execute replaces Query, type annotations throughout",
+      "1.4.0": "Transitional release with 2.0 deprecation warnings. Last 1.x series."
+    }
+  },
+  "scaling_characteristics": {
+    "description": "ORM adds overhead per row (object creation, identity map tracking). Core (raw SQL) is near-native performance. Connection pooling built-in. Suitable for web applications when configured correctly. Performance depends heavily on query patterns and eager/lazy loading strategy.",
+    "concurrency_model": "connection_pool",
+    "bottlenecks": [
+      {
+        "name": "n_plus_one_queries",
+        "description": "Lazy loading relationships triggers a separate query per related object. Loading 100 parent objects with a lazy relationship fires 101 queries.",
+        "impact": "Query count grows linearly with result set. Response time dominated by round-trips to database."
+      },
+      {
+        "name": "identity_map_memory",
+        "description": "Session tracks all loaded objects in an identity map. Large queries load all objects into memory and session tracking.",
+        "impact": "Memory grows with number of unique objects loaded in a session"
+      },
+      {
+        "name": "connection_pool_exhaustion",
+        "description": "Default pool size is 5 connections with 10 overflow. High concurrency exhausts the pool, causing requests to queue or fail.",
+        "impact": "TimeoutError when all connections in use and overflow exhausted"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "orm_objects_per_session",
+        "typical_limit": "10K-100K",
+        "description": "Beyond 100K objects, Session becomes slow due to identity map overhead"
+      },
+      {
+        "metric": "concurrent_connections",
+        "typical_limit": "5-20",
+        "description": "Default pool_size=5, max_overflow=10. Must tune for production."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 15,
+    "growth_pattern": "Memory grows with: loaded ORM objects (identity map), pending changes (dirty/new objects), cached metadata, and connection pool. Long-lived sessions accumulate objects unless explicitly expired or cleared.",
+    "known_leaks": [
+      {
+        "name": "session_not_closed",
+        "description": "Session objects that accumulate ORM objects without close() or expunge_all(). In web apps, sessions scoped to request must be cleaned up.",
+        "trigger": "Creating Session without context manager, forgetting to close in request lifecycle",
+        "versions_affected": "all"
+      },
+      {
+        "name": "eager_loading_explosion",
+        "description": "Eagerly loading deeply nested relationships creates massive JOIN results. A 3-level eager load on a well-connected model can return millions of rows.",
+        "trigger": "joinedload() on models with many-to-many or deep one-to-many relationships",
+        "versions_affected": "all"
+      },
+      {
+        "name": "event_listener_accumulation",
+        "description": "Registering event listeners (before_flush, after_commit) repeatedly without cleanup. Each registration adds a callback.",
+        "trigger": "Registering listeners inside functions called multiple times (e.g., per-request)",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "ORM objects are tracked by Session identity map. Session.close() releases references. Detached objects (removed from session) are GC-eligible."
+  },
+  "known_failure_modes": [
+    {
+      "name": "v1_to_v2_migration_breakage",
+      "description": "SQLAlchemy 2.0 removed legacy Query API. Vibe-coded apps using session.query(Model) patterns need updating to session.execute(select(Model)).",
+      "trigger_conditions": "Upgrading from SQLAlchemy 1.x to 2.x without code changes",
+      "severity": "critical",
+      "versions_affected": ">=2.0.0",
+      "detection_hint": "session.query(), Query.filter(), Model.query patterns"
+    },
+    {
+      "name": "n_plus_one_performance",
+      "description": "Lazy-loaded relationships cause N+1 query problem. 100 parent objects trigger 101 queries. Common in vibe-coded projects that don't think about loading strategy.",
+      "trigger_conditions": "Iterating over query results and accessing relationship attributes",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Relationship definitions without lazy='joined' or explicit joinedload()"
+    },
+    {
+      "name": "detached_instance_error",
+      "description": "Accessing attributes of an ORM object after its Session is closed raises DetachedInstanceError. Common when returning ORM objects from functions that close sessions.",
+      "trigger_conditions": "Accessing lazy-loaded attribute after Session.close()",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "ORM objects returned from functions with session context managers"
+    },
+    {
+      "name": "pool_timeout",
+      "description": "All connections in pool are checked out. New requests wait up to pool_timeout (30s default), then raise TimeoutError.",
+      "trigger_conditions": "More concurrent database operations than pool_size + max_overflow",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "create_engine without pool_size configuration in high-concurrency app"
+    },
+    {
+      "name": "sqlite_threading_conflict",
+      "description": "Using SQLAlchemy with SQLite in multi-threaded apps. SQLAlchemy's pool assumes thread-safe connections, but SQLite isn't thread-safe by default.",
+      "trigger_conditions": "SQLAlchemy + SQLite in Flask/FastAPI with threaded=True",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "create_engine('sqlite:///') in multi-threaded web application"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_result_handling",
+      "description": "session.execute(select).scalar_one() raises NoResultFound on empty results. Vibe code often doesn't handle this.",
+      "test_approach": "Run detected queries against empty tables and tables with no matching rows"
+    },
+    {
+      "name": "null_foreign_keys",
+      "description": "NULL foreign keys in relationships cause unexpected behavior in joins and loading",
+      "test_approach": "Create records with NULL foreign keys, test relationship loading and queries"
+    },
+    {
+      "name": "unicode_in_text_columns",
+      "description": "Different database backends handle Unicode differently. SQLite is permissive, PostgreSQL may require explicit encoding.",
+      "test_approach": "Insert Unicode, emoji, and zero-width characters into text columns"
+    },
+    {
+      "name": "concurrent_session_modification",
+      "description": "Two sessions modifying the same row. One succeeds, one gets stale data. No built-in optimistic locking without version_id_col.",
+      "test_approach": "Two concurrent sessions read then update the same row, verify final state"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["flask", "fastapi", "alembic", "flask-sqlalchemy", "sqlite3", "psycopg2", "pymysql"],
+    "known_conflicts": [
+      {
+        "dependency": "flask-sqlalchemy",
+        "description": "Flask-SQLAlchemy 3.x requires SQLAlchemy 2.x patterns. Mixing Flask-SQLAlchemy 2.x with SQLAlchemy 2.x causes import errors.",
+        "severity": "high"
+      },
+      {
+        "dependency": "sqlite3",
+        "description": "SQLAlchemy's connection pooling with SQLite can cause database locking issues. Should use NullPool or SingletonThreadPool for SQLite.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["sqlalchemy", "alembic"],
+        "risk": "Alembic version must match SQLAlchemy major version. Mismatched versions cause migration generation failures.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["sqlalchemy", "database_driver"],
+        "risk": "SQLAlchemy requires a database driver (psycopg2, pymysql, sqlite3). Missing driver gives cryptic ModuleNotFoundError.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "n_plus_one_detection",
+      "category": "data_volume_scaling",
+      "description": "Load increasing numbers of parent objects with relationships to detect N+1 query patterns",
+      "parameters": {
+        "parent_counts": [10, 50, 100, 500],
+        "relationship_depth": [1, 2, 3],
+        "children_per_parent": 5,
+        "measure_query_count": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Lazy loading: queries = parents * depth + 1. Eager loading: queries = depth + 1.",
+      "failure_indicators": ["query_count > 2x_parent_count", "response_time_linear_growth", "timeout"]
+    },
+    {
+      "name": "connection_pool_stress",
+      "category": "concurrent_execution",
+      "description": "Concurrent database operations to test connection pool behavior under load",
+      "parameters": {
+        "concurrent_operations": [5, 10, 20, 50],
+        "operation_duration_seconds": 1.0,
+        "pool_size": 5,
+        "max_overflow": 10,
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "Operations queue when pool exhausted. TimeoutError after pool_timeout.",
+      "failure_indicators": ["TimeoutError", "pool_exhaustion", "connection_leak"]
+    },
+    {
+      "name": "session_memory_growth",
+      "category": "memory_profiling",
+      "description": "Load increasing numbers of ORM objects in a single session to test identity map overhead",
+      "parameters": {
+        "object_counts": [100, 1000, 10000, 100000],
+        "measure_memory": true,
+        "measure_query_time": true
+      },
+      "expected_behavior": "Memory grows linearly with object count. Session operations slow down with many tracked objects.",
+      "failure_indicators": ["MemoryError", "session_operations_slow", "identity_map_overhead > 50%"]
+    },
+    {
+      "name": "bulk_operation_scaling",
+      "category": "data_volume_scaling",
+      "description": "Insert progressively more rows to compare ORM add_all vs bulk_insert_mappings vs Core insert",
+      "parameters": {
+        "row_counts": [100, 1000, 10000, 100000],
+        "methods": ["orm_add", "bulk_insert", "core_insert"],
+        "measure_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "ORM add_all 10-100x slower than Core insert. Bulk methods intermediate.",
+      "failure_indicators": ["timeout", "MemoryError", "orm_time > 100x_core_time"]
+    },
+    {
+      "name": "concurrent_write_conflict",
+      "category": "concurrent_execution",
+      "description": "Multiple sessions updating same rows to test isolation and locking behavior",
+      "parameters": {
+        "concurrent_sessions": [2, 4, 8],
+        "rows_per_session": 100,
+        "overlap_percentage": 50,
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "StaleDataError or database-level lock timeout on concurrent updates to same rows.",
+      "failure_indicators": ["data_corruption", "silent_overwrite", "deadlock", "timeout"]
+    }
+  ]
+}

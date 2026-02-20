@@ -1,0 +1,236 @@
+{
+  "identity": {
+    "name": "pandas",
+    "pypi_name": "pandas",
+    "category": "data_processing",
+    "description": "Data analysis and manipulation library providing DataFrame and Series data structures",
+    "current_stable_version": "2.2.3",
+    "min_supported_version": "2.0.0",
+    "version_notes": {
+      "2.2.0": "Copy-on-Write enabled by default, ADBC connector support, case_when method",
+      "2.1.0": "PyArrow-backed DataFrames stable, map() replaces applymap()",
+      "2.0.0": "Major breaking changes: Copy-on-Write opt-in, nullable dtypes default, Index can hold any dtype"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "In-memory data processing. Single-threaded by default. Data must fit in RAM (rule of thumb: need 5-10x the dataset size in free memory). No built-in distributed computation — that requires Dask or Spark.",
+    "concurrency_model": "single_threaded",
+    "bottlenecks": [
+      {
+        "name": "memory_multiplier",
+        "description": "Operations like merge, concat, pivot create intermediate copies. A 1GB DataFrame may need 5-10GB free RAM for common operations.",
+        "impact": "MemoryError during operations even when DataFrame fits in RAM at rest"
+      },
+      {
+        "name": "row_iteration_antipattern",
+        "description": "iterrows() and apply(axis=1) are orders of magnitude slower than vectorized operations. Vibe-coded projects default to row-by-row processing.",
+        "impact": "Processing time grows linearly instead of being vectorized. 100x-1000x slowdown."
+      },
+      {
+        "name": "string_operations",
+        "description": "Object dtype strings are stored as Python objects, not contiguous memory. String operations on large datasets are extremely slow.",
+        "impact": "String column operations 10-100x slower than numeric operations"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "dataframe_rows",
+        "typical_limit": "1M-100M",
+        "description": "Depends on column count and dtypes. Numeric-only DataFrames scale further than string-heavy ones."
+      },
+      {
+        "metric": "csv_read_rows_per_second",
+        "typical_limit": "500K-2M",
+        "description": "read_csv performance varies by data types. Specifying dtypes upfront is 2-5x faster."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 60,
+    "growth_pattern": "Memory usage dominated by data, not pandas overhead. Each column stored as contiguous NumPy array (numeric) or Python object array (strings). Intermediate operations create copies by default (pre-CoW). Copy-on-Write (pandas 2.2+) reduces copies significantly.",
+    "known_leaks": [
+      {
+        "name": "chained_indexing_copy",
+        "description": "df[col][row] = value creates hidden intermediate copy. The assignment modifies the copy, not the original. Memory waste plus silent bug.",
+        "trigger": "Chained indexing patterns like df['a']['b'] = value",
+        "versions_affected": "<2.2.0 (before CoW default)"
+      },
+      {
+        "name": "categorical_memory_creep",
+        "description": "Converting to categorical dtype then adding new categories incrementally. Each new category is stored but old storage is not released.",
+        "trigger": "Repeated astype('category') with evolving unique values",
+        "versions_affected": "all"
+      },
+      {
+        "name": "multiindex_memory_overhead",
+        "description": "MultiIndex stores all level combinations. Sparse MultiIndex from operations like unstack can use 10x expected memory.",
+        "trigger": "Repeated pivot/unstack/stack operations creating increasingly complex MultiIndex",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "NumPy arrays underlying DataFrames freed when all references released. Slicing creates views (shared memory) — deleting slice but keeping original keeps all memory alive."
+  },
+  "known_failure_modes": [
+    {
+      "name": "memory_error_on_operations",
+      "description": "DataFrame fits in memory but operations (merge, concat, pivot) fail because they need intermediate copies. Users see MemoryError during computation, not at load time.",
+      "trigger_conditions": "DataFrame using >30% of available RAM, then performing merge, join, or pivot",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "Large DataFrames followed by merge/concat/pivot operations"
+    },
+    {
+      "name": "silent_dtype_coercion",
+      "description": "read_csv infers dtypes. A column of integers with one 'N/A' string becomes object dtype (all values stored as Python objects, 10x memory).",
+      "trigger_conditions": "CSV with mixed types in a column, or NA values in integer columns",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "read_csv without dtype parameter, columns with mixed content"
+    },
+    {
+      "name": "settingwithcopy_warning_ignored",
+      "description": "SettingWithCopyWarning indicates an assignment may not work as expected. Vibe-coded apps ignore this warning, leading to silent data corruption.",
+      "trigger_conditions": "Chained indexing for assignment: df[df['a'] > 0]['b'] = value",
+      "severity": "high",
+      "versions_affected": "<2.2.0",
+      "detection_hint": "Chained indexing patterns with assignment"
+    },
+    {
+      "name": "read_csv_encoding_crash",
+      "description": "Default encoding assumption (UTF-8) fails on files with other encodings. UnicodeDecodeError crashes the read.",
+      "trigger_conditions": "CSV files with Latin-1, Windows-1252, or other non-UTF-8 encodings",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "read_csv without encoding parameter on user-uploaded files"
+    },
+    {
+      "name": "apply_performance_cliff",
+      "description": "df.apply(func, axis=1) runs Python function per row. On large DataFrames, this is 100-1000x slower than vectorized equivalent.",
+      "trigger_conditions": "apply(axis=1) on DataFrame with >10K rows",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": ".apply() calls with axis=1, especially with lambda functions"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_dataframe_operations",
+      "description": "Operations on empty DataFrames (0 rows) can behave unexpectedly — groupby returns empty, merge changes dtypes",
+      "test_approach": "Run all detected DataFrame operations with 0-row DataFrames"
+    },
+    {
+      "name": "nan_comparison_semantics",
+      "description": "NaN != NaN in pandas. Equality checks, groupby, merge behave unexpectedly with NaN values",
+      "test_approach": "Insert NaN values in key columns, test merge/groupby/filter operations"
+    },
+    {
+      "name": "timezone_naive_mixed",
+      "description": "Mixing timezone-aware and timezone-naive datetime columns causes TypeError on comparison or merge",
+      "test_approach": "Create datetime columns with and without timezone info, attempt operations"
+    },
+    {
+      "name": "integer_na_handling",
+      "description": "Standard int64 cannot hold NaN. Columns with integers and NaN become float64, changing values for large integers.",
+      "test_approach": "Load integer columns with missing values, verify precision preservation"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["numpy", "matplotlib", "scikit-learn", "sqlalchemy", "openpyxl", "requests", "streamlit"],
+    "known_conflicts": [
+      {
+        "dependency": "numpy",
+        "description": "Pandas pins NumPy version range. NumPy 2.0 broke compatibility with pandas <2.1. Must upgrade together.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["pandas", "numpy"],
+        "risk": "Pandas relies heavily on NumPy internals. NumPy major version changes (1.x to 2.x) can break pandas operations silently (dtype changes, deprecation removals).",
+        "severity": "high"
+      },
+      {
+        "chain": ["pandas", "pyarrow"],
+        "risk": "Pandas 2.x encourages PyArrow backend for better string handling and performance. PyArrow is a large C++ dependency that can fail to install on some platforms.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "data_volume_scaling",
+      "category": "data_volume_scaling",
+      "description": "Feed progressively larger DataFrames through detected pandas operations, measuring memory and time",
+      "parameters": {
+        "row_counts": [100, 1000, 10000, 100000, 1000000],
+        "column_counts": [5, 20, 50],
+        "dtypes": ["int64", "float64", "object"],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Memory grows linearly with data. Operations time grows linearly for vectorized ops, quadratically for apply().",
+      "failure_indicators": ["MemoryError", "time > 60s_for_100k_rows", "dtype_coercion_unexpected"]
+    },
+    {
+      "name": "merge_memory_stress",
+      "category": "data_volume_scaling",
+      "description": "Merge two DataFrames of increasing size to test intermediate memory requirements",
+      "parameters": {
+        "left_row_counts": [1000, 10000, 100000],
+        "right_row_counts": [1000, 10000, 100000],
+        "join_type": ["inner", "left", "outer"],
+        "measure_peak_memory": true
+      },
+      "expected_behavior": "Peak memory during merge is 2-5x the sum of input DataFrame sizes.",
+      "failure_indicators": ["MemoryError", "peak_memory > 10x_input", "result_size_unexpected"]
+    },
+    {
+      "name": "iterrows_vs_vectorized",
+      "category": "data_volume_scaling",
+      "description": "Benchmark detected apply/iterrows patterns against vectorized equivalents at scale",
+      "parameters": {
+        "row_counts": [100, 1000, 10000, 100000],
+        "operations": ["apply_row", "iterrows", "vectorized"],
+        "measure_time": true
+      },
+      "expected_behavior": "iterrows 100-1000x slower than vectorized at 100K rows.",
+      "failure_indicators": ["apply_time > 100x_vectorized", "timeout"]
+    },
+    {
+      "name": "memory_profiling_over_time",
+      "category": "memory_profiling",
+      "description": "Repeatedly create, modify, and discard DataFrames to test memory reclamation",
+      "parameters": {
+        "iterations": 100,
+        "dataframe_size_mb": 10,
+        "operations_per_iteration": ["copy", "slice", "merge", "drop"],
+        "measure_interval": 10
+      },
+      "expected_behavior": "Memory should return to baseline between iterations if references released.",
+      "failure_indicators": ["memory_growth_monotonic", "no_gc_reclamation", "MemoryError"]
+    },
+    {
+      "name": "edge_case_dtypes",
+      "category": "edge_case_input",
+      "description": "Feed mixed-type, NaN-laden, and extreme-value data through detected operations",
+      "parameters": {
+        "edge_cases": ["all_nan_column", "mixed_int_string", "very_long_strings", "extreme_floats", "empty_dataframe"],
+        "apply_to": "all_detected_operations"
+      },
+      "expected_behavior": "Operations should either succeed or raise informative errors, not silently corrupt data.",
+      "failure_indicators": ["silent_data_loss", "unexpected_dtype_change", "uncaught_exception"]
+    },
+    {
+      "name": "concurrent_dataframe_access",
+      "category": "concurrent_execution",
+      "description": "Multiple threads reading and writing the same DataFrame to test thread safety",
+      "parameters": {
+        "thread_count": [2, 4, 8],
+        "operations_per_thread": 100,
+        "operations": ["read_column", "write_column", "filter", "sort"]
+      },
+      "expected_behavior": "Pandas is NOT thread-safe for writes. Concurrent writes should produce corruption or errors.",
+      "failure_indicators": ["silent_data_corruption", "segfault", "inconsistent_results"]
+    }
+  ]
+}

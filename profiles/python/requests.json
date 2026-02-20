@@ -1,0 +1,231 @@
+{
+  "identity": {
+    "name": "requests",
+    "pypi_name": "requests",
+    "category": "http_client",
+    "description": "HTTP library for Python with elegant, simple API. Synchronous, blocking requests.",
+    "current_stable_version": "2.32.3",
+    "min_supported_version": "2.25.0",
+    "version_notes": {
+      "2.32.0": "urllib3 2.x support, improved SSL defaults, charset_normalizer as default decoder",
+      "2.28.0": "Dropped Python 3.6 support, urllib3 1.26+ required",
+      "2.25.0": "Last version supporting Python 2.7 with compatible dependencies"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Synchronous, blocking HTTP client. Each request blocks the calling thread until response is received. For concurrent HTTP calls, must use threading, multiprocessing, or switch to httpx/aiohttp. Session object provides connection pooling and cookie persistence.",
+    "concurrency_model": "synchronous_blocking",
+    "bottlenecks": [
+      {
+        "name": "blocking_io",
+        "description": "Every HTTP call blocks the thread. Sequential API calls in a loop wait for each response before starting the next.",
+        "impact": "Total time = sum of all request latencies. No parallelism without explicit threading."
+      },
+      {
+        "name": "no_connection_reuse_without_session",
+        "description": "Using requests.get() directly creates a new connection per call. TCP and TLS handshake overhead on every request.",
+        "impact": "2-10x slower than Session for repeated requests to the same host"
+      },
+      {
+        "name": "default_no_timeout",
+        "description": "No timeout set by default. Requests can hang indefinitely on unresponsive servers.",
+        "impact": "Thread/process hangs forever. Resource leak in web applications."
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "sequential_requests_per_second",
+        "typical_limit": "5-50",
+        "description": "Limited by target server response time. 200ms response = 5 req/s max sequential."
+      },
+      {
+        "metric": "concurrent_sessions",
+        "typical_limit": "100-1000",
+        "description": "With threading, limited by memory per thread (~8MB stack per thread) and OS thread limits."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 10,
+    "growth_pattern": "Minimal baseline. Memory dominated by response bodies held in memory. Response.content loads full body. Large downloads without streaming consume proportional memory.",
+    "known_leaks": [
+      {
+        "name": "response_not_closed",
+        "description": "Streaming responses (stream=True) that are not closed keep connections open and memory allocated.",
+        "trigger": "requests.get(url, stream=True) without response.close() or context manager",
+        "versions_affected": "all"
+      },
+      {
+        "name": "session_adapter_accumulation",
+        "description": "Mounting custom adapters to Session without unmounting. Each adapter maintains its own connection pool.",
+        "trigger": "Repeatedly calling session.mount() with different prefixes",
+        "versions_affected": "all"
+      },
+      {
+        "name": "large_response_retention",
+        "description": "Storing Response objects in lists/dicts. Each Response holds the full body, headers, and connection info.",
+        "trigger": "Accumulating Response objects in a loop: responses.append(requests.get(url))",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Response objects freed when all references released. Session connection pool cleaned up on Session.close() or GC."
+  },
+  "known_failure_modes": [
+    {
+      "name": "no_timeout_set",
+      "description": "Default timeout is None (infinite). Requests to slow or dead servers hang the thread forever. Most common issue in vibe-coded apps.",
+      "trigger_conditions": "requests.get(url) without timeout parameter, target server is slow or unresponsive",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "requests.get/post/put/delete calls without timeout parameter"
+    },
+    {
+      "name": "unhandled_exceptions",
+      "description": "Network errors (ConnectionError, Timeout, TooManyRedirects) not caught. App crashes on any network issue.",
+      "trigger_conditions": "Any network instability, DNS failure, or server error",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "requests calls not wrapped in try/except"
+    },
+    {
+      "name": "ssl_verification_disabled",
+      "description": "verify=False disables SSL certificate verification. Common workaround for certificate issues but enables MITM attacks.",
+      "trigger_conditions": "verify=False passed to any request",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "verify=False in requests calls"
+    },
+    {
+      "name": "unchecked_status_codes",
+      "description": "Requests does not raise on HTTP errors (4xx, 5xx) by default. response.json() on a 500 error causes JSONDecodeError instead of handling the error.",
+      "trigger_conditions": "Server returns error status, code assumes success",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No response.raise_for_status() or response.status_code check"
+    },
+    {
+      "name": "large_download_oom",
+      "description": "Downloading large files without streaming loads the entire response into memory. response.content on a 2GB file requires 2GB+ RAM.",
+      "trigger_conditions": "Downloading files >100MB without stream=True",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "requests.get() for URLs that return large files, without stream=True"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "redirect_loops",
+      "description": "Servers with redirect loops. Default max_redirects is 30. Redirect loops consume time and bandwidth before failing.",
+      "test_approach": "Test with URLs that redirect multiple times, including circular redirects"
+    },
+    {
+      "name": "encoding_detection",
+      "description": "response.text uses charset from Content-Type header, falling back to charset_normalizer detection. Wrong encoding silently garbles text.",
+      "test_approach": "Fetch responses with various encodings (UTF-8, Latin-1, Shift-JIS) and missing Content-Type headers"
+    },
+    {
+      "name": "empty_response_body",
+      "description": "response.json() on empty body raises JSONDecodeError. Common with 204 No Content or error responses.",
+      "test_approach": "Handle responses with empty bodies, 204 status, and non-JSON content types"
+    },
+    {
+      "name": "very_slow_response",
+      "description": "Server sends headers immediately but body very slowly (slowloris pattern). Read timeout may not trigger if data trickles.",
+      "test_approach": "Simulate slow response bodies, verify timeout behavior on body read"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["flask", "beautifulsoup4", "json", "pandas", "python-dotenv"],
+    "known_conflicts": [
+      {
+        "dependency": "urllib3",
+        "description": "Requests pins urllib3 version. Installing urllib3 directly can cause version conflicts. Requests 2.32+ requires urllib3>=2.0.",
+        "severity": "medium"
+      },
+      {
+        "dependency": "httpx",
+        "description": "Both provide HTTP functionality. Mixing them in the same project works but creates confusion about which client handles what.",
+        "severity": "low"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["requests", "urllib3", "openssl"],
+        "risk": "SSL/TLS behavior depends on urllib3 and system OpenSSL. Old OpenSSL versions may not support modern TLS.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["requests", "certifi"],
+        "risk": "Certificate bundle from certifi may be outdated. CA changes can break HTTPS requests.",
+        "severity": "low"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "concurrent_request_load",
+      "category": "concurrent_execution",
+      "description": "Send concurrent HTTP requests using threading to measure throughput and resource usage",
+      "parameters": {
+        "concurrent_threads": [1, 5, 10, 25, 50],
+        "requests_per_thread": 20,
+        "target_response_time_ms": 200,
+        "timeout_seconds": 30,
+        "measure_memory": true
+      },
+      "expected_behavior": "Throughput scales linearly with threads until target server or network saturates.",
+      "failure_indicators": ["ConnectionError", "timeout", "memory_growth > 50mb_per_10_threads", "thread_exhaustion"]
+    },
+    {
+      "name": "large_download_memory",
+      "category": "data_volume_scaling",
+      "description": "Download progressively larger responses to test memory behavior with and without streaming",
+      "parameters": {
+        "response_sizes_mb": [0.1, 1, 10, 50, 100],
+        "streaming": [true, false],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Without streaming: memory = response size. With streaming: memory stays constant.",
+      "failure_indicators": ["MemoryError", "memory > 2x_response_size", "timeout"]
+    },
+    {
+      "name": "timeout_behavior",
+      "category": "blocking_io",
+      "description": "Test request behavior with various timeout configurations and slow/unresponsive servers",
+      "parameters": {
+        "server_delays_seconds": [0, 1, 5, 30, "infinity"],
+        "timeout_configs": [null, 5, 10, [3, 10]],
+        "requests_per_config": 5
+      },
+      "expected_behavior": "With timeout: raises Timeout after specified duration. Without timeout: hangs indefinitely.",
+      "failure_indicators": ["indefinite_hang", "timeout_not_raised", "resource_leak"]
+    },
+    {
+      "name": "error_handling_resilience",
+      "category": "edge_case_input",
+      "description": "Test behavior with various error conditions: invalid URLs, DNS failures, connection resets",
+      "parameters": {
+        "error_scenarios": ["invalid_url", "dns_failure", "connection_reset", "ssl_error", "404", "500", "empty_body"],
+        "with_error_handling": [true, false]
+      },
+      "expected_behavior": "Each error should raise specific exception type. Unhandled errors crash the app.",
+      "failure_indicators": ["uncaught_exception", "wrong_exception_type", "silent_failure", "data_corruption"]
+    },
+    {
+      "name": "session_vs_individual_performance",
+      "category": "memory_profiling",
+      "description": "Compare Session-based vs individual requests for connection reuse and memory behavior",
+      "parameters": {
+        "total_requests": 1000,
+        "batch_size": 100,
+        "methods": ["session", "individual"],
+        "measure_memory": true,
+        "measure_time": true,
+        "measure_connections": true
+      },
+      "expected_behavior": "Session reuses connections (faster). Individual requests create new connections each time.",
+      "failure_indicators": ["session_connection_leak", "memory_growth_with_session", "no_connection_reuse"]
+    }
+  ]
+}

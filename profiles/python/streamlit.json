@@ -1,0 +1,238 @@
+{
+  "identity": {
+    "name": "streamlit",
+    "pypi_name": "streamlit",
+    "category": "web_framework",
+    "description": "Turns Python scripts into interactive web apps. Re-runs the entire script on every user interaction.",
+    "current_stable_version": "1.41.0",
+    "min_supported_version": "1.20.0",
+    "version_notes": {
+      "1.41.0": "Multipage improvements, fragment reruns, connection stability fixes",
+      "1.30.0": "st.connection for database/API connections, fragment-based reruns",
+      "1.20.0": "Dataframe editing, chat elements, theming improvements"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Each browser session gets its own Python script re-execution. Session state is per-tab. Script re-runs top-to-bottom on every widget interaction. Not designed for high concurrent users — server-side rendering with full script re-execution per interaction.",
+    "concurrency_model": "session_per_tab_rerun",
+    "bottlenecks": [
+      {
+        "name": "full_script_rerun",
+        "description": "Every widget interaction re-executes the entire script from top to bottom. Expensive computations without @st.cache_data are repeated on every click.",
+        "impact": "UI becomes unresponsive if script has slow operations without caching"
+      },
+      {
+        "name": "session_state_memory_per_user",
+        "description": "Each connected browser tab maintains full session state in server memory. No shared state across sessions.",
+        "impact": "Memory scales linearly with number of concurrent users/tabs"
+      },
+      {
+        "name": "no_horizontal_scaling",
+        "description": "Built-in server is single-process. No built-in load balancing or session affinity for multi-instance deployments.",
+        "impact": "Cannot easily scale beyond one server instance"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_sessions",
+        "typical_limit": "10-50",
+        "description": "Depends on script complexity and data size. Each session runs full script in memory."
+      },
+      {
+        "metric": "data_display_rows",
+        "typical_limit": 150000,
+        "description": "st.dataframe becomes sluggish beyond ~150K rows, browser-side rendering limit"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 80,
+    "growth_pattern": "High baseline due to Streamlit server + Tornado + Protobuf. Memory grows with each connected session. st.cache_data and st.cache_resource persist across reruns, growing unbounded without TTL. Large DataFrames displayed via st.dataframe are serialized and held in memory.",
+    "known_leaks": [
+      {
+        "name": "cache_without_ttl",
+        "description": "@st.cache_data without ttl parameter caches results forever. Each unique input creates a new cache entry.",
+        "trigger": "Functions with many unique input combinations cached without TTL or max_entries",
+        "versions_affected": ">=1.18.0"
+      },
+      {
+        "name": "session_state_accumulation",
+        "description": "Appending to st.session_state lists/dicts on every rerun without cleanup. Since the script re-runs on every interaction, data accumulates.",
+        "trigger": "st.session_state['list'].append() in main script body without guards",
+        "versions_affected": "all"
+      },
+      {
+        "name": "uploaded_file_retention",
+        "description": "Files uploaded via st.file_uploader are held in memory for the session lifetime. Multiple large uploads accumulate.",
+        "trigger": "Repeated file uploads in a single session without explicit cleanup",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Session state objects persist for session lifetime. Cache objects persist until TTL expiry or server restart."
+  },
+  "known_failure_modes": [
+    {
+      "name": "script_rerun_side_effects",
+      "description": "Code with side effects (sending emails, writing to DB, API calls) executes on every widget interaction because the entire script re-runs.",
+      "trigger_conditions": "Side-effect code in main script body without form/button guards",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "API calls, DB writes, or email sends not inside if st.button() or st.form() blocks"
+    },
+    {
+      "name": "dataframe_oom_on_display",
+      "description": "Displaying very large DataFrames via st.dataframe serializes the entire dataset. Browser crashes on rendering, server OOM on serialization.",
+      "trigger_conditions": "st.dataframe() or st.table() with >1M rows or >1GB DataFrames",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "st.dataframe called on unfiltered database queries or large CSV loads"
+    },
+    {
+      "name": "widget_key_collision",
+      "description": "Dynamically generated widgets without unique keys cause DuplicateWidgetID errors. Common in loops generating widgets.",
+      "trigger_conditions": "Multiple widgets with same key parameter, or no key in a loop",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Widgets inside for-loops without key=f'widget_{i}' patterns"
+    },
+    {
+      "name": "cache_invalidation_surprise",
+      "description": "@st.cache_data hashes all arguments. Unhashable arguments (DB connections, file handles) cause errors. Mutable default arguments cause stale cache.",
+      "trigger_conditions": "Passing unhashable objects to cached functions, or cached functions with mutable defaults",
+      "severity": "medium",
+      "versions_affected": ">=1.18.0",
+      "detection_hint": "UnhashableTypeError, or @st.cache_data on functions receiving connection objects"
+    },
+    {
+      "name": "multipage_import_issues",
+      "description": "Multipage apps with shared imports can have circular dependency issues. Pages are re-executed independently.",
+      "trigger_conditions": "Multi-file Streamlit apps with cross-page imports",
+      "severity": "medium",
+      "versions_affected": ">=1.10.0",
+      "detection_hint": "ImportError in pages/ directory files"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "rapid_widget_interaction",
+      "description": "Clicking multiple widgets faster than script re-execution completes causes queued reruns and potential state inconsistency",
+      "test_approach": "Simulate rapid sequential widget interactions, verify final state consistency"
+    },
+    {
+      "name": "session_timeout_data_loss",
+      "description": "Sessions time out after inactivity (default ~10 minutes on Streamlit Cloud). All session_state is lost.",
+      "test_approach": "Create session state, wait beyond timeout, verify behavior on reconnection"
+    },
+    {
+      "name": "concurrent_file_uploads",
+      "description": "Multiple file uploads in quick succession can overwhelm memory and cause partial processing",
+      "test_approach": "Upload multiple large files simultaneously, monitor memory and upload completion"
+    },
+    {
+      "name": "empty_dataframe_display",
+      "description": "Displaying empty DataFrames or DataFrames with mismatched column types can cause rendering errors",
+      "test_approach": "Display DataFrames with 0 rows, NaN-only columns, mixed types, and very long string values"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["pandas", "numpy", "plotly", "matplotlib", "altair", "openai", "langchain", "supabase"],
+    "known_conflicts": [
+      {
+        "dependency": "matplotlib",
+        "description": "Using plt.show() instead of st.pyplot(fig) causes blocking or no output. Must pass figure explicitly.",
+        "severity": "medium"
+      },
+      {
+        "dependency": "asyncio",
+        "description": "Streamlit runs its own event loop. Calling asyncio.run() from a Streamlit script raises RuntimeError.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["streamlit", "tornado"],
+        "risk": "Streamlit's Tornado server version can conflict with Jupyter's Tornado if both are installed.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["streamlit", "protobuf"],
+        "risk": "Streamlit requires specific protobuf versions. Conflicts with other gRPC-dependent libraries common.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "concurrent_session_load",
+      "category": "concurrent_execution",
+      "description": "Open increasing number of browser sessions simultaneously, monitoring server memory and response time",
+      "parameters": {
+        "session_counts": [1, 5, 10, 25, 50],
+        "interactions_per_session": 10,
+        "timeout_seconds": 60
+      },
+      "expected_behavior": "Memory grows linearly per session. Response time degrades after 20-30 sessions.",
+      "failure_indicators": ["MemoryError", "session_timeout", "server_unresponsive"]
+    },
+    {
+      "name": "script_rerun_cost",
+      "category": "data_volume_scaling",
+      "description": "Measure execution time and memory of full script reruns with increasing data sizes",
+      "parameters": {
+        "data_row_counts": [100, 1000, 10000, 100000],
+        "reruns_per_size": 20,
+        "measure_memory": true
+      },
+      "expected_behavior": "Without caching, execution time proportional to data size on every rerun.",
+      "failure_indicators": ["rerun_time > 10s", "memory_spike > 2x_data_size", "browser_timeout"]
+    },
+    {
+      "name": "cache_memory_growth",
+      "category": "memory_profiling",
+      "description": "Call @st.cache_data functions with many unique inputs to test cache memory growth",
+      "parameters": {
+        "unique_inputs": [10, 100, 1000, 10000],
+        "result_size_kb": 100,
+        "measure_interval": 100
+      },
+      "expected_behavior": "Memory grows linearly with unique cache entries. No TTL means no eviction.",
+      "failure_indicators": ["memory_growth_unbounded", "MemoryError", "cache_size > available_ram"]
+    },
+    {
+      "name": "file_upload_memory_stress",
+      "category": "data_volume_scaling",
+      "description": "Upload files of increasing sizes and monitor server memory",
+      "parameters": {
+        "file_sizes_mb": [1, 10, 50, 100, 500],
+        "concurrent_sessions": 3,
+        "measure_memory": true
+      },
+      "expected_behavior": "Memory grows with file size. Files held in memory for session duration.",
+      "failure_indicators": ["MemoryError", "upload_timeout", "session_crash"]
+    },
+    {
+      "name": "repeated_interaction_memory_profile",
+      "category": "memory_profiling",
+      "description": "Simulate extended user session with many widget interactions to detect memory leaks",
+      "parameters": {
+        "total_interactions": 500,
+        "interaction_types": ["button_click", "slider_change", "text_input"],
+        "measure_interval_interactions": 50,
+        "duration_minutes": 10
+      },
+      "expected_behavior": "Memory should stabilize after initial reruns. Growth indicates leak in session state or cache.",
+      "failure_indicators": ["memory_growth_rate > 5mb_per_100_interactions", "no_stabilization"]
+    },
+    {
+      "name": "edge_case_inputs",
+      "category": "edge_case_input",
+      "description": "Send malformed, empty, and oversized inputs through all detected widget types",
+      "parameters": {
+        "input_types": ["empty_string", "unicode", "very_long_string", "special_chars", "null_bytes"],
+        "apply_to": "all_detected_widgets"
+      },
+      "expected_behavior": "Widgets should handle gracefully or show user-friendly errors.",
+      "failure_indicators": ["uncaught_exception", "script_crash", "corrupted_display"]
+    }
+  ]
+}

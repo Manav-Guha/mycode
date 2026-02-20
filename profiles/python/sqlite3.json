@@ -1,0 +1,224 @@
+{
+  "identity": {
+    "name": "sqlite3",
+    "pypi_name": null,
+    "category": "database",
+    "description": "Python standard library interface to SQLite embedded database. File-based, serverless, zero-configuration.",
+    "current_stable_version": "stdlib",
+    "min_supported_version": "stdlib",
+    "version_notes": {
+      "python_3.12": "Autocommit attribute for connections, improved CLI, default_transaction flag",
+      "python_3.11": "Connection.autocommit added, blob I/O support",
+      "python_3.10": "No major changes to sqlite3 module"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "File-level locking. Single writer at a time (WAL mode allows concurrent readers with one writer). Not designed for high-concurrency web applications. Excellent for single-user or low-concurrency read-heavy workloads.",
+    "concurrency_model": "file_level_locking",
+    "bottlenecks": [
+      {
+        "name": "single_writer_lock",
+        "description": "Only one write transaction at a time. Other writers block until the lock is released (default 5 second timeout).",
+        "impact": "Write throughput limited to one transaction at a time. OperationalError: database is locked"
+      },
+      {
+        "name": "no_connection_pooling",
+        "description": "Each connection opens the file. No built-in connection pooling. Creating connections per request is expensive for web apps.",
+        "impact": "Connection overhead significant under high request rates"
+      },
+      {
+        "name": "full_table_scans",
+        "description": "Vibe-coded apps rarely create indexes. Queries on large tables do full scans, linear time growth.",
+        "impact": "Query time grows linearly with table size without proper indexes"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "database_file_size",
+        "typical_limit": "1-10GB",
+        "description": "SQLite supports up to 281TB technically, but performance degrades beyond a few GB without careful indexing"
+      },
+      {
+        "metric": "concurrent_readers",
+        "typical_limit": "10-50",
+        "description": "In WAL mode, multiple readers can proceed concurrently. Default journal mode allows only one reader during writes."
+      },
+      {
+        "metric": "writes_per_second",
+        "typical_limit": "50-500",
+        "description": "Depends on transaction batching. Individual INSERT statements are ~50/s. Batched in transactions: ~500/s or more."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 5,
+    "growth_pattern": "Minimal baseline. Memory grows with: page cache (default 2MB per connection), query result sets loaded into Python, and prepared statement cache.",
+    "known_leaks": [
+      {
+        "name": "unclosed_connections",
+        "description": "Connections not explicitly closed keep file handles and page cache alive. Common when using connect() without context manager.",
+        "trigger": "Opening connections without closing them, especially in loops or request handlers",
+        "versions_affected": "all"
+      },
+      {
+        "name": "large_result_set_in_memory",
+        "description": "cursor.fetchall() loads entire result set into Python memory. Large queries can exhaust RAM.",
+        "trigger": "SELECT * FROM large_table without LIMIT, using fetchall()",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Connection objects are reference-counted. Closing connection releases page cache and file handle. Unclosed connections may leak until GC finalizer runs."
+  },
+  "known_failure_modes": [
+    {
+      "name": "database_locked",
+      "description": "OperationalError: database is locked. Occurs when concurrent writes exceed the busy timeout (default 5 seconds).",
+      "trigger_conditions": "Multiple threads or processes writing to same database file simultaneously",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "sqlite3.connect() without timeout parameter in multi-threaded code"
+    },
+    {
+      "name": "thread_safety_violation",
+      "description": "SQLite connections cannot be shared across threads by default (check_same_thread=True). Vibe-coded apps often pass connections between threads.",
+      "trigger_conditions": "Creating connection in one thread, using it in another without check_same_thread=False",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "sqlite3.connect() used across threads, or check_same_thread=False (risky)"
+    },
+    {
+      "name": "sql_injection",
+      "description": "String formatting for SQL queries instead of parameterized queries. Extremely common in vibe-coded apps.",
+      "trigger_conditions": "f-strings or .format() used to build SQL with user input",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "f'SELECT * FROM table WHERE col = {user_input}' patterns"
+    },
+    {
+      "name": "implicit_transactions",
+      "description": "Python sqlite3 module auto-starts transactions. Without explicit commit(), changes are lost. With autocommit, each statement is its own transaction (slow).",
+      "trigger_conditions": "INSERT/UPDATE without commit(), or unexpected rollback on connection close",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "INSERT/UPDATE without commit() call or context manager"
+    },
+    {
+      "name": "data_type_flexibility_surprise",
+      "description": "SQLite uses dynamic typing. A TEXT column happily stores integers. No schema enforcement by default. Data integrity relies entirely on application code.",
+      "trigger_conditions": "Storing wrong data types in columns, expecting database to enforce schema",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "CREATE TABLE without CHECK constraints, no application-level validation"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_database_operations",
+      "description": "Querying tables that don't exist yet. Common when database file is created fresh on first run.",
+      "test_approach": "Run all detected queries against empty/new database files"
+    },
+    {
+      "name": "null_handling",
+      "description": "NULL comparisons in SQL are tricky. WHERE col = NULL doesn't work (must use IS NULL). Vibe code often gets this wrong.",
+      "test_approach": "Insert NULL values in columns used in WHERE clauses, verify query results"
+    },
+    {
+      "name": "very_long_text_values",
+      "description": "SQLite TEXT can hold up to 1 billion bytes. But Python string conversion and comparison of very long texts is slow.",
+      "test_approach": "Insert and query progressively longer text values (1KB to 100MB)"
+    },
+    {
+      "name": "database_file_permissions",
+      "description": "SQLite creates journal/WAL files alongside the database. Read-only file systems or permission issues cause cryptic errors.",
+      "test_approach": "Test database operations in read-only directories and with file permission variations"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["flask", "fastapi", "sqlalchemy", "pandas", "streamlit"],
+    "known_conflicts": [
+      {
+        "dependency": "sqlalchemy",
+        "description": "SQLAlchemy's connection pooling with SQLite can cause 'database is locked' errors if pool size exceeds SQLite's concurrency limit.",
+        "severity": "high"
+      },
+      {
+        "dependency": "multiprocessing",
+        "description": "SQLite connections cannot be pickled or shared across processes. Forked processes inherit file descriptors but must create new connections.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["sqlite3", "system_sqlite"],
+        "risk": "Python's sqlite3 module uses the system SQLite library. Different OS versions have different SQLite versions with different features and bugs.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "concurrent_write_contention",
+      "category": "concurrent_execution",
+      "description": "Multiple threads writing to same database to trigger locking issues",
+      "parameters": {
+        "thread_counts": [2, 4, 8, 16],
+        "writes_per_thread": 100,
+        "transaction_size": [1, 10, 100],
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "Writes succeed but serialize. High contention causes OperationalError: database is locked.",
+      "failure_indicators": ["database_locked", "deadlock", "data_loss", "timeout"]
+    },
+    {
+      "name": "data_volume_scaling",
+      "category": "data_volume_scaling",
+      "description": "Insert progressively more rows and measure query performance degradation",
+      "parameters": {
+        "row_counts": [100, 1000, 10000, 100000, 1000000],
+        "query_types": ["select_all", "select_where", "select_join", "aggregate"],
+        "with_index": [true, false],
+        "measure_time": true
+      },
+      "expected_behavior": "Without indexes, query time grows linearly. With indexes, remains logarithmic.",
+      "failure_indicators": ["query_time_linear_growth", "MemoryError_on_fetchall", "timeout"]
+    },
+    {
+      "name": "connection_churn",
+      "category": "memory_profiling",
+      "description": "Rapidly open and close connections to test resource cleanup",
+      "parameters": {
+        "total_connections": 10000,
+        "batch_size": 100,
+        "operations_per_connection": 5,
+        "measure_memory": true,
+        "measure_file_handles": true
+      },
+      "expected_behavior": "Memory should remain stable. File handles should be released on close.",
+      "failure_indicators": ["file_handle_leak", "memory_growth", "too_many_open_files"]
+    },
+    {
+      "name": "large_blob_handling",
+      "category": "data_volume_scaling",
+      "description": "Store and retrieve progressively larger BLOBs to test memory behavior",
+      "parameters": {
+        "blob_sizes_mb": [0.1, 1, 10, 50, 100],
+        "operation": "insert_then_select",
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Memory spikes to blob size during read. Large blobs degrade write performance.",
+      "failure_indicators": ["MemoryError", "timeout", "database_corruption"]
+    },
+    {
+      "name": "sql_edge_cases",
+      "category": "edge_case_input",
+      "description": "Test with edge-case SQL inputs: empty strings, NULL, Unicode, very long strings, special characters",
+      "parameters": {
+        "input_types": ["empty_string", "null", "unicode_emoji", "sql_metacharacters", "very_long_text", "binary_data"],
+        "apply_to": "all_detected_queries"
+      },
+      "expected_behavior": "Parameterized queries should handle all inputs safely. String-formatted queries will fail or be exploitable.",
+      "failure_indicators": ["sql_injection_possible", "encoding_error", "data_truncation", "crash"]
+    }
+  ]
+}

@@ -1,0 +1,235 @@
+{
+  "identity": {
+    "name": "flask",
+    "pypi_name": "Flask",
+    "category": "web_framework",
+    "description": "Lightweight WSGI web application framework with development server and debugger",
+    "current_stable_version": "3.1.0",
+    "min_supported_version": "2.0.0",
+    "version_notes": {
+      "3.0.0": "Dropped Python 3.7, async view support improved, type hints added throughout",
+      "2.3.0": "Last version supporting Python 3.7",
+      "2.0.0": "Major breaking changes: nested blueprints, short_empty_elements removed, config from_file added"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Single-threaded WSGI server by default. Development server is NOT suitable for production. Scales horizontally behind Gunicorn/uWSGI, but in-process state (module-level globals, flask.g) does not share across workers.",
+    "concurrency_model": "synchronous_wsgi",
+    "bottlenecks": [
+      {
+        "name": "dev_server_single_thread",
+        "description": "Flask's built-in dev server handles one request at a time by default. Concurrent requests queue up.",
+        "impact": "Request latency grows linearly with concurrent users"
+      },
+      {
+        "name": "global_state_not_shared",
+        "description": "Module-level variables and flask.g are per-process. Vibe-coded apps often store state in globals assuming a single process.",
+        "impact": "State inconsistency when scaled to multiple workers"
+      },
+      {
+        "name": "no_async_by_default",
+        "description": "Standard Flask routes are synchronous. Long-running I/O blocks the worker thread entirely.",
+        "impact": "Worker starvation under I/O-heavy workloads"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_requests_dev_server",
+        "typical_limit": 1,
+        "description": "Dev server processes one request at a time without threaded=True"
+      },
+      {
+        "metric": "concurrent_requests_threaded",
+        "typical_limit": "50-100",
+        "description": "With threaded=True or Gunicorn workers, limited by GIL and memory per thread"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 25,
+    "growth_pattern": "Flask itself is lean. Memory growth driven by request context stack, template caching, and application-level data stored in module globals.",
+    "known_leaks": [
+      {
+        "name": "request_context_stack_accumulation",
+        "description": "Pushing request contexts without popping (common in background threads or test fixtures) accumulates memory",
+        "trigger": "Manual request context push without proper teardown",
+        "versions_affected": "all"
+      },
+      {
+        "name": "template_cache_unbounded",
+        "description": "Jinja2 template loader caches all rendered templates. With dynamic template generation this grows without bound.",
+        "trigger": "Dynamically generated template strings rendered via render_template_string",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Flask objects are reference-counted normally. Circular references possible in app/request context teardown callbacks."
+  },
+  "known_failure_modes": [
+    {
+      "name": "dev_server_in_production",
+      "description": "Using app.run() in production. The development server has no connection pooling, no worker management, no graceful shutdown.",
+      "trigger_conditions": "Deploying with app.run() instead of a WSGI server",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "app.run() call without debug=False or with no WSGI server wrapper"
+    },
+    {
+      "name": "secret_key_missing_or_hardcoded",
+      "description": "Sessions, CSRF, and flash messages require SECRET_KEY. Missing key causes runtime error on first session write. Hardcoded key is a security vulnerability.",
+      "trigger_conditions": "Any session or flash operation without SECRET_KEY configured",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No SECRET_KEY in config, or SECRET_KEY set to a literal string in source"
+    },
+    {
+      "name": "blocking_route_handler",
+      "description": "Long-running synchronous operations (DB queries, API calls, file processing) in route handlers block the worker thread.",
+      "trigger_conditions": "Route handler performs I/O operation taking >1 second",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "time.sleep, requests.get, large file reads inside route functions"
+    },
+    {
+      "name": "circular_import_with_blueprints",
+      "description": "Importing the app object inside blueprint modules while the app imports those blueprints creates circular imports.",
+      "trigger_conditions": "Multi-file Flask app with cross-referencing imports",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "ImportError at startup mentioning circular dependency"
+    },
+    {
+      "name": "large_response_memory_spike",
+      "description": "Returning large data (full database table, large file) in a single response loads it all into memory.",
+      "trigger_conditions": "jsonify() or Response() with >100MB payload",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "jsonify called on large querysets, send_file without streaming"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "trailing_slash_redirects",
+      "description": "Flask auto-redirects /path to /path/ for routes defined with trailing slash, causing unexpected 308 responses",
+      "test_approach": "Send requests with and without trailing slashes, verify response codes"
+    },
+    {
+      "name": "unicode_in_urls",
+      "description": "Non-ASCII characters in URL parameters can cause encoding issues depending on Werkzeug version",
+      "test_approach": "Send requests with UTF-8 characters in path and query parameters"
+    },
+    {
+      "name": "concurrent_session_writes",
+      "description": "Default cookie-based sessions are not concurrency-safe. Simultaneous requests from same user can lose session data.",
+      "test_approach": "Fire parallel requests that write to session from the same client"
+    },
+    {
+      "name": "large_file_upload",
+      "description": "Default MAX_CONTENT_LENGTH is unlimited. Large uploads consume all available memory.",
+      "test_approach": "Upload progressively larger files, monitor memory and response time"
+    },
+    {
+      "name": "empty_form_data",
+      "description": "request.form['key'] raises 400 on missing key. Vibe-coded apps often don't handle missing form fields.",
+      "test_approach": "Submit forms with missing required fields, empty strings, and None values"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["sqlalchemy", "requests", "pandas", "jinja2", "flask-cors", "flask-login", "flask-sqlalchemy", "gunicorn"],
+    "known_conflicts": [
+      {
+        "dependency": "asyncio",
+        "description": "Running Flask inside an asyncio event loop (common with Jupyter) can deadlock. Flask 2.0+ added async support but the dev server is still synchronous.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["flask", "werkzeug"],
+        "risk": "Flask pins Werkzeug version tightly. Upgrading Werkzeug independently can break Flask.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["flask", "jinja2"],
+        "risk": "Template rendering security depends on Jinja2 autoescaping. Disabling autoescaping (common in vibe code) enables XSS.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "concurrent_request_load",
+      "category": "concurrent_execution",
+      "description": "Progressively increase concurrent requests to Flask dev server, measuring response time and error rate",
+      "parameters": {
+        "initial_concurrent": 1,
+        "max_concurrent": 100,
+        "step": 10,
+        "requests_per_step": 50,
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "Response time degrades linearly. Errors appear when connection queue fills.",
+      "failure_indicators": ["ConnectionRefused", "timeout", "response_time > 10x baseline"]
+    },
+    {
+      "name": "large_payload_response",
+      "category": "data_volume_scaling",
+      "description": "Request endpoints that return progressively larger JSON payloads, monitoring memory usage",
+      "parameters": {
+        "payload_sizes_kb": [1, 10, 100, 1000, 10000],
+        "measure_memory": true,
+        "measure_response_time": true
+      },
+      "expected_behavior": "Memory spikes proportional to response size. GC reclaims after response sent.",
+      "failure_indicators": ["MemoryError", "memory_growth > 3x payload", "response_time > 5s"]
+    },
+    {
+      "name": "session_write_concurrency",
+      "category": "concurrent_execution",
+      "description": "Concurrent requests writing to the same session, checking for data loss",
+      "parameters": {
+        "concurrent_writers": 10,
+        "writes_per_client": 20,
+        "session_backend": "cookie"
+      },
+      "expected_behavior": "Last-write-wins behavior with cookie sessions. Some writes lost.",
+      "failure_indicators": ["session_data_missing", "session_corruption", "500_error"]
+    },
+    {
+      "name": "file_upload_scaling",
+      "category": "data_volume_scaling",
+      "description": "Upload files of increasing size to test memory behavior and timeout handling",
+      "parameters": {
+        "file_sizes_mb": [0.1, 1, 10, 50, 100],
+        "timeout_seconds": 60,
+        "measure_memory": true
+      },
+      "expected_behavior": "Memory usage grows with file size. Without MAX_CONTENT_LENGTH, no limit enforced.",
+      "failure_indicators": ["MemoryError", "timeout", "413_error_missing"]
+    },
+    {
+      "name": "blocking_io_under_load",
+      "category": "blocking_io",
+      "description": "Simulate slow external service responses while handling concurrent requests",
+      "parameters": {
+        "simulated_io_delay_seconds": [0.1, 0.5, 1.0, 5.0],
+        "concurrent_requests": 20,
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "Worker thread blocked during I/O. Subsequent requests queued. Throughput drops to 1/delay.",
+      "failure_indicators": ["request_queue_full", "timeout", "worker_starvation"]
+    },
+    {
+      "name": "repeated_request_memory_profile",
+      "category": "memory_profiling",
+      "description": "Send identical requests repeatedly over time, tracking memory for leaks",
+      "parameters": {
+        "total_requests": 10000,
+        "batch_size": 100,
+        "measure_interval_requests": 500,
+        "duration_minutes": 5
+      },
+      "expected_behavior": "Memory should stabilize after initial caching. Steady growth indicates leak.",
+      "failure_indicators": ["memory_growth_rate > 1mb_per_1000_requests", "no_stabilization"]
+    }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "identity": {
+    "name": "numpy",
+    "pypi_name": "numpy",
+    "category": "numerical_computing",
+    "description": "Fundamental package for numerical computing with N-dimensional arrays and mathematical functions",
+    "current_stable_version": "2.2.2",
+    "min_supported_version": "1.24.0",
+    "version_notes": {
+      "2.2.0": "StringDType stable, improved copy semantics, new linalg functions",
+      "2.0.0": "Major breaking release: new DType system, removed deprecated APIs, changed default integer types on Windows, copy keyword changes",
+      "1.26.0": "Last 1.x release, NumPy 2.0 migration warnings added"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "C-implemented array operations. Vectorized operations are near-C speed. Single-threaded for most operations (BLAS/LAPACK operations may use multiple threads). Memory layout (C vs Fortran order) affects performance significantly.",
+    "concurrency_model": "single_threaded_with_blas",
+    "bottlenecks": [
+      {
+        "name": "python_loop_over_arrays",
+        "description": "Iterating over NumPy array elements in Python loops negates all NumPy performance benefits. Common in vibe-coded projects.",
+        "impact": "100-1000x slowdown compared to vectorized equivalent"
+      },
+      {
+        "name": "memory_contiguity",
+        "description": "Operations on non-contiguous memory (sliced arrays, transposed arrays) are slower due to cache misses.",
+        "impact": "2-10x slowdown for operations on non-contiguous arrays"
+      },
+      {
+        "name": "implicit_type_promotion",
+        "description": "Operations between different dtypes trigger implicit casting. int32 + float64 copies the int32 to float64 first.",
+        "impact": "Unexpected memory doubling and allocation overhead"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "array_elements",
+        "typical_limit": "100M-1B",
+        "description": "Depends on available RAM. A 1B float64 array = 8GB."
+      },
+      {
+        "metric": "matrix_multiply_size",
+        "typical_limit": "10000x10000",
+        "description": "Beyond this, memory for intermediate results becomes limiting. BLAS threading helps with computation."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 20,
+    "growth_pattern": "Minimal overhead beyond array data. Array memory = elements * dtype_size. Views (slices) share memory with original. Operations that create new arrays allocate full new memory blocks.",
+    "known_leaks": [
+      {
+        "name": "view_keeps_base_alive",
+        "description": "A small slice of a large array keeps the entire base array in memory. Common when extracting small portions of large datasets.",
+        "trigger": "small_array = large_array[0:10] — large_array memory not freed while small_array exists",
+        "versions_affected": "all"
+      },
+      {
+        "name": "repeated_concatenation",
+        "description": "Building arrays via repeated np.concatenate or np.append in a loop. Each call allocates a new array and copies all existing data.",
+        "trigger": "for loop with np.append(arr, new_values)",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "NumPy arrays are reference-counted. Views hold references to base arrays. Circular references between arrays and Python objects possible but rare."
+  },
+  "known_failure_modes": [
+    {
+      "name": "numpy_2_breaking_changes",
+      "description": "NumPy 2.0 removed many deprecated functions and changed default behaviors. Code written for NumPy 1.x may fail or produce different results.",
+      "trigger_conditions": "Upgrading from NumPy 1.x to 2.x without code changes",
+      "severity": "critical",
+      "versions_affected": ">=2.0.0",
+      "detection_hint": "np.bool, np.int, np.float, np.complex usage (removed in 2.0)"
+    },
+    {
+      "name": "silent_overflow",
+      "description": "Integer operations overflow silently. np.int32 maximum is ~2.1 billion. Operations exceeding this wrap around without warning.",
+      "trigger_conditions": "Arithmetic on integer arrays that exceeds dtype range",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Integer array operations without overflow checking, especially accumulations"
+    },
+    {
+      "name": "memory_error_on_allocation",
+      "description": "Large array allocation fails with MemoryError. Common when vibe-coded projects create full matrices instead of sparse representations.",
+      "trigger_conditions": "np.zeros((100000, 100000)) or similar large allocations",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Array creation with computed dimensions, especially from user input"
+    },
+    {
+      "name": "floating_point_comparison",
+      "description": "Direct equality comparison of float arrays fails due to floating-point precision. arr1 == arr2 returns False for mathematically equal results.",
+      "trigger_conditions": "Comparing float arrays after arithmetic operations",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "== or != comparison on float arrays without np.isclose/np.allclose"
+    },
+    {
+      "name": "broadcasting_shape_mismatch",
+      "description": "Broadcasting rules silently expand array dimensions. Mismatched shapes that happen to be broadcast-compatible produce wrong results without error.",
+      "trigger_conditions": "Operations between arrays of different shapes where broadcasting applies unexpectedly",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Operations between arrays of different shapes without explicit shape validation"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_array_operations",
+      "description": "Operations on zero-length arrays return unexpected results. np.mean([]) is NaN, np.sum([]) is 0, np.max([]) raises ValueError.",
+      "test_approach": "Run all detected numpy operations with empty arrays"
+    },
+    {
+      "name": "nan_propagation",
+      "description": "NaN propagates through most operations. A single NaN in an array makes np.mean, np.sum, etc. return NaN unless using np.nanmean etc.",
+      "test_approach": "Insert NaN values into arrays at various positions, test all detected operations"
+    },
+    {
+      "name": "very_large_values",
+      "description": "np.float64 max is ~1.8e308. Operations near this limit produce inf, which then propagates.",
+      "test_approach": "Test with values near float64 max, verify overflow handling"
+    },
+    {
+      "name": "zero_division",
+      "description": "Division by zero produces inf or nan with a RuntimeWarning, not an exception. Vibe code often doesn't check for this.",
+      "test_approach": "Include zero values in divisor arrays, verify downstream handling of inf/nan results"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["pandas", "scipy", "matplotlib", "scikit-learn", "opencv-python", "pillow"],
+    "known_conflicts": [
+      {
+        "dependency": "pandas",
+        "description": "NumPy 2.0 broke pandas <2.1. Must upgrade together. Pandas builds on NumPy internals extensively.",
+        "severity": "high"
+      },
+      {
+        "dependency": "scipy",
+        "description": "SciPy pins NumPy version ranges tightly. NumPy upgrades may require SciPy upgrades.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["numpy", "openblas/mkl"],
+        "risk": "NumPy uses BLAS libraries for linear algebra. Different BLAS implementations (OpenBLAS vs MKL) give slightly different numerical results.",
+        "severity": "low"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "array_size_scaling",
+      "category": "data_volume_scaling",
+      "description": "Create and operate on progressively larger arrays to find memory and performance limits",
+      "parameters": {
+        "array_sizes": [1000, 10000, 100000, 1000000, 10000000],
+        "dtypes": ["float64", "int64", "object"],
+        "operations": ["sum", "mean", "dot", "sort", "argsort"],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Memory proportional to size * dtype_size. Vectorized ops scale linearly.",
+      "failure_indicators": ["MemoryError", "time_growth_superlinear", "silent_overflow"]
+    },
+    {
+      "name": "repeated_allocation_memory",
+      "category": "memory_profiling",
+      "description": "Repeatedly allocate and free arrays to test memory reclamation and fragmentation",
+      "parameters": {
+        "iterations": 1000,
+        "array_size_mb": 10,
+        "operations": ["allocate_free", "concatenate_loop", "slice_accumulate"],
+        "measure_interval": 100
+      },
+      "expected_behavior": "Memory should return to baseline between iterations. Concatenation loop grows monotonically.",
+      "failure_indicators": ["memory_fragmentation", "monotonic_growth", "MemoryError"]
+    },
+    {
+      "name": "dtype_edge_cases",
+      "category": "edge_case_input",
+      "description": "Test detected operations with edge-case values: NaN, inf, overflow, empty, mixed dtypes",
+      "parameters": {
+        "edge_values": ["nan", "inf", "-inf", "max_int", "min_int", "empty", "zero"],
+        "apply_to": "all_detected_operations"
+      },
+      "expected_behavior": "Operations should produce correct results or raise informative errors.",
+      "failure_indicators": ["silent_overflow", "nan_propagation_unhandled", "unexpected_dtype_change"]
+    },
+    {
+      "name": "matrix_operation_scaling",
+      "category": "data_volume_scaling",
+      "description": "Scale matrix operations (multiply, inverse, decomposition) to find computation limits",
+      "parameters": {
+        "matrix_sizes": [10, 100, 1000, 5000, 10000],
+        "operations": ["matmul", "inv", "svd", "eig"],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "matmul is O(n^3). Memory for intermediates is O(n^2). BLAS threading helps.",
+      "failure_indicators": ["MemoryError", "time > 60s", "numerical_instability"]
+    },
+    {
+      "name": "concurrent_array_access",
+      "category": "concurrent_execution",
+      "description": "Multiple threads performing operations on shared arrays to test GIL and thread safety",
+      "parameters": {
+        "thread_count": [2, 4, 8],
+        "array_size": 1000000,
+        "operations": ["read", "write", "compute"],
+        "duration_seconds": 10
+      },
+      "expected_behavior": "NumPy releases GIL during C operations. Concurrent reads safe. Concurrent writes may corrupt.",
+      "failure_indicators": ["data_corruption", "segfault", "no_speedup_from_threads"]
+    }
+  ]
+}

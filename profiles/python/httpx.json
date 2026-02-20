@@ -1,0 +1,246 @@
+{
+  "identity": {
+    "name": "httpx",
+    "pypi_name": "httpx",
+    "category": "http_client",
+    "description": "Full-featured HTTP client with sync and async support, HTTP/2 capability, and requests-compatible API",
+    "current_stable_version": "0.28.1",
+    "min_supported_version": "0.24.0",
+    "version_notes": {
+      "0.28.0": "Connection pool improvements, transport API updates, follow_redirects default change",
+      "0.27.0": "HTTP/2 improvements, proxy authentication support",
+      "0.24.0": "Async streaming improvements, timeout configuration changes"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Supports both sync and async HTTP. Async mode uses asyncio for concurrent requests without threading overhead. HTTP/2 multiplexing allows multiple requests over single connection. Connection pooling built-in for both sync and async clients.",
+    "concurrency_model": "async_and_sync",
+    "bottlenecks": [
+      {
+        "name": "sync_mode_same_as_requests",
+        "description": "In sync mode, httpx has the same blocking behavior as requests. No concurrency benefit without async.",
+        "impact": "Same throughput as requests when used synchronously"
+      },
+      {
+        "name": "connection_pool_limits",
+        "description": "Default connection pool: 100 max connections, 10 per host. High-throughput apps hitting a single host are limited by per-host pool.",
+        "impact": "Requests queue when per-host connection limit reached"
+      },
+      {
+        "name": "async_client_not_shared",
+        "description": "AsyncClient should be reused across requests but vibe-coded apps often create a new client per request, losing connection pooling.",
+        "impact": "TCP/TLS handshake per request, no HTTP/2 multiplexing benefit"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "async_concurrent_requests",
+        "typical_limit": "100-1000",
+        "description": "Async mode can maintain hundreds of concurrent requests per client, limited by per-host pool and event loop."
+      },
+      {
+        "metric": "http2_streams_per_connection",
+        "typical_limit": 100,
+        "description": "HTTP/2 multiplexing allows ~100 concurrent streams per connection. Server may impose lower limits."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 12,
+    "growth_pattern": "Similar to requests. Connection pool maintains open connections (memory per connection). Async operations have coroutine overhead. Response bodies loaded into memory by default. Streaming available for large responses.",
+    "known_leaks": [
+      {
+        "name": "unclosed_async_client",
+        "description": "AsyncClient not closed with aclose(). Open connections and event loop resources not released.",
+        "trigger": "Creating AsyncClient without async with or explicit aclose()",
+        "versions_affected": "all"
+      },
+      {
+        "name": "streaming_response_not_closed",
+        "description": "Streaming responses that are not consumed or closed keep connections allocated in the pool.",
+        "trigger": "client.stream() without reading response or closing it",
+        "versions_affected": "all"
+      },
+      {
+        "name": "response_accumulation",
+        "description": "Same as requests — storing Response objects retains full body, headers, and HTTP metadata.",
+        "trigger": "Accumulating Response objects in collections",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Client connection pool requires explicit close() for deterministic cleanup. Async client needs aclose() in async context."
+  },
+  "known_failure_modes": [
+    {
+      "name": "async_client_sync_context",
+      "description": "Using AsyncClient in synchronous code, or calling async methods without await. Results in coroutine not being executed.",
+      "trigger_conditions": "Calling async httpx methods without await or outside async context",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "AsyncClient used without await, or outside async def function"
+    },
+    {
+      "name": "no_timeout_set",
+      "description": "Default timeout is 5 seconds for httpx (better than requests' None), but some operations need longer. Timeout too short causes failures on slow APIs.",
+      "trigger_conditions": "API calls to slow services without custom timeout",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "httpx calls to external APIs without explicit timeout configuration"
+    },
+    {
+      "name": "redirect_behavior_change",
+      "description": "httpx does NOT follow redirects by default (unlike requests). Vibe-coded apps switching from requests expect automatic redirect following.",
+      "trigger_conditions": "Migrating from requests to httpx without setting follow_redirects=True",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "httpx.get() calls without follow_redirects=True to APIs that redirect"
+    },
+    {
+      "name": "http2_dependency_missing",
+      "description": "HTTP/2 support requires httpx[http2] (h2 package). Enabling http2=True without the dependency raises ImportError.",
+      "trigger_conditions": "Client(http2=True) without h2 installed",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "http2=True in Client constructor, check for h2 in dependencies"
+    },
+    {
+      "name": "event_loop_conflict",
+      "description": "Using AsyncClient when an event loop is already running (common in Jupyter, Streamlit). Cannot call asyncio.run() inside existing loop.",
+      "trigger_conditions": "Async httpx in Jupyter notebooks, Streamlit apps, or other async frameworks",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "AsyncClient in Jupyter or Streamlit context"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "http2_server_incompatibility",
+      "description": "Not all servers support HTTP/2. Negotiation failures can cause cryptic connection errors.",
+      "test_approach": "Test with http2=True against servers that don't support HTTP/2"
+    },
+    {
+      "name": "timeout_granularity",
+      "description": "httpx has granular timeouts (connect, read, write, pool). Misconfigured timeouts cause unexpected failures.",
+      "test_approach": "Test with various timeout configurations and slow server responses"
+    },
+    {
+      "name": "multipart_upload_streaming",
+      "description": "Large multipart file uploads. httpx supports streaming uploads but vibe code often loads files into memory first.",
+      "test_approach": "Upload files of increasing size, compare memory with streaming vs buffered"
+    },
+    {
+      "name": "proxy_configuration",
+      "description": "Proxy settings differ from requests. Migrating code may miss proxy configuration changes.",
+      "test_approach": "Test with proxy configurations, verify connection behavior"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["fastapi", "supabase", "anyio", "asyncio", "pydantic"],
+    "known_conflicts": [
+      {
+        "dependency": "requests",
+        "description": "Both provide HTTP functionality. API is similar but not identical (follow_redirects, timeout defaults differ). Mixing them is confusing but technically compatible.",
+        "severity": "low"
+      },
+      {
+        "dependency": "supabase",
+        "description": "Supabase SDK uses httpx internally. Direct httpx version pins can conflict with SDK's dependency.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["httpx", "httpcore"],
+        "risk": "httpx depends on httpcore for transport layer. httpcore breaking changes affect httpx behavior.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["httpx", "h2"],
+        "risk": "HTTP/2 support via h2 package. h2 version incompatibilities can cause stream errors.",
+        "severity": "low"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "async_concurrent_load",
+      "category": "concurrent_execution",
+      "description": "Fire increasing numbers of concurrent async requests to measure throughput and connection pool behavior",
+      "parameters": {
+        "concurrent_requests": [10, 50, 100, 500, 1000],
+        "requests_per_batch": 100,
+        "timeout_seconds": 30,
+        "measure_memory": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Throughput scales with concurrency until connection pool or server limit reached.",
+      "failure_indicators": ["pool_timeout", "connection_error", "event_loop_blocked", "memory > 500mb"]
+    },
+    {
+      "name": "sync_vs_async_comparison",
+      "category": "concurrent_execution",
+      "description": "Compare sync Client vs AsyncClient performance for the same workload",
+      "parameters": {
+        "total_requests": 100,
+        "target_hosts": 5,
+        "methods": ["sync_sequential", "sync_threaded", "async"],
+        "measure_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Async significantly faster for I/O-bound workloads. Sync threaded intermediate.",
+      "failure_indicators": ["async_slower_than_sync", "memory_spike_async", "event_loop_error"]
+    },
+    {
+      "name": "large_response_streaming",
+      "category": "data_volume_scaling",
+      "description": "Download large responses with and without streaming to test memory behavior",
+      "parameters": {
+        "response_sizes_mb": [1, 10, 50, 100, 500],
+        "streaming": [true, false],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Streaming: constant memory. Non-streaming: memory proportional to response size.",
+      "failure_indicators": ["MemoryError", "streaming_memory_growth", "timeout"]
+    },
+    {
+      "name": "connection_pool_exhaustion",
+      "category": "concurrent_execution",
+      "description": "Open more concurrent connections than pool allows to test queuing and timeout behavior",
+      "parameters": {
+        "pool_max_connections": 10,
+        "concurrent_requests": [5, 10, 20, 50],
+        "server_response_delay_seconds": 2,
+        "pool_timeout_seconds": 5
+      },
+      "expected_behavior": "Requests queue when pool exhausted. PoolTimeout after configured timeout.",
+      "failure_indicators": ["PoolTimeout", "connection_leak", "no_queuing"]
+    },
+    {
+      "name": "error_resilience",
+      "category": "edge_case_input",
+      "description": "Test handling of various HTTP and network errors with both sync and async clients",
+      "parameters": {
+        "error_scenarios": ["connection_refused", "timeout", "ssl_error", "dns_failure", "malformed_response"],
+        "client_modes": ["sync", "async"],
+        "with_retry": [true, false]
+      },
+      "expected_behavior": "Each error raises specific exception. Unhandled errors propagate cleanly.",
+      "failure_indicators": ["silent_failure", "wrong_exception_type", "connection_not_released", "unclosed_client"]
+    },
+    {
+      "name": "long_running_memory_profile",
+      "category": "memory_profiling",
+      "description": "Sustained request load over time to detect memory leaks in client and connection pool",
+      "parameters": {
+        "total_requests": 10000,
+        "batch_size": 100,
+        "measure_interval_requests": 500,
+        "duration_minutes": 5,
+        "client_mode": "async"
+      },
+      "expected_behavior": "Memory stable after warmup. Connection pool size constant.",
+      "failure_indicators": ["memory_growth_monotonic", "connection_pool_growth", "unclosed_responses"]
+    }
+  ]
+}

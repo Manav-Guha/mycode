@@ -1,0 +1,229 @@
+{
+  "identity": {
+    "name": "supabase",
+    "pypi_name": "supabase",
+    "category": "backend_service",
+    "description": "Python client for Supabase, providing access to PostgreSQL database, authentication, storage, and realtime subscriptions",
+    "current_stable_version": "2.13.0",
+    "min_supported_version": "2.0.0",
+    "version_notes": {
+      "2.13.0": "Improved type hints, storage v2 support, realtime channel management",
+      "2.0.0": "Major rewrite: new client initialization, async support, breaking API changes from 1.x",
+      "1.0.0": "Legacy API, not compatible with current Supabase platform features"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "HTTP client wrapping Supabase REST API (PostgREST). Performance limited by network latency to Supabase servers and PostgREST query translation. Realtime subscriptions use WebSocket connections. Each client instance maintains its own HTTP session.",
+    "concurrency_model": "http_client",
+    "bottlenecks": [
+      {
+        "name": "network_latency_per_query",
+        "description": "Every database operation is an HTTP request to Supabase servers. Latency floor is network round-trip time (~20-200ms depending on region).",
+        "impact": "Cannot achieve sub-millisecond query times. Latency dominated by network, not query complexity."
+      },
+      {
+        "name": "no_query_batching",
+        "description": "Each Supabase client call is a separate HTTP request. No built-in query batching or pipelining.",
+        "impact": "10 queries = 10 HTTP round-trips. Latency multiplies linearly."
+      },
+      {
+        "name": "rate_limiting",
+        "description": "Supabase free tier has rate limits. Burst traffic can hit 429 responses.",
+        "impact": "Requests rejected with 429 status. No built-in retry in Python SDK."
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "requests_per_second",
+        "typical_limit": "100-500",
+        "description": "Depends on Supabase plan. Free tier is lower. Network latency limits effective throughput per client."
+      },
+      {
+        "metric": "realtime_connections",
+        "typical_limit": "200",
+        "description": "Supabase free tier limits concurrent realtime connections. Pro tier higher."
+      },
+      {
+        "metric": "response_payload_size_mb",
+        "typical_limit": 2,
+        "description": "PostgREST default row limit and payload size. Large queries may be truncated."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 15,
+    "growth_pattern": "Client object is lightweight. Memory growth from: accumulated response data stored in variables, realtime subscription callbacks accumulating state, and large query results loaded into memory.",
+    "known_leaks": [
+      {
+        "name": "realtime_subscription_accumulation",
+        "description": "Subscribing to channels without unsubscribing. Each subscription maintains a WebSocket listener and callback chain.",
+        "trigger": "Calling .on() or .subscribe() repeatedly without .unsubscribe()",
+        "versions_affected": ">=2.0.0"
+      },
+      {
+        "name": "large_query_result_retention",
+        "description": "Fetching large result sets (thousands of rows) and storing them in variables without cleanup.",
+        "trigger": "supabase.table('large_table').select('*').execute() without pagination",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. HTTP session objects cleaned up when client is garbage collected. Realtime WebSocket connections require explicit cleanup."
+  },
+  "known_failure_modes": [
+    {
+      "name": "missing_or_invalid_credentials",
+      "description": "Supabase URL or API key not set, incorrect, or expired. SDK gives opaque HTTP errors instead of clear credential failure messages.",
+      "trigger_conditions": "Environment variables not set, .env not loaded, or key rotation",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "SUPABASE_URL or SUPABASE_KEY referenced without validation"
+    },
+    {
+      "name": "rls_policy_blocking",
+      "description": "Row Level Security policies block queries silently. Queries return empty results instead of permission errors when RLS is enabled without proper policies.",
+      "trigger_conditions": "Using anon key with RLS-enabled tables that have no public SELECT policy",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Queries returning empty results unexpectedly, no error handling for empty responses"
+    },
+    {
+      "name": "v1_to_v2_api_break",
+      "description": "Supabase Python SDK 2.x has different initialization and query patterns than 1.x. Common in vibe-coded apps following outdated tutorials.",
+      "trigger_conditions": "Code written for supabase-py 1.x running with 2.x installed",
+      "severity": "high",
+      "versions_affected": ">=2.0.0",
+      "detection_hint": "create_client() vs Client() initialization patterns"
+    },
+    {
+      "name": "network_failure_no_retry",
+      "description": "Network errors (timeout, DNS failure, connection reset) raise exceptions with no built-in retry. Vibe-coded apps don't handle these.",
+      "trigger_conditions": "Network instability, Supabase service outage, DNS issues",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Supabase calls without try/except or retry logic"
+    },
+    {
+      "name": "pagination_missing",
+      "description": "Default query returns limited rows (1000 by default in PostgREST). Vibe-coded apps assume all data is returned.",
+      "trigger_conditions": "Table has more rows than PostgREST default limit",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "select('*') without .range() or pagination handling"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_table_queries",
+      "description": "Querying empty tables returns empty list, not None. Code that indexes into results without checking length crashes.",
+      "test_approach": "Run all detected Supabase queries against empty tables"
+    },
+    {
+      "name": "special_characters_in_values",
+      "description": "PostgREST URL-encodes query parameters. Special characters in filter values can cause unexpected matching.",
+      "test_approach": "Filter with values containing %, _, *, and other PostgREST special characters"
+    },
+    {
+      "name": "concurrent_realtime_events",
+      "description": "Rapid database changes trigger many realtime events. Callback processing that's slower than event rate causes queue buildup.",
+      "test_approach": "Rapid INSERT/UPDATE with realtime subscription, monitor event processing lag"
+    },
+    {
+      "name": "large_file_storage_upload",
+      "description": "Uploading large files to Supabase Storage. SDK loads entire file into memory before upload.",
+      "test_approach": "Upload files of increasing size (1MB to 500MB), monitor memory and timeout behavior"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["streamlit", "flask", "fastapi", "pandas", "python-dotenv"],
+    "known_conflicts": [
+      {
+        "dependency": "httpx",
+        "description": "Supabase SDK uses httpx internally. Version conflicts between SDK's httpx pin and user's direct httpx dependency possible.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["supabase", "postgrest-py", "httpx"],
+        "risk": "Supabase SDK depends on postgrest-py which depends on httpx. Breaking changes in any layer cascade.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["supabase", "gotrue-py"],
+        "risk": "Auth module (gotrue-py) version must match SDK version. Mismatch causes authentication failures.",
+        "severity": "high"
+      },
+      {
+        "chain": ["supabase", "realtime-py"],
+        "risk": "Realtime module version must match server protocol version. Old SDK with new Supabase project may fail silently.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "query_throughput",
+      "category": "concurrent_execution",
+      "description": "Send increasing rates of queries to measure throughput and identify rate limiting",
+      "parameters": {
+        "queries_per_second": [1, 10, 50, 100, 500],
+        "duration_seconds": 30,
+        "query_types": ["select", "insert", "update"],
+        "measure_latency": true,
+        "measure_errors": true
+      },
+      "expected_behavior": "Latency stable up to rate limit, then 429 errors appear.",
+      "failure_indicators": ["429_rate_limit", "timeout", "connection_error", "latency > 5s"]
+    },
+    {
+      "name": "large_result_memory",
+      "category": "data_volume_scaling",
+      "description": "Fetch progressively larger result sets to test memory and pagination behavior",
+      "parameters": {
+        "row_counts": [100, 1000, 5000, 10000],
+        "row_sizes_bytes": [100, 1000, 10000],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Memory proportional to result set size. Default 1000-row limit may truncate results silently.",
+      "failure_indicators": ["MemoryError", "truncated_results", "timeout", "payload_too_large"]
+    },
+    {
+      "name": "network_resilience",
+      "category": "edge_case_input",
+      "description": "Simulate network issues (slow responses, timeouts, disconnections) during Supabase operations",
+      "parameters": {
+        "failure_modes": ["timeout", "connection_reset", "slow_response", "dns_failure"],
+        "failure_probability": 0.3,
+        "total_operations": 100
+      },
+      "expected_behavior": "Operations should fail with clear errors. No data corruption from partial operations.",
+      "failure_indicators": ["silent_data_loss", "uncaught_exception", "partial_write", "corrupted_state"]
+    },
+    {
+      "name": "realtime_subscription_load",
+      "category": "memory_profiling",
+      "description": "Subscribe to progressively more channels and generate events to test memory and processing",
+      "parameters": {
+        "channel_counts": [1, 5, 10, 50],
+        "events_per_second": 10,
+        "duration_seconds": 60,
+        "measure_memory": true,
+        "measure_event_lag": true
+      },
+      "expected_behavior": "Memory grows with subscriptions. Event processing lag increases with event rate.",
+      "failure_indicators": ["memory_growth_unbounded", "event_lag > 5s", "subscription_dropped"]
+    },
+    {
+      "name": "auth_token_expiry",
+      "category": "edge_case_input",
+      "description": "Test behavior when auth tokens expire mid-session or are invalid",
+      "parameters": {
+        "scenarios": ["expired_token", "invalid_token", "missing_token", "token_refresh_failure"],
+        "operations_after_expiry": 10
+      },
+      "expected_behavior": "Clear error on expired token. Automatic refresh if configured, else informative failure.",
+      "failure_indicators": ["silent_auth_failure", "empty_results_no_error", "uncaught_401"]
+    }
+  ]
+}

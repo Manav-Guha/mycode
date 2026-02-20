@@ -10,6 +10,13 @@ from mycode.ingester import (
     ProjectIngester,
 )
 from mycode.js_ingester import JsProjectIngester
+from mycode.library import (
+    ComponentLibrary,
+    DependencyProfile,
+    LibraryError,
+    ProfileMatch,
+    ProfileNotFoundError,
+)
 from mycode.session import (
     DependencyInstallError,
     EnvironmentInfo,
@@ -39,4 +46,10 @@ __all__ = [
     "CouplingPoint",
     # JS Project Ingester (C3)
     "JsProjectIngester",
+    # Component Library (C4)
+    "ComponentLibrary",
+    "DependencyProfile",
+    "ProfileMatch",
+    "LibraryError",
+    "ProfileNotFoundError",
 ]

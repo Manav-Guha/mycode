@@ -1,0 +1,235 @@
+{
+  "identity": {
+    "name": "fastapi",
+    "pypi_name": "fastapi",
+    "category": "web_framework",
+    "description": "Modern async web framework built on Starlette and Pydantic with automatic OpenAPI docs",
+    "current_stable_version": "0.115.0",
+    "min_supported_version": "0.100.0",
+    "version_notes": {
+      "0.115.0": "Pydantic v2 fully integrated, lifespan context manager standard",
+      "0.109.0": "Annotated dependency injection, WebSocket improvements",
+      "0.100.0": "Pydantic v2 migration, breaking changes in model validation"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "ASGI-based async framework. Handles concurrent requests via asyncio event loop. Sync route handlers run in thread pool. Uvicorn as default ASGI server. Scales well for I/O-bound workloads but CPU-bound work blocks the event loop.",
+    "concurrency_model": "async_event_loop",
+    "bottlenecks": [
+      {
+        "name": "sync_route_thread_pool_exhaustion",
+        "description": "Sync (non-async) route handlers run in a thread pool (default 40 threads). Under high concurrency, the pool saturates.",
+        "impact": "Requests queue up waiting for thread pool slots. Latency spikes."
+      },
+      {
+        "name": "cpu_bound_in_async_handler",
+        "description": "CPU-intensive work in async handlers blocks the event loop, stalling all concurrent requests.",
+        "impact": "All requests freeze during CPU-bound computation"
+      },
+      {
+        "name": "pydantic_validation_overhead",
+        "description": "Complex nested Pydantic models with many validators add per-request CPU cost. At high request rates this becomes significant.",
+        "impact": "Increased latency proportional to model complexity"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_async_requests",
+        "typical_limit": "1000-5000",
+        "description": "Async I/O handlers can manage thousands of concurrent connections on a single worker"
+      },
+      {
+        "metric": "concurrent_sync_requests",
+        "typical_limit": 40,
+        "description": "Limited by thread pool size (default 40 in anyio)"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 40,
+    "growth_pattern": "Higher baseline than Flask due to Pydantic schema generation and OpenAPI doc generation at startup. Memory stable during normal operation. Growth typically from accumulated middleware state or background tasks not being awaited.",
+    "known_leaks": [
+      {
+        "name": "background_task_accumulation",
+        "description": "BackgroundTasks that spawn but are never awaited or that hold references to large request bodies accumulate memory",
+        "trigger": "High-frequency endpoints with BackgroundTasks that process large payloads",
+        "versions_affected": "all"
+      },
+      {
+        "name": "dependency_injection_cache_growth",
+        "description": "Dependencies with yield that don't clean up properly can accumulate state across requests",
+        "trigger": "Generator dependencies that store state or hold database connections",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Async context objects may create reference cycles between coroutines and their frames."
+  },
+  "known_failure_modes": [
+    {
+      "name": "sync_def_blocking_event_loop",
+      "description": "Mixing sync and async code incorrectly. Calling synchronous blocking I/O from an async route handler freezes the event loop.",
+      "trigger_conditions": "Using requests.get() or time.sleep() inside an async def route",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "requests or time.sleep calls inside async def functions"
+    },
+    {
+      "name": "pydantic_v1_v2_incompatibility",
+      "description": "FastAPI 0.100+ requires Pydantic v2 patterns. Vibe-coded apps using Pydantic v1 syntax (schema(), .dict()) break silently or raise validation errors.",
+      "trigger_conditions": "Using .dict() instead of .model_dump(), schema() instead of model_json_schema()",
+      "severity": "high",
+      "versions_affected": ">=0.100.0",
+      "detection_hint": "Pydantic v1 method calls: .dict(), .schema(), .parse_obj()"
+    },
+    {
+      "name": "startup_event_deprecated",
+      "description": "on_event('startup') deprecated in favor of lifespan. Old pattern still works but won't in future versions.",
+      "trigger_conditions": "Using @app.on_event('startup') decorator",
+      "severity": "medium",
+      "versions_affected": ">=0.109.0",
+      "detection_hint": "on_event decorator usage"
+    },
+    {
+      "name": "unhandled_validation_error_leak",
+      "description": "Pydantic ValidationError responses include full model schema by default. Complex models can expose internal structure in error responses.",
+      "trigger_conditions": "Invalid request data sent to endpoint with complex Pydantic models",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "No custom exception handler for RequestValidationError"
+    },
+    {
+      "name": "uvicorn_reload_memory",
+      "description": "Running with --reload in production. File watcher consumes extra memory and CPU. Auto-reload can cause partial restarts under load.",
+      "trigger_conditions": "Deploying with uvicorn --reload flag",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "uvicorn.run with reload=True"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "deeply_nested_json_body",
+      "description": "Deeply nested JSON request bodies cause recursive Pydantic validation, consuming stack and CPU",
+      "test_approach": "Send JSON payloads with increasing nesting depth (10, 50, 100, 500 levels)"
+    },
+    {
+      "name": "large_file_upload_streaming",
+      "description": "FastAPI buffers uploaded files in memory by default (UploadFile). Very large files exhaust memory.",
+      "test_approach": "Upload files of increasing size (1MB to 1GB), monitor memory consumption"
+    },
+    {
+      "name": "concurrent_websocket_connections",
+      "description": "WebSocket connections held open consume memory per connection. No built-in connection limit.",
+      "test_approach": "Open progressively more WebSocket connections, measure memory and connection stability"
+    },
+    {
+      "name": "path_parameter_injection",
+      "description": "Path parameters with special characters (slashes, dots, encoded sequences) can cause routing issues",
+      "test_approach": "Send requests with URL-encoded special characters, path traversal patterns"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["sqlalchemy", "pydantic", "uvicorn", "httpx", "databases", "alembic", "python-jose", "passlib"],
+    "known_conflicts": [
+      {
+        "dependency": "flask",
+        "description": "Running Flask and FastAPI in the same process causes WSGI/ASGI conflicts. Common in migration scenarios.",
+        "severity": "high"
+      },
+      {
+        "dependency": "pydantic",
+        "description": "FastAPI version must match Pydantic major version. FastAPI >=0.100 requires Pydantic v2.",
+        "severity": "critical"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["fastapi", "starlette"],
+        "risk": "FastAPI pins Starlette tightly. Direct Starlette imports may break on FastAPI upgrades.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["fastapi", "pydantic", "pydantic-settings"],
+        "risk": "Pydantic v2 split settings into separate package. Missing pydantic-settings causes ImportError.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "async_concurrent_load",
+      "category": "concurrent_execution",
+      "description": "Progressively increase concurrent async requests to measure event loop saturation",
+      "parameters": {
+        "initial_concurrent": 10,
+        "max_concurrent": 5000,
+        "step_multiplier": 2,
+        "requests_per_step": 100,
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "Latency stable up to event loop saturation, then degrades. Should handle 1000+ concurrent I/O-bound requests.",
+      "failure_indicators": ["event_loop_blocked", "timeout", "response_time > 20x baseline"]
+    },
+    {
+      "name": "sync_handler_thread_exhaustion",
+      "category": "blocking_io",
+      "description": "Send concurrent requests to sync route handlers to exhaust thread pool",
+      "parameters": {
+        "concurrent_requests": [10, 20, 40, 80, 160],
+        "handler_delay_seconds": 1.0,
+        "timeout_seconds": 60
+      },
+      "expected_behavior": "Requests queue after thread pool (40) is exhausted. Latency jumps in steps.",
+      "failure_indicators": ["thread_pool_exhausted", "timeout", "503_errors"]
+    },
+    {
+      "name": "pydantic_validation_stress",
+      "category": "data_volume_scaling",
+      "description": "Send increasingly complex request bodies to measure Pydantic validation overhead",
+      "parameters": {
+        "field_counts": [5, 20, 50, 100, 500],
+        "nesting_depths": [1, 3, 5, 10],
+        "requests_per_config": 100
+      },
+      "expected_behavior": "Validation time grows with model complexity. CPU-bound during validation.",
+      "failure_indicators": ["validation_time > 100ms", "cpu_saturation", "timeout"]
+    },
+    {
+      "name": "websocket_connection_scaling",
+      "category": "memory_profiling",
+      "description": "Open increasing numbers of WebSocket connections to measure memory per connection",
+      "parameters": {
+        "connection_counts": [10, 50, 100, 500, 1000],
+        "message_interval_seconds": 1,
+        "duration_minutes": 2
+      },
+      "expected_behavior": "Memory grows linearly with connection count. Each connection ~50-100KB.",
+      "failure_indicators": ["memory_per_connection > 1mb", "connection_drops", "MemoryError"]
+    },
+    {
+      "name": "large_response_streaming",
+      "category": "data_volume_scaling",
+      "description": "Request endpoints returning large JSON responses to test serialization performance",
+      "parameters": {
+        "response_sizes_kb": [1, 10, 100, 1000, 10000],
+        "concurrent_requests": 10,
+        "measure_memory": true
+      },
+      "expected_behavior": "Non-streaming responses buffer in memory. Streaming responses maintain constant memory.",
+      "failure_indicators": ["MemoryError", "memory_growth > 3x response_size", "serialization_timeout"]
+    },
+    {
+      "name": "repeated_request_memory_profile",
+      "category": "memory_profiling",
+      "description": "Sustained request load over time to detect memory leaks in middleware, dependencies, and background tasks",
+      "parameters": {
+        "total_requests": 10000,
+        "batch_size": 200,
+        "measure_interval_requests": 1000,
+        "duration_minutes": 5
+      },
+      "expected_behavior": "Memory should plateau after warmup. Continuous growth indicates leak.",
+      "failure_indicators": ["memory_growth_rate > 1mb_per_1000_requests", "no_stabilization"]
+    }
+  ]
+}
