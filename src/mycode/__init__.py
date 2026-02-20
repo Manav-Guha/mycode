@@ -9,6 +9,7 @@ from mycode.ingester import (
     IngestionResult,
     ProjectIngester,
 )
+from mycode.js_ingester import JsProjectIngester
 from mycode.session import (
     DependencyInstallError,
     EnvironmentInfo,
@@ -36,4 +37,6 @@ __all__ = [
     "DependencyInfo",
     "FunctionFlow",
     "CouplingPoint",
+    # JS Project Ingester (C3)
+    "JsProjectIngester",
 ]
