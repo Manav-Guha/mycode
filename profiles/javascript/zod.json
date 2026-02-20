@@ -1,0 +1,180 @@
+{
+  "identity": {
+    "name": "zod",
+    "npm_name": "zod",
+    "category": "validation",
+    "description": "TypeScript-first schema validation library with static type inference — runtime validation from type definitions",
+    "current_stable_version": "3.24.1",
+    "min_supported_version": "3.20.0",
+    "version_notes": {
+      "3.24.0": "Improved error messages, new pipe/transform features, better discriminated union support",
+      "3.22.0": "z.string().pipe() for chained transformations, improved branded types",
+      "3.20.0": "z.input/z.output inference improvements, error map customization"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Runtime validation library. Schemas defined at module load. Validation runs per invocation (every request in web apps). Zero external dependencies. Performance comparable to hand-written validation code.",
+    "concurrency_model": "synchronous_cpu",
+    "bottlenecks": [
+      {
+        "name": "complex_schema_validation",
+        "description": "Deeply nested schemas with many transformations, refinements, and unions add CPU cost per validation.",
+        "impact": "Validation time grows with schema complexity. Unions checked sequentially."
+      },
+      {
+        "name": "large_array_validation",
+        "description": "Validating large arrays where each element has a complex schema. Every element validated individually.",
+        "impact": "Validation time = array_length * per_element_validation_time"
+      },
+      {
+        "name": "transform_chains",
+        "description": "Chained .transform() and .pipe() operations add processing per validation. Each transform runs sequentially.",
+        "impact": "Throughput drops with number of transforms in the chain"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "validations_per_second",
+        "typical_limit": "100K-1M",
+        "description": "Simple schemas. Drops to 10K-100K for complex nested schemas."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 0.5,
+    "growth_pattern": "Minimal. Schema objects are lightweight. Memory from: schema definitions (persist for app lifetime), validation error objects (temporary), and parsed output objects.",
+    "known_leaks": [
+      {
+        "name": "dynamic_schema_creation",
+        "description": "Creating schemas dynamically in hot paths (per-request schema generation). Each schema allocates objects.",
+        "trigger": "z.object({...}) inside request handlers instead of defining once at module level",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. Schema objects persist as module-level constants. Validation results are temporary."
+  },
+  "known_failure_modes": [
+    {
+      "name": "parse_vs_safeParse_confusion",
+      "description": ".parse() throws ZodError on invalid input. .safeParse() returns {success, data/error}. Vibe-coded apps use .parse() without try/catch.",
+      "trigger_conditions": "Invalid input to .parse() without error handling",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": ".parse() calls without try/catch, especially on user input"
+    },
+    {
+      "name": "type_coercion_surprises",
+      "description": "z.coerce.number() converts 'abc' to NaN (which is a number). z.coerce.boolean() converts '' to false, '0' to true. Unexpected coercion results.",
+      "trigger_conditions": "Using z.coerce.* with arbitrary user input",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "z.coerce.* used on untrusted input without additional refinements"
+    },
+    {
+      "name": "default_strips_unknown_keys",
+      "description": "z.object().parse() strips unknown keys by default. Data loss if extra fields are meaningful. Use .passthrough() or .strict() to change behavior.",
+      "trigger_conditions": "Validating objects with extra fields that should be preserved",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "z.object() without .passthrough() or .strict() on input that may have extra fields"
+    },
+    {
+      "name": "async_refinement_not_awaited",
+      "description": "Schemas with .refine(async fn) require .parseAsync(). Using .parse() on async schemas silently skips async refinements.",
+      "trigger_conditions": "Async refinement with synchronous .parse()",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": ".refine() with async function used with .parse() instead of .parseAsync()"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_and_null_handling",
+      "description": "Difference between undefined, null, '', and missing fields. z.string() rejects undefined and null. z.optional() allows undefined but not null.",
+      "test_approach": "Validate with undefined, null, empty string, and missing fields for all schema types"
+    },
+    {
+      "name": "large_union_types",
+      "description": "z.union() with many variants. Validation tries each variant sequentially until one matches. Performance degrades with variant count.",
+      "test_approach": "Create unions with increasing variant counts, measure validation time"
+    },
+    {
+      "name": "recursive_schemas",
+      "description": "z.lazy() for recursive types. Deep nesting can cause stack overflow during validation.",
+      "test_approach": "Validate deeply nested recursive data structures"
+    },
+    {
+      "name": "error_message_size",
+      "description": "ZodError for complex nested objects can produce very large error objects with paths for every failure.",
+      "test_approach": "Validate completely invalid complex objects, measure error object size"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["express", "next", "trpc", "react-hook-form", "prisma", "openai"],
+    "known_conflicts": [
+      {
+        "dependency": "yup",
+        "description": "Both are validation libraries. Using both adds bundle size and inconsistent validation patterns.",
+        "severity": "low"
+      },
+      {
+        "dependency": "joi",
+        "description": "Both serve same purpose. Zod is TypeScript-first; Joi is JavaScript-first. Mixing causes confusion.",
+        "severity": "low"
+      }
+    ],
+    "dependency_chain_risks": []
+  },
+  "stress_test_templates": [
+    {
+      "name": "validation_throughput",
+      "category": "data_volume_scaling",
+      "description": "Measure validation throughput with increasing schema complexity",
+      "parameters": {
+        "schema_types": ["simple_object", "nested_3_levels", "union_10_variants", "array_1000_items"],
+        "validations_count": 10000,
+        "measure_time": true,
+        "measure_per_validation": true
+      },
+      "expected_behavior": "Simple: >100K/s. Complex: >10K/s. Arrays proportional to length.",
+      "failure_indicators": ["throughput < 1K/s", "memory_growth", "stack_overflow"]
+    },
+    {
+      "name": "error_handling_coverage",
+      "category": "edge_case_input",
+      "description": "Test validation error handling with various invalid inputs",
+      "parameters": {
+        "input_types": ["wrong_type", "missing_required", "extra_fields", "null", "undefined", "empty_string"],
+        "schemas": "all_detected",
+        "methods": ["parse", "safeParse"]
+      },
+      "expected_behavior": "safeParse returns error object. parse throws ZodError. All caught.",
+      "failure_indicators": ["uncaught_ZodError", "silent_data_loss", "wrong_error_path"]
+    },
+    {
+      "name": "schema_complexity_scaling",
+      "category": "data_volume_scaling",
+      "description": "Increase schema depth and field count to find performance limits",
+      "parameters": {
+        "nesting_depths": [1, 3, 5, 10],
+        "fields_per_level": [5, 10, 20],
+        "validations": 1000,
+        "measure_time": true
+      },
+      "expected_behavior": "Validation time grows with depth * fields. Error messages grow with depth.",
+      "failure_indicators": ["validation_time > 10ms", "error_object > 100KB", "stack_overflow"]
+    },
+    {
+      "name": "coercion_edge_cases",
+      "category": "edge_case_input",
+      "description": "Test z.coerce.* with various input types to verify expected behavior",
+      "parameters": {
+        "coerce_types": ["number", "boolean", "string", "date"],
+        "inputs": ["valid", "empty_string", "null", "undefined", "NaN", "special_chars"],
+        "verify_output": true
+      },
+      "expected_behavior": "Coercion produces expected types. NaN and unexpected coercion flagged.",
+      "failure_indicators": ["unexpected_coercion", "NaN_accepted_as_number", "silent_data_change"]
+    }
+  ]
+}

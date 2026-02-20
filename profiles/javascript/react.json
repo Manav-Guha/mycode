@@ -1,0 +1,223 @@
+{
+  "identity": {
+    "name": "react",
+    "npm_name": "react",
+    "category": "ui_framework",
+    "description": "Declarative component-based UI library for building user interfaces with virtual DOM diffing",
+    "current_stable_version": "19.0.0",
+    "min_supported_version": "18.0.0",
+    "version_notes": {
+      "19.0.0": "React Compiler, Actions, useActionState, use() hook, ref as prop, async scripts in components",
+      "18.0.0": "Concurrent rendering, automatic batching, Suspense for data fetching, useId, useTransition"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Client-side rendering by default. Virtual DOM diffing scales with component tree size. Re-renders triggered by state changes propagate down the component tree. Performance depends on component granularity and memoization strategy.",
+    "concurrency_model": "single_threaded_event_loop",
+    "bottlenecks": [
+      {
+        "name": "unnecessary_re_renders",
+        "description": "State changes cause the component and all children to re-render. Without React.memo or useMemo, entire subtrees re-render on every parent state change.",
+        "impact": "UI jank and dropped frames when large component trees re-render frequently"
+      },
+      {
+        "name": "large_list_rendering",
+        "description": "Rendering thousands of DOM elements (lists, tables) without virtualization. Each element creates a real DOM node.",
+        "impact": "Initial render time grows linearly. Browser becomes unresponsive beyond ~10K DOM nodes."
+      },
+      {
+        "name": "context_provider_rerenders",
+        "description": "Any change to a Context value re-renders ALL consumers. Using context for frequently-changing state (mouse position, timers) causes cascading re-renders.",
+        "impact": "All context consumers re-render even if they don't use the changed value"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "dom_nodes",
+        "typical_limit": "5000-50000",
+        "description": "Browser rendering slows beyond 5K visible nodes. React can manage more virtual nodes but DOM operations become bottleneck."
+      },
+      {
+        "metric": "component_tree_depth",
+        "typical_limit": "50-200",
+        "description": "Deep trees increase reconciliation time. Stack overflow possible with extremely deep recursion."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 2,
+    "growth_pattern": "React itself is small (~45KB). Memory grows with: component instances in the fiber tree, state stored in hooks, retained closures in useEffect/useCallback, and DOM nodes. Long-lived SPAs accumulate detached DOM trees and stale closures.",
+    "known_leaks": [
+      {
+        "name": "stale_closure_in_useeffect",
+        "description": "useEffect cleanup not running or not cancelling subscriptions/timers. Event listeners and intervals accumulate across re-renders.",
+        "trigger": "useEffect without cleanup function, or cleanup that doesn't cancel all subscriptions",
+        "versions_affected": ">=16.8.0"
+      },
+      {
+        "name": "unmounted_component_state_update",
+        "description": "Async operations (fetch, setTimeout) that resolve after component unmounts attempt state updates. Memory retained by the pending callback.",
+        "trigger": "Async operations in useEffect without AbortController or cleanup cancellation",
+        "versions_affected": ">=16.8.0"
+      },
+      {
+        "name": "event_listener_accumulation",
+        "description": "Adding event listeners in useEffect without removing them in cleanup. Each render adds another listener.",
+        "trigger": "addEventListener in useEffect without corresponding removeEventListener in cleanup",
+        "versions_affected": ">=16.8.0"
+      }
+    ],
+    "gc_behavior": "Component state GC-eligible when component unmounts (removed from fiber tree). Closures in hooks retain references to their scope."
+  },
+  "known_failure_modes": [
+    {
+      "name": "infinite_re_render_loop",
+      "description": "Setting state inside render body or useEffect without proper dependency array causes infinite re-render loop. Browser tab becomes unresponsive.",
+      "trigger_conditions": "setState() in render body, or useEffect with missing/incorrect dependency array that triggers state change",
+      "severity": "critical",
+      "versions_affected": ">=16.8.0",
+      "detection_hint": "setState inside component body (not in handler), useEffect without dependency array that calls setState"
+    },
+    {
+      "name": "key_prop_missing_in_lists",
+      "description": "Rendering lists without key prop causes React to re-render entire list on any change. Using array index as key causes state bugs when list is reordered.",
+      "trigger_conditions": "map() rendering without key, or key={index} on reorderable lists",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": ".map() calls in JSX without key prop, or key={index} pattern"
+    },
+    {
+      "name": "useeffect_dependency_bugs",
+      "description": "Missing dependencies in useEffect array cause stale closures. Adding all dependencies causes too-frequent execution. Common source of subtle bugs.",
+      "trigger_conditions": "useEffect referencing variables not in its dependency array",
+      "severity": "high",
+      "versions_affected": ">=16.8.0",
+      "detection_hint": "useEffect with empty [] that references props or state"
+    },
+    {
+      "name": "prop_drilling_state_management",
+      "description": "Passing state through many component levels (prop drilling). Changes cascade through every intermediate component. Common in vibe-coded apps without state management.",
+      "trigger_conditions": "Props passed through 4+ component levels",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Same prop name appearing in multiple nested component signatures"
+    },
+    {
+      "name": "client_side_data_fetching_waterfall",
+      "description": "Components fetching data in useEffect create waterfalls — parent fetches, renders children, children fetch. Sequential, not parallel.",
+      "trigger_conditions": "Nested components each doing their own fetch in useEffect",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "fetch() or API calls inside useEffect in multiple nested components"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "rapid_state_updates",
+      "description": "Many setState calls in quick succession. React batches in event handlers but not always in async code (pre-18) or setTimeout.",
+      "test_approach": "Trigger rapid state updates from various contexts (handlers, timeouts, promises)"
+    },
+    {
+      "name": "large_state_objects",
+      "description": "Storing large objects (thousands of items) in useState. Every update creates a new reference, triggering re-renders of all consumers.",
+      "test_approach": "Store progressively larger objects in state, measure re-render performance"
+    },
+    {
+      "name": "error_boundary_coverage",
+      "description": "Unhandled errors in components crash the entire app without error boundaries. Vibe-coded apps rarely implement error boundaries.",
+      "test_approach": "Trigger rendering errors, verify error boundary catches or app crashes"
+    },
+    {
+      "name": "concurrent_mode_edge_cases",
+      "description": "React 18+ concurrent features (useTransition, Suspense) can cause components to render multiple times or be interrupted mid-render.",
+      "test_approach": "Use concurrent features with components that have side effects in render"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["react-dom", "react-router", "axios", "zustand", "tailwindcss", "next"],
+    "known_conflicts": [
+      {
+        "dependency": "react-dom",
+        "description": "react and react-dom versions must match exactly. Mismatched versions cause cryptic errors.",
+        "severity": "critical"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["react", "react-dom", "scheduler"],
+        "risk": "React's internal scheduler package must match. Duplicate React instances in the bundle (from dependencies) cause hooks errors.",
+        "severity": "high"
+      },
+      {
+        "chain": ["react", "component_libraries"],
+        "risk": "UI libraries (MUI, Chakra, Ant Design) pin React version ranges. Major React upgrades break these libraries.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "component_tree_scaling",
+      "category": "data_volume_scaling",
+      "description": "Render component trees of increasing size and measure render time and memory",
+      "parameters": {
+        "component_counts": [100, 500, 1000, 5000, 10000],
+        "tree_depth": [5, 10, 20],
+        "measure_render_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Render time grows with component count. Virtual DOM diffing scales linearly.",
+      "failure_indicators": ["render_time > 16ms", "memory > 100mb", "browser_unresponsive"]
+    },
+    {
+      "name": "list_rendering_performance",
+      "category": "data_volume_scaling",
+      "description": "Render lists of increasing length with and without virtualization",
+      "parameters": {
+        "list_lengths": [100, 1000, 5000, 10000, 50000],
+        "item_complexity": ["simple_text", "nested_components"],
+        "virtualized": [true, false],
+        "measure_render_time": true
+      },
+      "expected_behavior": "Non-virtualized: linear degradation. Virtualized: constant time regardless of list size.",
+      "failure_indicators": ["render_time > 100ms", "scroll_jank", "browser_crash"]
+    },
+    {
+      "name": "state_update_frequency",
+      "category": "concurrent_execution",
+      "description": "Trigger state updates at increasing frequencies to test batching and render performance",
+      "parameters": {
+        "updates_per_second": [10, 60, 120, 500, 1000],
+        "state_size_bytes": [100, 10000],
+        "duration_seconds": 10
+      },
+      "expected_behavior": "React batches updates. Render frequency caps at display refresh rate. Dropped updates at extreme rates.",
+      "failure_indicators": ["infinite_loop", "dropped_frames > 10%", "memory_growth"]
+    },
+    {
+      "name": "event_listener_memory",
+      "category": "memory_profiling",
+      "description": "Mount and unmount components with event listeners to detect listener leaks",
+      "parameters": {
+        "mount_unmount_cycles": [10, 100, 1000],
+        "listeners_per_component": 5,
+        "measure_listener_count": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Listeners should be cleaned up on unmount. Count should remain stable across cycles.",
+      "failure_indicators": ["listener_count_growing", "memory_growth_per_cycle", "event_handler_errors"]
+    },
+    {
+      "name": "context_consumer_scaling",
+      "category": "data_volume_scaling",
+      "description": "Increase context consumers to test re-render cascading",
+      "parameters": {
+        "consumer_counts": [10, 50, 100, 500],
+        "context_update_frequency": 10,
+        "measure_render_time": true
+      },
+      "expected_behavior": "All consumers re-render on context change. Time proportional to consumer count.",
+      "failure_indicators": ["render_time > 16ms_per_update", "dropped_frames", "memory_spike"]
+    }
+  ]
+}

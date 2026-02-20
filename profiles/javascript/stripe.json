@@ -1,0 +1,181 @@
+{
+  "identity": {
+    "name": "stripe",
+    "npm_name": "stripe",
+    "category": "payment",
+    "description": "Official Node.js library for the Stripe API — payments, subscriptions, invoicing, and financial operations",
+    "current_stable_version": "17.5.0",
+    "min_supported_version": "14.0.0",
+    "version_notes": {
+      "17.0.0": "ES module support, improved TypeScript types, new API version pinning",
+      "14.0.0": "Node.js 12+ required, improved auto-pagination, webhook signature verification improvements"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "HTTP client wrapping Stripe REST API. Every operation is an API call. Built-in retry with idempotency keys. Rate limited by Stripe (25 read/s, 100 write/s in test mode).",
+    "concurrency_model": "async_http",
+    "bottlenecks": [
+      {
+        "name": "api_latency",
+        "description": "Each Stripe API call has network latency. Creating a PaymentIntent involves multiple internal steps at Stripe, typically 200ms-2s.",
+        "impact": "Payment flow latency = sum of sequential Stripe calls"
+      },
+      {
+        "name": "rate_limiting",
+        "description": "Stripe enforces rate limits per API key. Live mode: 100 read req/s, 100 write req/s. Test mode: 25 req/s.",
+        "impact": "429 errors during high-volume operations (batch processing, migrations)"
+      },
+      {
+        "name": "webhook_processing",
+        "description": "Webhook endpoints must respond within 20 seconds. Slow processing causes Stripe to retry, creating duplicate events.",
+        "impact": "Duplicate event processing if handler is slow"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "requests_per_second_live",
+        "typical_limit": 100,
+        "description": "Stripe live mode rate limit per API key"
+      },
+      {
+        "metric": "webhook_timeout_seconds",
+        "typical_limit": 20,
+        "description": "Stripe retries if webhook response takes >20s"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 5,
+    "growth_pattern": "Lightweight SDK. Memory from: list auto-pagination (accumulates pages), webhook payload processing, and response object retention.",
+    "known_leaks": [
+      {
+        "name": "auto_pagination_accumulation",
+        "description": "Using for-await on auto-paginated lists loads all pages into memory. Large lists consume unbounded memory.",
+        "trigger": "Iterating over stripe.customers.list() auto-pagination on large collections",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. Response objects are plain JS objects, GC-eligible when unreferenced."
+  },
+  "known_failure_modes": [
+    {
+      "name": "webhook_signature_not_verified",
+      "description": "Processing Stripe webhooks without verifying the signature. Allows forged webhook events. Critical security vulnerability.",
+      "trigger_conditions": "Webhook endpoint that processes events without stripe.webhooks.constructEvent()",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "Webhook handler without stripe.webhooks.constructEvent or signature verification"
+    },
+    {
+      "name": "secret_key_in_client_code",
+      "description": "Using Stripe secret key (sk_) in browser-side code. Exposes full account access.",
+      "trigger_conditions": "Stripe SDK with secret key in client-bundled code",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "'sk_live_' or 'sk_test_' in client-side files"
+    },
+    {
+      "name": "idempotency_not_used",
+      "description": "Creating charges/payment intents without idempotency keys. Network retries can create duplicate charges.",
+      "trigger_conditions": "Create operations without idempotencyKey in unreliable network conditions",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "stripe.paymentIntents.create() without idempotencyKey option"
+    },
+    {
+      "name": "webhook_raw_body_not_preserved",
+      "description": "Express body parsing converts raw body to JSON. Webhook signature verification needs raw body. Common misconfiguration.",
+      "trigger_conditions": "express.json() middleware before webhook route",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "express.json() applied globally, webhook route needs express.raw()"
+    },
+    {
+      "name": "api_version_mismatch",
+      "description": "SDK sends API version in headers. Webhook events have the API version from dashboard settings. Mismatch causes field differences.",
+      "trigger_conditions": "SDK API version differs from Stripe dashboard webhook API version",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "No explicit apiVersion in Stripe constructor, or version differs from webhook settings"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "currency_precision",
+      "description": "Stripe amounts are in smallest currency unit (cents). Passing dollar amounts instead of cents creates 100x charges.",
+      "test_approach": "Verify all amount values are in correct currency units"
+    },
+    {
+      "name": "duplicate_webhook_events",
+      "description": "Stripe may send the same event multiple times. Handler must be idempotent.",
+      "test_approach": "Send duplicate webhook events, verify handler processes only once"
+    },
+    {
+      "name": "test_vs_live_key_confusion",
+      "description": "Using test keys in production or live keys in development.",
+      "test_approach": "Verify environment-appropriate key usage"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["express", "next", "prisma", "mongoose", "dotenv"],
+    "known_conflicts": [],
+    "dependency_chain_risks": [
+      {
+        "chain": ["stripe", "node-fetch"],
+        "risk": "Stripe SDK may use native fetch or node-fetch depending on Node.js version.",
+        "severity": "low"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "payment_flow_latency",
+      "category": "data_volume_scaling",
+      "description": "Measure end-to-end payment flow latency with increasing complexity",
+      "parameters": {
+        "flow_types": ["simple_charge", "subscription", "multi_step"],
+        "concurrent_flows": [1, 5, 10],
+        "measure_latency": true,
+        "measure_api_calls": true
+      },
+      "expected_behavior": "Latency proportional to API calls in flow. Concurrent flows hit rate limit.",
+      "failure_indicators": ["rate_limit_hit", "timeout", "duplicate_charge"]
+    },
+    {
+      "name": "webhook_processing_stress",
+      "category": "concurrent_execution",
+      "description": "Send webhook events at increasing rates to test processing capacity",
+      "parameters": {
+        "events_per_second": [1, 10, 50, 100],
+        "handler_processing_ms": [10, 100, 1000],
+        "duration_seconds": 30
+      },
+      "expected_behavior": "Events processed sequentially. Slow handlers cause retries after 20s.",
+      "failure_indicators": ["duplicate_processing", "timeout_retry", "event_lost", "handler_crash"]
+    },
+    {
+      "name": "list_pagination_memory",
+      "category": "memory_profiling",
+      "description": "Auto-paginate through large lists to test memory behavior",
+      "parameters": {
+        "total_items": [100, 1000, 10000],
+        "page_size": 100,
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Memory should stay bounded if processing items individually.",
+      "failure_indicators": ["memory_proportional_to_total", "timeout", "rate_limit"]
+    },
+    {
+      "name": "error_handling",
+      "category": "edge_case_input",
+      "description": "Test handling of various Stripe error types",
+      "parameters": {
+        "error_types": ["card_declined", "rate_limit", "invalid_request", "authentication", "api_error"],
+        "with_retry": [true, false]
+      },
+      "expected_behavior": "Each error type handled specifically. Retryable errors retried with backoff.",
+      "failure_indicators": ["unhandled_error", "silent_failure", "infinite_retry", "customer_charged_on_error"]
+    }
+  ]
+}

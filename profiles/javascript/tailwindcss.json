@@ -1,0 +1,186 @@
+{
+  "identity": {
+    "name": "tailwindcss",
+    "npm_name": "tailwindcss",
+    "category": "css_framework",
+    "description": "Utility-first CSS framework that generates optimized stylesheets from class names used in markup",
+    "current_stable_version": "4.0.0",
+    "min_supported_version": "3.0.0",
+    "version_notes": {
+      "4.0.0": "New engine: no config file needed, CSS-first configuration, automatic content detection, Oxide engine (Rust-based)",
+      "3.4.0": "Dynamic viewport units, :has() support, improved arbitrary values",
+      "3.0.0": "JIT engine default, arbitrary values, play CDN"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Build-time CSS generation. Scans source files for class names, generates only the CSS that's used. Output size depends on unique utility combinations used, not total template count. Runtime impact is purely CSS — no JavaScript overhead.",
+    "concurrency_model": "build_time",
+    "bottlenecks": [
+      {
+        "name": "content_scanning_at_build",
+        "description": "Tailwind scans all files in content paths for class names. Large projects with many files increase build time.",
+        "impact": "Build time grows with source file count. Scanning node_modules accidentally causes very slow builds."
+      },
+      {
+        "name": "css_specificity_conflicts",
+        "description": "Utility classes have equal specificity. Source order determines which wins. Dynamic class composition can produce unexpected results.",
+        "impact": "Styling bugs from class order, especially with conditional classes"
+      },
+      {
+        "name": "browser_css_parsing",
+        "description": "Very large CSS files (many custom utilities, @apply chains) slow browser CSS parsing on initial load.",
+        "impact": "First paint delayed by CSS parsing time"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "output_css_size_kb",
+        "typical_limit": "10-50",
+        "description": "JIT mode produces only used CSS. Well-optimized projects stay under 20KB gzipped."
+      },
+      {
+        "metric": "source_files_scanned",
+        "typical_limit": "1000-10000",
+        "description": "Build time increases with files scanned. Content paths should be specific."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 0,
+    "growth_pattern": "Zero runtime footprint — Tailwind is CSS only. Build-time memory usage depends on project size and JIT compilation. Browser memory grows with DOM elements that have many utility classes (longer class strings).",
+    "known_leaks": [],
+    "gc_behavior": "No runtime JavaScript. CSS parsed by browser engine, not V8."
+  },
+  "known_failure_modes": [
+    {
+      "name": "content_paths_misconfigured",
+      "description": "Content array doesn't include all template files. Classes used in templates not covered by content paths are purged from output.",
+      "trigger_conditions": "Classes in files not listed in tailwind.config.js content array",
+      "severity": "critical",
+      "versions_affected": "3.x",
+      "detection_hint": "Missing file patterns in content array, especially for component libraries or dynamic imports"
+    },
+    {
+      "name": "dynamic_class_construction",
+      "description": "Constructing class names dynamically (e.g., `bg-${color}-500`) prevents Tailwind from detecting the class. The full class string must appear in source code.",
+      "trigger_conditions": "Template literals or string concatenation to build class names",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Template literals or variables used to construct Tailwind class names"
+    },
+    {
+      "name": "v3_to_v4_migration",
+      "description": "Tailwind v4 removes tailwind.config.js in favor of CSS-based configuration. All v3 configs need migration.",
+      "trigger_conditions": "Upgrading from Tailwind v3 to v4 without migrating config",
+      "severity": "high",
+      "versions_affected": ">=4.0.0",
+      "detection_hint": "tailwind.config.js present with v4 installed"
+    },
+    {
+      "name": "apply_directive_limitations",
+      "description": "@apply with complex utilities, responsive variants, or third-party plugin classes can fail or produce unexpected output.",
+      "trigger_conditions": "Using @apply with hover:, responsive, or plugin-based utilities",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "@apply with variant prefixes (hover:, md:, etc.)"
+    },
+    {
+      "name": "class_order_conflicts",
+      "description": "Conflicting utility classes where the last one in CSS file order wins (not DOM order). bg-red-500 bg-blue-500 — winner depends on CSS generation order.",
+      "trigger_conditions": "Multiple conflicting utilities on the same element",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Multiple utilities affecting the same CSS property on one element"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "purge_false_positives",
+      "description": "Class names that look like Tailwind utilities in comments, strings, or non-template files get included in output unnecessarily.",
+      "test_approach": "Verify CSS output doesn't include classes only present in comments or non-template files"
+    },
+    {
+      "name": "arbitrary_value_edge_cases",
+      "description": "Arbitrary values with special characters (brackets, colons) can confuse the parser.",
+      "test_approach": "Use arbitrary values with special characters, verify CSS output"
+    },
+    {
+      "name": "dark_mode_consistency",
+      "description": "Dark mode (class strategy) requires parent .dark class. Inconsistent application causes partial dark mode.",
+      "test_approach": "Toggle dark mode, verify all components respect the mode change"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["react", "next", "svelte", "vue", "postcss", "autoprefixer"],
+    "known_conflicts": [
+      {
+        "dependency": "bootstrap",
+        "description": "Both define utility classes with overlapping names. CSS specificity conflicts inevitable.",
+        "severity": "high"
+      },
+      {
+        "dependency": "postcss",
+        "description": "Tailwind is a PostCSS plugin. PostCSS version must be compatible. Tailwind v4 changes PostCSS integration.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["tailwindcss", "postcss", "autoprefixer"],
+        "risk": "Build pipeline dependency. Version mismatches cause build failures. PostCSS 8 required for Tailwind 3+.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "build_time_scaling",
+      "category": "data_volume_scaling",
+      "description": "Measure build time with increasing numbers of source files and unique class combinations",
+      "parameters": {
+        "source_file_counts": [10, 100, 500, 1000],
+        "unique_classes_per_file": [10, 50, 100],
+        "measure_build_time": true,
+        "measure_output_size": true
+      },
+      "expected_behavior": "Build time grows with file count. Output size grows with unique class count.",
+      "failure_indicators": ["build_time > 30s", "output_css > 500kb", "memory > 1gb_during_build"]
+    },
+    {
+      "name": "css_output_size_analysis",
+      "category": "data_volume_scaling",
+      "description": "Analyze CSS output size with purging enabled and disabled",
+      "parameters": {
+        "purge_enabled": [true, false],
+        "measure_output_size": true,
+        "measure_gzip_size": true
+      },
+      "expected_behavior": "Purged CSS 10-100x smaller than unpurged. Well-optimized: under 20KB gzipped.",
+      "failure_indicators": ["purged_css > 100kb_gzip", "no_purge_configured", "missing_classes"]
+    },
+    {
+      "name": "dynamic_class_detection",
+      "category": "edge_case_input",
+      "description": "Verify dynamically constructed class names are properly handled",
+      "parameters": {
+        "patterns": ["template_literal", "string_concat", "conditional_ternary", "object_keys"],
+        "verify_presence_in_output": true
+      },
+      "expected_behavior": "Only full static class strings detected. Dynamic constructions produce missing classes.",
+      "failure_indicators": ["missing_classes_in_output", "styling_broken", "no_warning"]
+    },
+    {
+      "name": "browser_rendering_performance",
+      "category": "data_volume_scaling",
+      "description": "Measure browser rendering performance with increasing CSS and DOM complexity",
+      "parameters": {
+        "dom_element_counts": [100, 1000, 5000, 10000],
+        "classes_per_element": [3, 10, 20],
+        "measure_first_paint": true,
+        "measure_style_recalc": true
+      },
+      "expected_behavior": "Rendering time grows with DOM size. Style recalculation proportional to element count.",
+      "failure_indicators": ["first_paint > 1s", "style_recalc > 16ms", "layout_thrashing"]
+    }
+  ]
+}

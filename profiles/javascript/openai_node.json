@@ -1,0 +1,186 @@
+{
+  "identity": {
+    "name": "openai_node",
+    "npm_name": "openai",
+    "category": "ai_framework",
+    "description": "Official Node.js client for the OpenAI API — chat completions, embeddings, images, audio, and assistants",
+    "current_stable_version": "4.77.0",
+    "min_supported_version": "4.0.0",
+    "version_notes": {
+      "4.77.0": "Responses API support, structured outputs, streaming improvements",
+      "4.0.0": "Complete rewrite from v3: new client-based interface, streaming helpers, TypeScript-first. Breaking change from 3.x."
+    }
+  },
+  "scaling_characteristics": {
+    "description": "HTTP client wrapping OpenAI REST API. Node.js fetch-based. Performance dominated by API latency. Supports streaming responses. Rate limited by OpenAI per-organization quotas.",
+    "concurrency_model": "async_http",
+    "bottlenecks": [
+      {
+        "name": "api_latency",
+        "description": "Each API call has minimum 500ms-2s latency. Sequential calls in chains accumulate latency.",
+        "impact": "Total time = sum of sequential API call latencies"
+      },
+      {
+        "name": "rate_limiting",
+        "description": "OpenAI enforces rate limits per organization. Concurrent requests from a busy server quickly hit limits.",
+        "impact": "429 errors requiring retry with backoff"
+      },
+      {
+        "name": "streaming_memory",
+        "description": "Streaming responses accumulate chunks in memory. Long responses or multiple concurrent streams grow memory.",
+        "impact": "Memory proportional to concurrent stream count * response length"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "requests_per_minute",
+        "typical_limit": "60-10000",
+        "description": "Depends on OpenAI tier level"
+      },
+      {
+        "metric": "concurrent_streams",
+        "typical_limit": "10-100",
+        "description": "Limited by connection pool and memory per stream"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 10,
+    "growth_pattern": "Lightweight client. Memory from: response objects, streaming chunk accumulation, conversation history arrays, and connection pool.",
+    "known_leaks": [
+      {
+        "name": "streaming_not_consumed",
+        "description": "Starting a streaming response but not consuming all chunks. Connection and partial data retained.",
+        "trigger": "Breaking from for-await loop early without aborting the stream",
+        "versions_affected": ">=4.0.0"
+      },
+      {
+        "name": "conversation_history_growth",
+        "description": "Building messages array for multi-turn conversations. Each turn adds messages without trimming.",
+        "trigger": "messages.push() in chat loop without truncation strategy",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. Client connection pool cleaned up on garbage collection. Streams require explicit consumption or abort."
+  },
+  "known_failure_modes": [
+    {
+      "name": "v3_to_v4_migration",
+      "description": "OpenAI Node SDK v4 completely rewrote the API. new OpenAIApi() → new OpenAI(). createChatCompletion → chat.completions.create. All v3 code breaks.",
+      "trigger_conditions": "Code written for openai 3.x running with 4.x installed",
+      "severity": "critical",
+      "versions_affected": ">=4.0.0",
+      "detection_hint": "new Configuration(), new OpenAIApi(), createChatCompletion method calls"
+    },
+    {
+      "name": "api_key_exposure",
+      "description": "API key hardcoded in client-side code. If bundled for browser, key is visible to anyone.",
+      "trigger_conditions": "OpenAI client instantiated in browser-side code with hardcoded key",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "new OpenAI({ apiKey: 'sk-...' }) in client-side files, or NEXT_PUBLIC_ env var for API key"
+    },
+    {
+      "name": "unhandled_api_errors",
+      "description": "API errors (rate limit, auth, server error) not caught. Process crashes on unhandled promise rejection.",
+      "trigger_conditions": "Any API call without try/catch or .catch()",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "await openai.chat.completions.create() without try/catch"
+    },
+    {
+      "name": "context_window_overflow",
+      "description": "Messages array exceeding model context window. API returns error but conversation builders don't check token count.",
+      "trigger_conditions": "Long conversation history without truncation",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Growing messages array without token counting or trimming"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_messages",
+      "description": "Empty messages array, messages with empty content, or missing role field.",
+      "test_approach": "Send requests with various malformed message structures"
+    },
+    {
+      "name": "concurrent_streaming",
+      "description": "Multiple simultaneous streaming responses. Memory and connection pool pressure.",
+      "test_approach": "Open increasing concurrent streams, monitor memory and connection health"
+    },
+    {
+      "name": "abort_controller_usage",
+      "description": "Cancelling requests with AbortController. Not all code paths handle AbortError gracefully.",
+      "test_approach": "Abort requests at various stages (before response, during stream, after completion)"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["express", "next", "langchain", "zod", "dotenv"],
+    "known_conflicts": [
+      {
+        "dependency": "langchain",
+        "description": "LangChain.js wraps the OpenAI SDK. Version mismatches cause method-not-found errors.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["openai", "node-fetch/undici"],
+        "risk": "SDK uses native fetch (Node 18+) or polyfill. Older Node versions need polyfill.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "rate_limit_stress",
+      "category": "concurrent_execution",
+      "description": "Send increasing request rates to identify rate limiting thresholds",
+      "parameters": {
+        "requests_per_second": [1, 5, 10, 50],
+        "duration_seconds": 30,
+        "measure_errors": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Succeeds up to rate limit, then 429 errors.",
+      "failure_indicators": ["unhandled_429", "no_retry", "process_crash", "silent_failure"]
+    },
+    {
+      "name": "streaming_memory",
+      "category": "memory_profiling",
+      "description": "Monitor memory during concurrent streaming responses",
+      "parameters": {
+        "concurrent_streams": [1, 5, 10, 25],
+        "response_length": "long",
+        "duration_seconds": 60,
+        "measure_memory": true
+      },
+      "expected_behavior": "Memory proportional to concurrent streams. Released after stream ends.",
+      "failure_indicators": ["memory_growth_after_completion", "unclosed_streams", "connection_leak"]
+    },
+    {
+      "name": "conversation_growth",
+      "category": "data_volume_scaling",
+      "description": "Simulate growing conversation history to test token and memory management",
+      "parameters": {
+        "turns": [10, 50, 100, 500],
+        "message_size_tokens": 200,
+        "measure_token_count": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Token count grows linearly. Eventually hits context window limit.",
+      "failure_indicators": ["context_overflow_unhandled", "memory_unbounded", "cost_explosion"]
+    },
+    {
+      "name": "error_resilience",
+      "category": "edge_case_input",
+      "description": "Test handling of various API errors and edge cases",
+      "parameters": {
+        "error_types": ["invalid_key", "rate_limit", "server_error", "timeout", "malformed_response"],
+        "with_retry": [true, false]
+      },
+      "expected_behavior": "Each error raises specific error type. Retry handles transient errors.",
+      "failure_indicators": ["process_crash", "silent_failure", "infinite_retry", "key_in_logs"]
+    }
+  ]
+}

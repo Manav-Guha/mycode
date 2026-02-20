@@ -1,0 +1,181 @@
+{
+  "identity": {
+    "name": "axios",
+    "npm_name": "axios",
+    "category": "http_client",
+    "description": "Promise-based HTTP client for browser and Node.js with interceptors, transforms, and automatic JSON parsing",
+    "current_stable_version": "1.7.9",
+    "min_supported_version": "1.0.0",
+    "version_notes": {
+      "1.7.0": "Fetch adapter support, improved proxy handling, security fixes",
+      "1.0.0": "ESM support, improved TypeScript types, breaking changes from 0.x in interceptors and transforms"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Promise-based HTTP client. In Node.js, uses http/https modules. In browser, uses XMLHttpRequest or fetch. Connection reuse via keep-alive. No built-in request queuing or rate limiting.",
+    "concurrency_model": "async_promises",
+    "bottlenecks": [
+      {
+        "name": "no_connection_pooling_by_default",
+        "description": "Node.js: default http agent creates new connections. Must configure keepAlive agent for reuse.",
+        "impact": "TCP+TLS handshake per request without keep-alive agent"
+      },
+      {
+        "name": "interceptor_chain_overhead",
+        "description": "All interceptors run for every request/response. Many interceptors add processing time per request.",
+        "impact": "Latency per request grows with interceptor count"
+      },
+      {
+        "name": "response_buffering",
+        "description": "Responses loaded into memory by default. Large responses consume proportional memory.",
+        "impact": "Memory = response body size for each concurrent request"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_requests",
+        "typical_limit": "50-500",
+        "description": "Limited by max sockets (default ~5 per host). Must configure httpAgent for higher."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 3,
+    "growth_pattern": "Lightweight library. Memory from: response data retained in variables, interceptor closures, and concurrent request buffers.",
+    "known_leaks": [
+      {
+        "name": "response_data_retention",
+        "description": "Storing full response objects (including headers, config, request) in arrays.",
+        "trigger": "Accumulating axios response objects without extracting just the needed data",
+        "versions_affected": "all"
+      },
+      {
+        "name": "interceptor_not_ejected",
+        "description": "Adding interceptors dynamically without ejecting old ones. Interceptor chain grows.",
+        "trigger": "axios.interceptors.request.use() in component lifecycle without eject",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. Request/response objects GC-eligible when unreferenced."
+  },
+  "known_failure_modes": [
+    {
+      "name": "no_timeout_configured",
+      "description": "Default timeout is 0 (no timeout). Requests to unresponsive servers hang indefinitely.",
+      "trigger_conditions": "axios.get() without timeout option to slow/dead server",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "axios calls without timeout configuration"
+    },
+    {
+      "name": "error_response_handling",
+      "description": "Axios throws for non-2xx status codes. Vibe-coded apps catch the error but don't check error.response for server error details.",
+      "trigger_conditions": "Server returns 4xx/5xx response",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "catch blocks that don't check error.response, or no .catch() at all"
+    },
+    {
+      "name": "csrf_token_missing",
+      "description": "Browser-side POST/PUT requests without CSRF tokens when xsrfCookieName/xsrfHeaderName configured but cookie not set.",
+      "trigger_conditions": "CSRF protection expected but token cookie not present",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "POST/PUT requests to APIs with CSRF protection"
+    },
+    {
+      "name": "baseurl_override_vulnerability",
+      "description": "If user input can influence the URL, absolute URLs bypass baseURL entirely. axios.get(userInput) with userInput='https://evil.com' ignores baseURL.",
+      "trigger_conditions": "User-controlled URL passed to axios with baseURL set",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "User input used directly as URL argument"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "large_response_body",
+      "description": "Very large JSON responses. axios parses JSON automatically, which is CPU-bound on main thread.",
+      "test_approach": "Fetch progressively larger JSON responses, measure parsing time and memory"
+    },
+    {
+      "name": "request_cancellation",
+      "description": "CancelToken (deprecated) vs AbortController. Cancellation timing can leave partial state.",
+      "test_approach": "Cancel requests at various stages, verify cleanup"
+    },
+    {
+      "name": "network_errors_vs_http_errors",
+      "description": "Network errors (no response) vs HTTP errors (4xx/5xx response). Different error shapes.",
+      "test_approach": "Trigger both error types, verify handling code distinguishes them"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["react", "vue", "express", "next"],
+    "known_conflicts": [
+      {
+        "dependency": "fetch",
+        "description": "Native fetch and axios serve same purpose. Mixing them adds bundle size and inconsistent error handling.",
+        "severity": "low"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["axios", "follow-redirects"],
+        "risk": "axios depends on follow-redirects for Node.js redirect handling. Security vulnerabilities in follow-redirects affect axios.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "concurrent_request_load",
+      "category": "concurrent_execution",
+      "description": "Increase concurrent requests to measure throughput",
+      "parameters": {
+        "concurrent": [10, 50, 100, 500],
+        "requests_per_batch": 50,
+        "timeout_ms": 30000,
+        "measure_latency": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Throughput scales until socket limit. With keep-alive, faster.",
+      "failure_indicators": ["timeout", "ECONNRESET", "socket_exhaustion", "memory > 500mb"]
+    },
+    {
+      "name": "large_response_memory",
+      "category": "data_volume_scaling",
+      "description": "Fetch large responses to test memory behavior",
+      "parameters": {
+        "response_sizes_mb": [0.1, 1, 10, 50, 100],
+        "measure_memory": true,
+        "measure_parse_time": true
+      },
+      "expected_behavior": "Memory proportional to response size. JSON parse blocks event loop for large payloads.",
+      "failure_indicators": ["MemoryError", "event_loop_blocked", "parse_timeout"]
+    },
+    {
+      "name": "timeout_behavior",
+      "category": "edge_case_input",
+      "description": "Test timeout handling with various server response patterns",
+      "parameters": {
+        "server_delays_ms": [0, 1000, 5000, 30000],
+        "timeout_configs_ms": [0, 5000, 10000],
+        "measure_behavior": true
+      },
+      "expected_behavior": "With timeout: error after specified duration. Without: hangs indefinitely.",
+      "failure_indicators": ["infinite_hang", "timeout_not_thrown", "resource_leak"]
+    },
+    {
+      "name": "interceptor_overhead",
+      "category": "data_volume_scaling",
+      "description": "Measure per-request overhead with increasing interceptor count",
+      "parameters": {
+        "interceptor_counts": [0, 5, 10, 50],
+        "requests": 1000,
+        "measure_latency": true
+      },
+      "expected_behavior": "Latency grows with interceptor count.",
+      "failure_indicators": ["latency > 1ms_per_interceptor", "interceptor_error_unhandled"]
+    }
+  ]
+}

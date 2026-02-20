@@ -1,0 +1,183 @@
+{
+  "identity": {
+    "name": "anthropic_node",
+    "npm_name": "@anthropic-ai/sdk",
+    "category": "ai_framework",
+    "description": "Official Node.js client for the Anthropic API — Claude chat with tool use, vision, and streaming",
+    "current_stable_version": "0.37.0",
+    "min_supported_version": "0.18.0",
+    "version_notes": {
+      "0.37.0": "Extended thinking support, improved streaming, token counting",
+      "0.25.0": "Tool use GA, streaming tool use, improved TypeScript types",
+      "0.18.0": "Messages API stable, migration from completions"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "HTTP client wrapping Anthropic REST API. Similar patterns to OpenAI Node SDK. Async/await based. Supports streaming. Rate limited per organization.",
+    "concurrency_model": "async_http",
+    "bottlenecks": [
+      {
+        "name": "api_latency",
+        "description": "Each call has 500ms-2s minimum latency. Claude with large context (200K tokens) can take 30-120s.",
+        "impact": "Sequential calls accumulate latency. Extended thinking adds more time."
+      },
+      {
+        "name": "rate_limiting",
+        "description": "Anthropic enforces rate limits per tier. Stricter at lower tiers than OpenAI.",
+        "impact": "429 errors on burst traffic. Must implement exponential backoff."
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "requests_per_minute",
+        "typical_limit": "50-4000",
+        "description": "Depends on API tier"
+      },
+      {
+        "metric": "tokens_per_minute",
+        "typical_limit": "40000-400000",
+        "description": "Depends on tier and model"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 10,
+    "growth_pattern": "Lightweight client. Same memory patterns as OpenAI Node SDK: conversation history growth, streaming chunks, response object retention.",
+    "known_leaks": [
+      {
+        "name": "streaming_not_consumed",
+        "description": "Starting a stream but not consuming all events. Connection and partial data retained.",
+        "trigger": "Breaking from streaming iteration early without abort",
+        "versions_affected": "all"
+      },
+      {
+        "name": "message_history_accumulation",
+        "description": "Building messages array for multi-turn conversations without trimming.",
+        "trigger": "Appending to messages array across many conversation turns",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. Connection pool cleaned up when client is garbage collected."
+  },
+  "known_failure_modes": [
+    {
+      "name": "message_format_errors",
+      "description": "Messages must alternate user/assistant roles. System message is a separate parameter. Common mistakes migrating from OpenAI SDK.",
+      "trigger_conditions": "System role in messages array, consecutive same-role messages",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Messages with role='system' in messages array instead of system parameter"
+    },
+    {
+      "name": "api_key_in_client_code",
+      "description": "API key included in browser-bundled code. Anthropic keys start with 'sk-ant-' making them identifiable.",
+      "trigger_conditions": "SDK used in client-side code or key in NEXT_PUBLIC_ env var",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "'sk-ant-' literal in source, or SDK imported in client-side files"
+    },
+    {
+      "name": "tool_use_response_loop",
+      "description": "Tool use requires sending tool results back. Missing tool result handling causes API errors or infinite loops.",
+      "trigger_conditions": "Tool use configured but tool_result messages not sent back",
+      "severity": "high",
+      "versions_affected": ">=0.25.0",
+      "detection_hint": "Tools configured without tool_result handling in conversation loop"
+    },
+    {
+      "name": "no_error_handling",
+      "description": "API calls without try/catch. Rate limit errors, auth failures, and server errors crash the process.",
+      "trigger_conditions": "Any API call without error handling",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "await anthropic.messages.create() without try/catch"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_content_blocks",
+      "description": "Messages with empty content arrays or empty text blocks.",
+      "test_approach": "Send messages with various empty/malformed content structures"
+    },
+    {
+      "name": "image_input_sizes",
+      "description": "Base64-encoded images in messages consume significant tokens and memory.",
+      "test_approach": "Send progressively larger images, monitor token usage and memory"
+    },
+    {
+      "name": "max_tokens_configuration",
+      "description": "max_tokens is required for Anthropic API. Not setting it causes errors (unlike OpenAI which has a default).",
+      "test_approach": "Verify max_tokens is always provided, test with various values"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["express", "next", "langchain", "zod", "dotenv"],
+    "known_conflicts": [
+      {
+        "dependency": "@langchain/anthropic",
+        "description": "LangChain.js Anthropic integration wraps this SDK. Version mismatches cause errors.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["@anthropic-ai/sdk", "node-fetch"],
+        "risk": "May require fetch polyfill on older Node.js versions (<18).",
+        "severity": "low"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "rate_limit_stress",
+      "category": "concurrent_execution",
+      "description": "Send increasing request rates to identify rate limiting thresholds",
+      "parameters": {
+        "requests_per_second": [1, 5, 10, 50],
+        "duration_seconds": 30,
+        "measure_errors": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Succeeds up to rate limit, then 429 errors.",
+      "failure_indicators": ["unhandled_429", "no_retry", "process_crash"]
+    },
+    {
+      "name": "streaming_reliability",
+      "category": "edge_case_input",
+      "description": "Test streaming under various conditions including early termination",
+      "parameters": {
+        "scenarios": ["normal", "early_abort", "concurrent_streams", "network_interruption"],
+        "concurrent_streams": [1, 5, 10],
+        "measure_memory": true
+      },
+      "expected_behavior": "Streams complete or fail cleanly. Resources released.",
+      "failure_indicators": ["memory_leak", "unclosed_connection", "partial_response_lost"]
+    },
+    {
+      "name": "conversation_growth",
+      "category": "data_volume_scaling",
+      "description": "Growing conversation history to test token and memory management",
+      "parameters": {
+        "turns": [10, 50, 100, 500],
+        "message_size_tokens": 200,
+        "measure_token_count": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Tokens grow linearly. 200K context allows very long conversations.",
+      "failure_indicators": ["context_overflow", "memory_unbounded", "cost_explosion"]
+    },
+    {
+      "name": "tool_use_cycles",
+      "category": "edge_case_input",
+      "description": "Test tool use conversation loops with various tool counts and complexities",
+      "parameters": {
+        "tool_counts": [1, 5, 10],
+        "max_tool_rounds": [1, 5, 10],
+        "measure_total_calls": true,
+        "measure_cost": true
+      },
+      "expected_behavior": "Tool rounds complete. Total API calls proportional to tool rounds.",
+      "failure_indicators": ["infinite_loop", "missing_tool_result", "cost > budget"]
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+{
+  "identity": {
+    "name": "langchainjs",
+    "npm_name": "langchain",
+    "category": "ai_framework",
+    "description": "JavaScript/TypeScript framework for building LLM applications — chains, agents, retrieval, and memory",
+    "current_stable_version": "0.3.9",
+    "min_supported_version": "0.2.0",
+    "version_notes": {
+      "0.3.0": "Integration packages split (same as Python), improved streaming, LCEL (LangChain Expression Language) stable",
+      "0.2.0": "Package split: @langchain/core, @langchain/community, @langchain/openai etc."
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Same architectural patterns as Python LangChain. Sequential chain execution, agent loops, context window management. Performance dominated by LLM API calls.",
+    "concurrency_model": "async_sequential",
+    "bottlenecks": [
+      {
+        "name": "sequential_chain_execution",
+        "description": "Chains execute steps sequentially. Each step waits for LLM response before proceeding.",
+        "impact": "Latency = sum of all chain step latencies"
+      },
+      {
+        "name": "agent_unbounded_loops",
+        "description": "Agents without maxIterations can loop indefinitely, consuming API calls.",
+        "impact": "Unbounded cost and latency per request"
+      },
+      {
+        "name": "context_stuffing",
+        "description": "Retrieval chains load documents into context. Token cost and latency grow with document count.",
+        "impact": "Cost proportional to retrieved context size"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "chain_steps",
+        "typical_limit": "3-10",
+        "description": "Practical limit before response time is unacceptable"
+      },
+      {
+        "metric": "agent_iterations",
+        "typical_limit": "5-15",
+        "description": "Agents should converge within 15 iterations"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 30,
+    "growth_pattern": "Moderate baseline. Memory from: conversation history in memory objects, retrieved documents in context, chain intermediates, and vector store data if in-process.",
+    "known_leaks": [
+      {
+        "name": "conversation_buffer_growth",
+        "description": "BufferMemory stores full conversation history. No auto-truncation.",
+        "trigger": "Long conversations without memory management strategy",
+        "versions_affected": "all"
+      },
+      {
+        "name": "callback_handler_accumulation",
+        "description": "Custom callbacks that store data accumulate across chain invocations.",
+        "trigger": "Callback handlers appending to arrays without size limits",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. Chain objects persist while referenced. Large context windows held in memory during processing."
+  },
+  "known_failure_modes": [
+    {
+      "name": "package_split_imports",
+      "description": "LangChain.js 0.2+ split into @langchain/core, @langchain/community, @langchain/openai. Old imports break.",
+      "trigger_conditions": "Code using langchain 0.1.x import paths with 0.2+ installed",
+      "severity": "critical",
+      "versions_affected": ">=0.2.0",
+      "detection_hint": "Imports from 'langchain/llms', 'langchain/chat_models' instead of '@langchain/openai'"
+    },
+    {
+      "name": "agent_infinite_loop",
+      "description": "Agents without maxIterations loop indefinitely on ambiguous tasks.",
+      "trigger_conditions": "AgentExecutor without maxIterations configuration",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "AgentExecutor.fromAgentAndTools without maxIterations"
+    },
+    {
+      "name": "api_key_in_bundle",
+      "description": "LangChain.js used in client-side code with API keys. Keys visible in browser bundle.",
+      "trigger_conditions": "LangChain imported in client-side code with direct API key configuration",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "LangChain imports in client-side files, API keys in client-accessible code"
+    },
+    {
+      "name": "typescript_type_mismatches",
+      "description": "Different @langchain/* packages export similar but incompatible types. Type errors when passing objects between packages.",
+      "trigger_conditions": "Mixing types from different @langchain packages",
+      "severity": "medium",
+      "versions_affected": ">=0.2.0",
+      "detection_hint": "TypeScript errors about incompatible types from different @langchain packages"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_retrieval",
+      "description": "Vector store returns no results. Chain may produce hallucinated answers.",
+      "test_approach": "Query retrieval chains with out-of-domain topics"
+    },
+    {
+      "name": "api_rate_limiting",
+      "description": "Concurrent chains hitting LLM rate limits.",
+      "test_approach": "Run concurrent chains, increasing rate until limit hit"
+    },
+    {
+      "name": "output_parser_failures",
+      "description": "LLM returns unexpected format. Output parsers throw, breaking chain.",
+      "test_approach": "Test chains with malformed LLM responses"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["openai", "@anthropic-ai/sdk", "chromadb", "pinecone", "zod"],
+    "known_conflicts": [
+      {
+        "dependency": "openai",
+        "description": "Version mismatch between @langchain/openai and openai SDK causes method-not-found errors.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["langchain", "@langchain/core", "@langchain/openai"],
+        "risk": "All @langchain packages must be version-compatible. Mixed versions cause import errors.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "chain_execution_scaling",
+      "category": "data_volume_scaling",
+      "description": "Execute chains with increasing steps to measure latency and cost",
+      "parameters": {
+        "chain_steps": [1, 3, 5, 10],
+        "measure_latency": true,
+        "measure_token_count": true
+      },
+      "expected_behavior": "Latency and cost linear with chain steps.",
+      "failure_indicators": ["timeout", "token_overflow", "cost > budget"]
+    },
+    {
+      "name": "agent_iteration_stress",
+      "category": "edge_case_input",
+      "description": "Test agent behavior with ambiguous tasks and various iteration limits",
+      "parameters": {
+        "max_iterations": [5, 10, 25, null],
+        "task_complexity": ["clear", "ambiguous"],
+        "measure_iterations": true,
+        "measure_cost": true
+      },
+      "expected_behavior": "Agent converges or hits limit. Without limit, may loop.",
+      "failure_indicators": ["infinite_loop", "no_max_iterations", "cost > 10x_expected"]
+    },
+    {
+      "name": "memory_growth_profiling",
+      "category": "memory_profiling",
+      "description": "Extended conversation to test memory growth patterns",
+      "parameters": {
+        "turns": [10, 50, 100, 500],
+        "memory_type": ["buffer", "window", "summary"],
+        "measure_memory": true,
+        "measure_tokens": true
+      },
+      "expected_behavior": "Buffer: linear growth. Window: constant. Summary: slow growth.",
+      "failure_indicators": ["memory_unbounded", "token_overflow", "MemoryError"]
+    },
+    {
+      "name": "concurrent_chains",
+      "category": "concurrent_execution",
+      "description": "Concurrent chain execution to test rate limiting and resources",
+      "parameters": {
+        "concurrent": [2, 5, 10, 25],
+        "timeout_seconds": 120
+      },
+      "expected_behavior": "Throughput limited by API rate limits.",
+      "failure_indicators": ["rate_limit_unhandled", "timeout", "memory_spike"]
+    }
+  ]
+}

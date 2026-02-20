@@ -1,0 +1,227 @@
+{
+  "identity": {
+    "name": "socketio",
+    "npm_name": "socket.io",
+    "category": "realtime",
+    "description": "Bidirectional real-time event-based communication library using WebSocket with fallback to HTTP long-polling",
+    "current_stable_version": "4.8.1",
+    "min_supported_version": "4.0.0",
+    "version_notes": {
+      "4.8.0": "Connection state recovery improvements, improved middleware support",
+      "4.0.0": "New middleware API, namespace middleware, improved reconnection, breaking changes from 3.x"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Event-driven WebSocket server/client. Each connected client maintains a persistent WebSocket connection. Memory and CPU scale with connected clients. Broadcasting to many clients is I/O-bound.",
+    "concurrency_model": "event_loop_persistent_connections",
+    "bottlenecks": [
+      {
+        "name": "per_connection_memory",
+        "description": "Each connected client consumes memory for: WebSocket state, event listeners, rooms, buffer, and namespace data.",
+        "impact": "Memory grows linearly with connected clients. 10K connections = ~500MB+ depending on event data."
+      },
+      {
+        "name": "broadcast_scaling",
+        "description": "Broadcasting to all clients is O(n). Each client gets an individual write operation. Large room broadcasts are slow.",
+        "impact": "Broadcast time proportional to client count. CPU bound for message serialization."
+      },
+      {
+        "name": "single_node_limit",
+        "description": "Socket.IO on a single Node.js process. No built-in multi-server scaling. Requires Redis adapter for multi-server.",
+        "impact": "Single server limited by OS connection limits and event loop capacity"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_connections",
+        "typical_limit": "1000-50000",
+        "description": "Depends on message rate and server memory. Idle connections cost less."
+      },
+      {
+        "metric": "messages_per_second",
+        "typical_limit": "10000-100000",
+        "description": "Depends on message size and broadcast vs unicast"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 15,
+    "growth_pattern": "Memory grows linearly with connected clients. Each client: ~50-100KB for connection state, buffers, and rooms. Message buffers for disconnected clients accumulate if connection recovery is enabled.",
+    "known_leaks": [
+      {
+        "name": "event_listener_accumulation",
+        "description": "Adding event listeners on socket objects without removing them. Common when registering handlers inside connection callback.",
+        "trigger": "socket.on('event', handler) without socket.off() or socket.removeAllListeners()",
+        "versions_affected": "all"
+      },
+      {
+        "name": "room_membership_not_cleaned",
+        "description": "Joining rooms without leaving. Socket auto-leaves on disconnect, but custom rooms joined in event handlers may accumulate during connection lifetime.",
+        "trigger": "socket.join(room) in event handler without corresponding socket.leave()",
+        "versions_affected": "all"
+      },
+      {
+        "name": "disconnected_client_buffers",
+        "description": "Messages buffered for clients during temporary disconnection. If client never reconnects, buffer persists.",
+        "trigger": "Connection state recovery enabled with clients that disconnect permanently",
+        "versions_affected": ">=4.6.0"
+      }
+    ],
+    "gc_behavior": "V8 GC. Socket objects cleaned up on disconnect. Room data structures managed by Socket.IO adapter."
+  },
+  "known_failure_modes": [
+    {
+      "name": "cors_not_configured",
+      "description": "Socket.IO server rejects cross-origin connections by default. Client connects from different origin and silently fails.",
+      "trigger_conditions": "Client on different origin/port than server without CORS configuration",
+      "severity": "high",
+      "versions_affected": ">=3.0.0",
+      "detection_hint": "new Server(httpServer) without cors option, client on different origin"
+    },
+    {
+      "name": "client_server_version_mismatch",
+      "description": "Socket.IO client and server must use compatible versions. v2 client can't connect to v4 server. Connection silently fails or falls back to polling.",
+      "trigger_conditions": "socket.io-client and socket.io major version mismatch",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Different major versions of socket.io and socket.io-client in package.json"
+    },
+    {
+      "name": "event_handler_errors_swallowed",
+      "description": "Errors thrown in event handlers are silently swallowed. No default error propagation or logging.",
+      "trigger_conditions": "Throwing in socket.on('event', handler) without try/catch",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Event handlers without try/catch blocks"
+    },
+    {
+      "name": "namespace_mismatch",
+      "description": "Client connecting to a namespace that doesn't exist on the server. Connection succeeds but events are never received.",
+      "trigger_conditions": "Client io('/namespace') when server doesn't have io.of('/namespace')",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Client connects to namespace path not defined on server"
+    },
+    {
+      "name": "reconnection_storm",
+      "description": "Many clients reconnecting simultaneously after server restart. All send buffered events at once, overwhelming the server.",
+      "trigger_conditions": "Server restart with many connected clients that have autoConnect and reconnection enabled",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Many clients with default reconnection settings, no connection jitter"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "large_message_payloads",
+      "description": "Sending very large objects or binary data through events. Default maxHttpBufferSize is 1MB.",
+      "test_approach": "Send progressively larger payloads, verify limit enforcement"
+    },
+    {
+      "name": "rapid_event_emission",
+      "description": "Emitting many events in rapid succession. Buffer fills, backpressure not obvious.",
+      "test_approach": "Emit events at increasing rates, monitor memory and delivery"
+    },
+    {
+      "name": "connection_during_server_startup",
+      "description": "Clients connecting before server is fully initialized. Event handlers may not be registered yet.",
+      "test_approach": "Connect clients during server startup sequence, verify event handling"
+    },
+    {
+      "name": "binary_data_handling",
+      "description": "Sending Buffer, ArrayBuffer, Blob objects. Binary encoding path differs from JSON.",
+      "test_approach": "Send various binary data types, verify round-trip integrity"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["express", "redis", "next", "react"],
+    "known_conflicts": [
+      {
+        "dependency": "ws",
+        "description": "Socket.IO uses ws package internally. Installing ws directly alongside may cause version conflicts.",
+        "severity": "low"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["socket.io", "engine.io", "ws"],
+        "risk": "Socket.IO depends on engine.io (transport layer) which depends on ws (WebSocket implementation). Version chain must be compatible.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["socket.io", "@socket.io/redis-adapter"],
+        "risk": "Multi-server scaling requires Redis adapter. Adapter version must match Socket.IO version.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "connection_scaling",
+      "category": "concurrent_execution",
+      "description": "Increase concurrent WebSocket connections to test memory and CPU scaling",
+      "parameters": {
+        "connection_counts": [10, 100, 1000, 5000, 10000],
+        "messages_per_second_per_client": 1,
+        "measure_memory": true,
+        "measure_event_loop_lag": true
+      },
+      "expected_behavior": "Memory grows linearly per connection. Event loop lag increases at high connection counts.",
+      "failure_indicators": ["memory > 100mb_per_1000_connections", "event_loop_lag > 100ms", "connection_refused"]
+    },
+    {
+      "name": "broadcast_scaling",
+      "category": "data_volume_scaling",
+      "description": "Broadcast messages to increasing numbers of clients",
+      "parameters": {
+        "client_counts": [10, 100, 1000, 5000],
+        "message_sizes_bytes": [100, 1000, 10000],
+        "broadcasts_per_second": [1, 10, 60],
+        "measure_delivery_time": true
+      },
+      "expected_behavior": "Broadcast time proportional to client count * message size.",
+      "failure_indicators": ["delivery_time > 1s", "messages_dropped", "event_loop_blocked"]
+    },
+    {
+      "name": "event_listener_memory",
+      "category": "memory_profiling",
+      "description": "Connect and disconnect clients repeatedly to detect listener leaks",
+      "parameters": {
+        "cycles": [100, 1000, 5000],
+        "listeners_per_connection": 5,
+        "measure_memory": true,
+        "measure_listener_count": true
+      },
+      "expected_behavior": "Memory returns to baseline after disconnection. No listener accumulation.",
+      "failure_indicators": ["memory_growth_per_cycle", "listener_count_growing", "MaxListenersExceeded"]
+    },
+    {
+      "name": "reconnection_storm",
+      "category": "concurrent_execution",
+      "description": "Simulate server restart with many connected clients reconnecting simultaneously",
+      "parameters": {
+        "client_counts": [10, 100, 500, 1000],
+        "buffered_messages_per_client": [0, 5, 20],
+        "measure_reconnection_time": true,
+        "measure_server_load": true
+      },
+      "expected_behavior": "Clients reconnect with jitter. Server handles burst without crashing.",
+      "failure_indicators": ["server_crash", "message_loss", "reconnection_failure > 5%", "event_loop_blocked"]
+    },
+    {
+      "name": "message_throughput",
+      "category": "data_volume_scaling",
+      "description": "Increase message rate per client to find throughput limits",
+      "parameters": {
+        "clients": 100,
+        "messages_per_second": [10, 100, 1000, 5000],
+        "message_size_bytes": 100,
+        "duration_seconds": 30,
+        "measure_throughput": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Throughput scales until event loop or network saturated.",
+      "failure_indicators": ["message_loss", "latency > 100ms", "event_loop_lag > 50ms", "buffer_overflow"]
+    }
+  ]
+}

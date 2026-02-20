@@ -72,6 +72,11 @@ class DependencyProfile:
         return self.identity.get("pypi_name")
 
     @property
+    def npm_name(self) -> Optional[str]:
+        """npm package name, or None for non-JS modules."""
+        return self.identity.get("npm_name")
+
+    @property
     def category(self) -> str:
         """Profile category (e.g. 'web_framework', 'database')."""
         return self.identity["category"]
@@ -217,7 +222,7 @@ class ComponentLibrary:
                 continue
 
             # Normalize common package name variants
-            lookup_name = _normalize_dep_name(dep_name)
+            lookup_name = _normalize_dep_name(dep_name, language.lower())
 
             if lookup_name in available:
                 try:
@@ -321,18 +326,34 @@ class ComponentLibrary:
 # ── Helpers ──
 
 
-def _normalize_dep_name(name: str) -> str:
+def _normalize_dep_name(name: str, language: str = "python") -> str:
     """Normalize a dependency name for profile lookup.
 
     Handles common variations:
-    - PyPI names use hyphens, profile names use underscores or bare names
+    - PyPI/npm names use hyphens, profile names use underscores or bare names
     - Case insensitive
-    - Common aliases (e.g. 'beautifulsoup4' -> 'beautifulsoup4')
+    - Language-specific aliases (Python vs JavaScript)
+    - Scoped npm packages (@org/pkg)
     """
-    normalized = name.lower().replace("-", "_").replace(".", "_")
+    normalized = name.lower().strip()
 
-    # Map common PyPI names to profile file names
-    aliases = {
+    # Handle scoped npm packages before general normalization
+    # e.g. "@anthropic-ai/sdk" → "anthropic_node"
+    scoped_aliases = {
+        "@anthropic-ai/sdk": "anthropic_node",
+        "@supabase/supabase-js": "supabase_js",
+        "@prisma/client": "prisma",
+        "@langchain/core": "langchainjs",
+        "@langchain/community": "langchainjs",
+        "@langchain/openai": "langchainjs",
+    }
+    if normalized in scoped_aliases:
+        return scoped_aliases[normalized]
+
+    normalized = normalized.replace("-", "_").replace(".", "_")
+
+    # Language-specific alias maps
+    _PYTHON_ALIASES = {
         "flask": "flask",
         "fastapi": "fastapi",
         "streamlit": "streamlit",
@@ -360,6 +381,43 @@ def _normalize_dep_name(name: str) -> str:
         "httpx": "httpx",
     }
 
+    _JAVASCRIPT_ALIASES = {
+        "react": "react",
+        "react_dom": "react",
+        "next": "nextjs",
+        "express": "express",
+        "fs": "node_core",
+        "path": "node_core",
+        "http": "node_core",
+        "https": "node_core",
+        "url": "node_core",
+        "crypto": "node_core",
+        "child_process": "node_core",
+        "os": "node_core",
+        "util": "node_core",
+        "tailwindcss": "tailwindcss",
+        "three": "threejs",
+        "svelte": "svelte",
+        "openai": "openai_node",
+        "anthropic": "anthropic_node",
+        "langchain": "langchainjs",
+        "langchain_core": "langchainjs",
+        "langchain_community": "langchainjs",
+        "supabase_js": "supabase_js",
+        "prisma": "prisma",
+        "axios": "axios",
+        "node_fetch": "axios",
+        "mongoose": "mongoose",
+        "mongodb": "mongoose",
+        "stripe": "stripe",
+        "dotenv": "dotenv",
+        "zod": "zod",
+        "socket_io": "socketio",
+        "socket_io_client": "socketio",
+        "socketio": "socketio",
+    }
+
+    aliases = _JAVASCRIPT_ALIASES if language == "javascript" else _PYTHON_ALIASES
     return aliases.get(normalized, normalized)
 
 

@@ -1,0 +1,221 @@
+{
+  "identity": {
+    "name": "node_core",
+    "npm_name": null,
+    "category": "runtime",
+    "description": "Node.js core modules (fs, path, http, crypto, child_process) — file system, networking, and OS interaction",
+    "current_stable_version": "stdlib",
+    "min_supported_version": "stdlib",
+    "version_notes": {
+      "node_22": "Built-in WebSocket client, stable watch mode, require() for ESM",
+      "node_20": "Stable test runner, permission model, single executable apps",
+      "node_18": "Built-in fetch, test runner experimental, watch mode experimental"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Single-threaded event loop for I/O. Worker threads for CPU-bound tasks. libuv thread pool (default 4 threads) handles file system and DNS operations. All async I/O is non-blocking through the event loop.",
+    "concurrency_model": "event_loop_with_thread_pool",
+    "bottlenecks": [
+      {
+        "name": "sync_api_usage",
+        "description": "fs.readFileSync, crypto.randomBytes(sync), and other sync APIs block the event loop entirely.",
+        "impact": "All concurrent requests and timers freeze during sync operation"
+      },
+      {
+        "name": "libuv_thread_pool_saturation",
+        "description": "File system operations use libuv thread pool (default 4 threads). Many concurrent file operations queue up.",
+        "impact": "File I/O latency grows when all 4 threads are busy. DNS lookups also use the pool."
+      },
+      {
+        "name": "event_loop_blocking_computation",
+        "description": "CPU-intensive work (JSON.parse of large objects, crypto, regex on long strings) blocks the event loop.",
+        "impact": "All I/O callbacks delayed until CPU-bound work completes"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_connections_http",
+        "typical_limit": "10000-100000",
+        "description": "Node.js can handle many concurrent connections for I/O-bound workloads."
+      },
+      {
+        "metric": "file_descriptors",
+        "typical_limit": "1024-65536",
+        "description": "OS limit on open file descriptors. Default 1024 on many Linux systems."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 25,
+    "growth_pattern": "V8 heap grows with active objects. Buffer pool for binary data. Stream backpressure prevents memory explosion for well-implemented streams. File content loaded via readFile() held in Buffer memory.",
+    "known_leaks": [
+      {
+        "name": "event_listener_accumulation",
+        "description": "Adding event listeners without removing them. Node.js warns at 11 listeners (MaxListenersExceededWarning) but doesn't prevent it.",
+        "trigger": "Repeatedly calling .on() or .addListener() without .removeListener()",
+        "versions_affected": "all"
+      },
+      {
+        "name": "stream_backpressure_ignored",
+        "description": "Writing to writable streams without handling backpressure. Data buffers in memory when write speed exceeds drain speed.",
+        "trigger": "write() returning false and continuing to write without waiting for 'drain'",
+        "versions_affected": "all"
+      },
+      {
+        "name": "unclosed_resources",
+        "description": "File handles, sockets, and child processes not closed. Resource accumulation until process limit.",
+        "trigger": "fs.open without close, or createServer connections without destroy",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 generational GC. Young generation collected frequently. Old generation collected less often. Buffers allocated outside V8 heap (off-heap). Large Buffers may cause RSS growth even when heap is stable."
+  },
+  "known_failure_modes": [
+    {
+      "name": "callback_error_unhandled",
+      "description": "Errors in callbacks not propagated. Node.js callback convention (err, result) requires checking err. Vibe-coded apps ignore the error parameter.",
+      "trigger_conditions": "Any async operation that passes error to callback",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "Callback functions that don't check the err parameter"
+    },
+    {
+      "name": "unhandled_promise_rejection",
+      "description": "Promise rejections without .catch(). Node.js 15+ terminates the process on unhandled rejections by default.",
+      "trigger_conditions": "Any async/await without try/catch, or promise without .catch()",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "Promises without .catch(), async functions without try/catch"
+    },
+    {
+      "name": "path_traversal",
+      "description": "Constructing file paths from user input. path.join('/safe', userInput) with '../' allows escaping the intended directory.",
+      "trigger_conditions": "User-controlled input in fs operations without path.resolve() and boundary checking",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "path.join or fs operations with user-controlled path segments"
+    },
+    {
+      "name": "child_process_injection",
+      "description": "exec() with string concatenation allows command injection. execFile() is safer but less commonly used.",
+      "trigger_conditions": "child_process.exec() with user input in command string",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "exec() with template literals or string concatenation involving user input"
+    },
+    {
+      "name": "esm_cjs_interop_issues",
+      "description": "Mixing CommonJS (require) and ES Modules (import). Default exports, named exports, and dynamic import() behave differently across module systems.",
+      "trigger_conditions": "require() of ESM module, or import of CJS module with complex exports",
+      "severity": "medium",
+      "versions_affected": ">=12.0.0",
+      "detection_hint": "Mix of require() and import in the same project, .mjs/.cjs file extensions"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_file_operations",
+      "description": "Reading empty files, writing empty strings, stat on non-existent files. Error handling varies by API.",
+      "test_approach": "Perform all detected file operations with empty inputs and non-existent paths"
+    },
+    {
+      "name": "binary_vs_text_encoding",
+      "description": "fs.readFile without encoding returns Buffer. With encoding returns string. Mixing causes type errors downstream.",
+      "test_approach": "Read files with and without encoding parameter, verify downstream handling"
+    },
+    {
+      "name": "concurrent_file_writes",
+      "description": "Multiple concurrent writes to the same file. No built-in file locking. Data may interleave or corrupt.",
+      "test_approach": "Concurrent writes to same file, verify final content integrity"
+    },
+    {
+      "name": "very_large_buffers",
+      "description": "Creating Buffers larger than V8 max string size or available memory.",
+      "test_approach": "Allocate progressively larger Buffers, monitor memory and error handling"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["express", "dotenv", "path", "url", "crypto"],
+    "known_conflicts": [
+      {
+        "dependency": "esm_loaders",
+        "description": "Custom ESM loaders can interfere with native module loading. Multiple loaders may conflict.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["node", "libuv", "openssl"],
+        "risk": "Node.js bundles OpenSSL and libuv. Security updates to these require Node.js version updates.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "file_io_scaling",
+      "category": "data_volume_scaling",
+      "description": "Read and write files of increasing size using various APIs (sync, async, stream)",
+      "parameters": {
+        "file_sizes_mb": [0.01, 0.1, 1, 10, 100],
+        "apis": ["readFile", "readFileSync", "createReadStream"],
+        "measure_memory": true,
+        "measure_time": true,
+        "measure_event_loop_lag": true
+      },
+      "expected_behavior": "Streams: constant memory. readFile: memory = file size. Sync: blocks event loop.",
+      "failure_indicators": ["event_loop_blocked", "MemoryError", "memory > 2x_file_size"]
+    },
+    {
+      "name": "event_listener_accumulation",
+      "category": "memory_profiling",
+      "description": "Add and remove event listeners to detect accumulation",
+      "parameters": {
+        "cycles": [100, 1000, 10000],
+        "listeners_per_cycle": 5,
+        "with_removal": [true, false],
+        "measure_listener_count": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "With removal: count stable. Without: count and memory grow. Warning at 11.",
+      "failure_indicators": ["listener_count_growing", "MaxListenersExceeded", "memory_growth"]
+    },
+    {
+      "name": "concurrent_http_connections",
+      "category": "concurrent_execution",
+      "description": "Increase concurrent HTTP connections to test event loop scalability",
+      "parameters": {
+        "concurrent_connections": [10, 100, 1000, 5000, 10000],
+        "request_duration_ms": 100,
+        "measure_latency": true,
+        "measure_event_loop_lag": true
+      },
+      "expected_behavior": "Handles thousands of I/O-bound connections. Latency stable until saturation.",
+      "failure_indicators": ["event_loop_lag > 100ms", "EMFILE", "timeout", "connection_reset"]
+    },
+    {
+      "name": "stream_backpressure",
+      "category": "memory_profiling",
+      "description": "Test stream piping with slow consumers to verify backpressure handling",
+      "parameters": {
+        "producer_rate_mbps": [1, 10, 100],
+        "consumer_rate_mbps": [0.1, 1, 10],
+        "duration_seconds": 30,
+        "measure_memory": true
+      },
+      "expected_behavior": "With proper backpressure: memory stays bounded. Without: memory grows until OOM.",
+      "failure_indicators": ["memory_growth_unbounded", "MemoryError", "stream_error"]
+    },
+    {
+      "name": "error_handling_resilience",
+      "category": "edge_case_input",
+      "description": "Test handling of various error conditions in core APIs",
+      "parameters": {
+        "scenarios": ["ENOENT", "EACCES", "EMFILE", "ECONNREFUSED", "EPIPE"],
+        "with_error_handling": [true, false]
+      },
+      "expected_behavior": "Errors should be caught and handled. Unhandled errors should not crash silently.",
+      "failure_indicators": ["process_exit", "silent_failure", "resource_leak", "unhandled_rejection"]
+    }
+  ]
+}

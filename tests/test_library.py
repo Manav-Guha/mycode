@@ -407,35 +407,82 @@ class TestMatchDependencies:
 class TestNormalizeName:
     """Tests for dependency name normalization."""
 
+    # -- Python aliases --
+
     def test_lowercase(self):
-        assert _normalize_dep_name("Flask") == "flask"
+        assert _normalize_dep_name("Flask", "python") == "flask"
 
     def test_hyphen_to_underscore(self):
-        assert _normalize_dep_name("supabase-py") == "supabase"
+        assert _normalize_dep_name("supabase-py", "python") == "supabase"
 
     def test_dot_to_underscore(self):
-        assert _normalize_dep_name("some.pkg") == "some_pkg"
+        assert _normalize_dep_name("some.pkg", "python") == "some_pkg"
 
     def test_known_alias_supabase(self):
-        assert _normalize_dep_name("supabase_py") == "supabase"
+        assert _normalize_dep_name("supabase_py", "python") == "supabase"
 
     def test_known_alias_llama_index(self):
-        assert _normalize_dep_name("llama-index") == "llamaindex"
-        assert _normalize_dep_name("llama_index_core") == "llamaindex"
+        assert _normalize_dep_name("llama-index", "python") == "llamaindex"
+        assert _normalize_dep_name("llama_index_core", "python") == "llamaindex"
 
     def test_known_alias_langchain(self):
-        assert _normalize_dep_name("langchain-core") == "langchain"
-        assert _normalize_dep_name("langchain-community") == "langchain"
+        assert _normalize_dep_name("langchain-core", "python") == "langchain"
+        assert _normalize_dep_name("langchain-community", "python") == "langchain"
 
     def test_known_alias_os_pathlib(self):
-        assert _normalize_dep_name("os") == "os_pathlib"
-        assert _normalize_dep_name("pathlib") == "os_pathlib"
+        assert _normalize_dep_name("os", "python") == "os_pathlib"
+        assert _normalize_dep_name("pathlib", "python") == "os_pathlib"
 
     def test_known_alias_pydantic_core(self):
-        assert _normalize_dep_name("pydantic-core") == "pydantic"
+        assert _normalize_dep_name("pydantic-core", "python") == "pydantic"
 
     def test_unknown_passthrough(self):
-        assert _normalize_dep_name("my-custom-lib") == "my_custom_lib"
+        assert _normalize_dep_name("my-custom-lib", "python") == "my_custom_lib"
+
+    # -- JavaScript aliases --
+
+    def test_js_next_to_nextjs(self):
+        assert _normalize_dep_name("next", "javascript") == "nextjs"
+
+    def test_js_three_to_threejs(self):
+        assert _normalize_dep_name("three", "javascript") == "threejs"
+
+    def test_js_openai_to_openai_node(self):
+        assert _normalize_dep_name("openai", "javascript") == "openai_node"
+
+    def test_js_anthropic_scoped(self):
+        assert _normalize_dep_name("@anthropic-ai/sdk", "javascript") == "anthropic_node"
+
+    def test_js_supabase_scoped(self):
+        assert _normalize_dep_name("@supabase/supabase-js", "javascript") == "supabase_js"
+
+    def test_js_prisma_scoped(self):
+        assert _normalize_dep_name("@prisma/client", "javascript") == "prisma"
+
+    def test_js_langchain_scoped(self):
+        assert _normalize_dep_name("@langchain/core", "javascript") == "langchainjs"
+        assert _normalize_dep_name("@langchain/community", "javascript") == "langchainjs"
+
+    def test_js_socket_io(self):
+        assert _normalize_dep_name("socket.io", "javascript") == "socketio"
+        assert _normalize_dep_name("socket.io-client", "javascript") == "socketio"
+
+    def test_js_node_core_modules(self):
+        for mod in ("fs", "path", "http", "https", "crypto", "child_process"):
+            assert _normalize_dep_name(mod, "javascript") == "node_core"
+
+    def test_js_react_dom_alias(self):
+        assert _normalize_dep_name("react-dom", "javascript") == "react"
+
+    def test_js_node_fetch_to_axios(self):
+        assert _normalize_dep_name("node-fetch", "javascript") == "axios"
+
+    def test_js_mongodb_to_mongoose(self):
+        assert _normalize_dep_name("mongodb", "javascript") == "mongoose"
+
+    def test_js_default_language_is_python(self):
+        """Without explicit language, should use Python aliases."""
+        assert _normalize_dep_name("os") == "os_pathlib"
 
 
 # ── Tests: Version Checking ──
@@ -630,3 +677,154 @@ class TestRealProfiles:
         for m in matches:
             assert m.profile is not None, f"{m.dependency_name} should resolve"
             assert m.profile.name == "os_pathlib"
+
+
+# ── Tests: Real JavaScript Profiles ──
+
+
+class TestRealJavaScriptProfiles:
+    """Integration tests that load the actual shipped JavaScript profiles."""
+
+    REAL_PROFILES_ROOT = Path(__file__).resolve().parent.parent / "profiles"
+
+    @pytest.fixture
+    def real_library(self):
+        return ComponentLibrary(profiles_root=self.REAL_PROFILES_ROOT)
+
+    def test_all_js_profiles_load(self, real_library):
+        """Every JSON file in profiles/javascript/ should load without errors."""
+        profiles = real_library.load_all("javascript")
+        assert len(profiles) >= 18  # All 18 JavaScript profiles
+
+    def test_all_js_profiles_have_required_sections(self, real_library):
+        """Every loaded JS profile must have all required sections populated."""
+        for name, profile in real_library.load_all("javascript").items():
+            assert profile.identity, f"{name}: empty identity"
+            assert profile.name, f"{name}: empty name"
+            assert profile.category, f"{name}: empty category"
+            assert profile.current_stable_version, f"{name}: empty version"
+            assert isinstance(profile.scaling_characteristics, dict), f"{name}: scaling not dict"
+            assert isinstance(profile.memory_behavior, dict), f"{name}: memory not dict"
+            assert isinstance(profile.known_failure_modes, list), f"{name}: failure modes not list"
+            assert len(profile.known_failure_modes) > 0, f"{name}: no failure modes"
+            assert isinstance(profile.edge_case_sensitivities, list), f"{name}: edge cases not list"
+            assert len(profile.edge_case_sensitivities) > 0, f"{name}: no edge cases"
+            assert isinstance(profile.interaction_patterns, dict), f"{name}: interactions not dict"
+            assert isinstance(profile.stress_test_templates, list), f"{name}: templates not list"
+            assert len(profile.stress_test_templates) > 0, f"{name}: no stress test templates"
+
+    def test_js_stress_templates_have_required_fields(self, real_library):
+        """Every stress test template must have name, category, description, parameters."""
+        required = {"name", "category", "description", "parameters", "expected_behavior", "failure_indicators"}
+        for name, profile in real_library.load_all("javascript").items():
+            for i, template in enumerate(profile.stress_test_templates):
+                missing = required - set(template.keys())
+                assert not missing, (
+                    f"{name} template[{i}] ({template.get('name', '?')}) "
+                    f"missing: {missing}"
+                )
+
+    def test_js_failure_modes_have_required_fields(self, real_library):
+        """Every failure mode must have name, description, severity."""
+        required = {"name", "description", "trigger_conditions", "severity", "versions_affected"}
+        for name, profile in real_library.load_all("javascript").items():
+            for i, mode in enumerate(profile.known_failure_modes):
+                missing = required - set(mode.keys())
+                assert not missing, (
+                    f"{name} failure_mode[{i}] ({mode.get('name', '?')}) "
+                    f"missing: {missing}"
+                )
+
+    def test_expected_js_profiles_present(self, real_library):
+        """All 18 specified JavaScript profiles should be present."""
+        expected = {
+            "react", "nextjs", "express", "node_core",
+            "tailwindcss", "threejs", "svelte",
+            "openai_node", "anthropic_node", "langchainjs",
+            "supabase_js", "prisma", "axios",
+            "mongoose", "stripe", "dotenv", "zod", "socketio",
+        }
+        available = set(real_library.list_profiles("javascript"))
+        missing = expected - available
+        assert not missing, f"Missing JS profiles: {missing}"
+
+    def test_js_profiles_have_npm_name(self, real_library):
+        """All JS profiles should have npm_name in identity."""
+        for name, profile in real_library.load_all("javascript").items():
+            if name != "node_core":  # node_core is stdlib, no npm_name
+                assert profile.npm_name is not None, f"{name}: missing npm_name"
+
+    def test_js_profile_categories_reasonable(self, real_library):
+        """Each JS profile should have a meaningful category."""
+        valid_categories = {
+            "ui_framework", "web_framework", "server_framework",
+            "runtime_core", "runtime", "css_framework", "3d_graphics", "graphics",
+            "ai_sdk", "ai_framework", "backend_service",
+            "orm", "http_client", "database",
+            "payment", "configuration", "validation", "realtime",
+        }
+        for name, profile in real_library.load_all("javascript").items():
+            assert profile.category in valid_categories, (
+                f"{name} has unexpected category: {profile.category}"
+            )
+
+    def test_js_match_against_sample_project(self, real_library):
+        """Simulate matching a typical Next.js project's dependencies."""
+        project_deps = [
+            {"name": "next", "installed_version": "15.1.0"},
+            {"name": "react", "installed_version": "19.0.0"},
+            {"name": "@prisma/client", "installed_version": "6.2.0"},
+            {"name": "zod", "installed_version": "3.24.1"},
+            {"name": "stripe", "installed_version": "17.5.0"},
+            {"name": "tailwindcss", "installed_version": "4.0.0"},
+            {"name": "some-unknown-lib"},
+        ]
+        matches = real_library.match_dependencies("javascript", project_deps)
+        assert len(matches) == 7
+
+        recognized = real_library.get_recognized(matches)
+        unrecognized = real_library.get_unrecognized(matches)
+
+        assert len(recognized) == 6  # next, react, prisma, zod, stripe, tailwindcss
+        assert unrecognized == ["some-unknown-lib"]
+
+    def test_js_alias_resolution_scoped_packages(self, real_library):
+        """Scoped npm packages should resolve to correct profiles."""
+        deps = [
+            {"name": "@anthropic-ai/sdk"},
+            {"name": "@supabase/supabase-js"},
+            {"name": "@prisma/client"},
+            {"name": "@langchain/core"},
+        ]
+        matches = real_library.match_dependencies("javascript", deps)
+        expected_names = ["anthropic_node", "supabase_js", "prisma", "langchainjs"]
+        for m, expected in zip(matches, expected_names):
+            assert m.profile is not None, f"{m.dependency_name} should resolve"
+            assert m.profile.name == expected, (
+                f"{m.dependency_name} should resolve to {expected}, got {m.profile.name}"
+            )
+
+    def test_js_alias_resolution_node_core_modules(self, real_library):
+        """Node.js core modules should resolve to node_core profile."""
+        deps = [{"name": "fs"}, {"name": "path"}, {"name": "http"}, {"name": "crypto"}]
+        matches = real_library.match_dependencies("javascript", deps)
+        for m in matches:
+            assert m.profile is not None, f"{m.dependency_name} should resolve"
+            assert m.profile.name == "node_core"
+
+    def test_js_alias_resolution_socket_io(self, real_library):
+        """socket.io variants should resolve to socketio profile."""
+        deps = [{"name": "socket.io"}, {"name": "socket.io-client"}]
+        matches = real_library.match_dependencies("javascript", deps)
+        for m in matches:
+            assert m.profile is not None, f"{m.dependency_name} should resolve"
+            assert m.profile.name == "socketio"
+
+    def test_js_alias_next_and_three(self, real_library):
+        """Short npm names should resolve to full profile names."""
+        deps = [{"name": "next"}, {"name": "three"}]
+        matches = real_library.match_dependencies("javascript", deps)
+        assert matches[0].profile is not None
+        assert matches[0].profile.name == "nextjs"
+        assert matches[1].profile is not None
+        assert matches[1].profile.name == "threejs"

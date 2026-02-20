@@ -1,0 +1,204 @@
+{
+  "identity": {
+    "name": "threejs",
+    "npm_name": "three",
+    "category": "graphics",
+    "description": "3D graphics library using WebGL/WebGPU for rendering 3D scenes, animations, and visualizations in the browser",
+    "current_stable_version": "0.171.0",
+    "min_supported_version": "0.150.0",
+    "version_notes": {
+      "0.171.0": "WebGPU renderer improvements, new material system features, performance optimizations",
+      "0.160.0": "WebGPU renderer stable, TSL (Three Shading Language), improved tree shaking",
+      "0.150.0": "Color management improvements, new lighting model"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "GPU-accelerated 3D rendering. Performance depends on GPU capabilities, draw call count, polygon count, texture memory, and shader complexity. CPU-side scene management runs on main thread.",
+    "concurrency_model": "gpu_render_loop",
+    "bottlenecks": [
+      {
+        "name": "draw_call_count",
+        "description": "Each mesh with unique material is a draw call. Hundreds of draw calls overwhelm the GPU command buffer.",
+        "impact": "Frame rate drops proportionally to draw call count. Target < 100 draw calls for mobile, < 1000 for desktop."
+      },
+      {
+        "name": "geometry_complexity",
+        "description": "High polygon count scenes (millions of triangles) exhaust GPU vertex processing. No built-in LOD in basic setup.",
+        "impact": "Frame rate drops below 60fps. Mobile devices affected much sooner than desktop."
+      },
+      {
+        "name": "texture_memory",
+        "description": "Large textures (4K+) consume GPU memory. Multiple high-res textures can exceed GPU VRAM.",
+        "impact": "Texture swapping when VRAM exceeded causes frame stutter"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "triangles_per_frame",
+        "typical_limit": "100K-10M",
+        "description": "Depends on GPU. Mobile: 100K. Desktop: 1-10M. With instancing, much higher."
+      },
+      {
+        "metric": "draw_calls_per_frame",
+        "typical_limit": "100-1000",
+        "description": "Mobile: ~100. Desktop: ~1000. Instanced drawing reduces draw calls."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 5,
+    "growth_pattern": "Memory split between CPU (Three.js objects, scene graph) and GPU (geometry buffers, textures, shaders). Disposing objects requires explicit calls — GC does not free GPU resources. Texture memory dominates for scene-heavy apps.",
+    "known_leaks": [
+      {
+        "name": "undisposed_geometries_and_materials",
+        "description": "Removing objects from scene without calling .dispose() on geometry, material, and textures. GPU memory not freed.",
+        "trigger": "scene.remove(mesh) without mesh.geometry.dispose(), mesh.material.dispose()",
+        "versions_affected": "all"
+      },
+      {
+        "name": "texture_reload_accumulation",
+        "description": "Loading textures repeatedly without disposing old ones. Each load allocates new GPU memory.",
+        "trigger": "TextureLoader.load() in animation loop or repeated scene rebuilds",
+        "versions_affected": "all"
+      },
+      {
+        "name": "renderer_not_disposed",
+        "description": "Creating new WebGLRenderer without disposing the old one. Each renderer creates a WebGL context (limited per page).",
+        "trigger": "New THREE.WebGLRenderer() in component re-render (React) without cleanup",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "JavaScript objects GC-eligible normally. GPU resources (textures, buffers, programs) require explicit .dispose() calls. forceContextLoss() releases all WebGL resources."
+  },
+  "known_failure_modes": [
+    {
+      "name": "webgl_context_lost",
+      "description": "Browser kills WebGL context when GPU memory is exhausted or after tab backgrounding. Scene goes black. No auto-recovery without explicit handling.",
+      "trigger_conditions": "GPU memory exhaustion, tab backgrounding on mobile, too many WebGL contexts",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "No 'webglcontextlost' event handler on renderer.domElement"
+    },
+    {
+      "name": "animation_loop_memory_growth",
+      "description": "Creating new objects (geometries, materials, vectors) inside the animation loop. Each frame allocates new objects that overwhelm GC.",
+      "trigger_conditions": "new THREE.Vector3() or new THREE.Material() inside requestAnimationFrame callback",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Object construction (new THREE.*) inside render/animate functions"
+    },
+    {
+      "name": "mobile_performance_cliff",
+      "description": "Scenes that run smoothly on desktop fail completely on mobile. Mobile GPUs have 10-100x less capability. No graceful degradation by default.",
+      "trigger_conditions": "Complex scenes tested only on desktop",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No mobile detection or quality settings adjustment"
+    },
+    {
+      "name": "react_integration_leaks",
+      "description": "Using Three.js in React components without proper cleanup in useEffect return. Renderers, scenes, and animation frames accumulate on re-render.",
+      "trigger_conditions": "Three.js in React useEffect without cleanup, or in render body",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "THREE.WebGLRenderer inside React component without useEffect cleanup"
+    },
+    {
+      "name": "shader_compilation_stall",
+      "description": "First render with new shaders causes frame stall while GPU compiles shaders. Multiple materials = multiple stalls.",
+      "trigger_conditions": "Many unique materials rendered for the first time",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Many ShaderMaterial or custom material types without pre-compilation"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "very_large_scenes",
+      "description": "Scenes with thousands of objects. Scene graph traversal and raycasting become slow.",
+      "test_approach": "Add progressively more objects to scene, measure frame rate and raycast time"
+    },
+    {
+      "name": "window_resize_handling",
+      "description": "Not updating camera aspect ratio and renderer size on window resize causes distortion.",
+      "test_approach": "Resize viewport, verify rendering adapts correctly"
+    },
+    {
+      "name": "z_fighting",
+      "description": "Coplanar or nearly coplanar surfaces cause z-buffer flickering. Camera near/far ratio affects precision.",
+      "test_approach": "Create overlapping geometries at various scales, verify rendering stability"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["react-three-fiber", "cannon-es", "gsap", "dat.gui", "postprocessing"],
+    "known_conflicts": [
+      {
+        "dependency": "react-three-fiber",
+        "description": "R3F manages Three.js lifecycle. Direct Three.js manipulation alongside R3F causes state conflicts.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["three", "webgl"],
+        "risk": "Depends on browser WebGL support. Some features require WebGL 2.0. WebGPU is experimental.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "scene_complexity_scaling",
+      "category": "data_volume_scaling",
+      "description": "Increase scene complexity (objects, polygons, materials) and measure frame rate",
+      "parameters": {
+        "object_counts": [10, 100, 1000, 5000],
+        "polygons_per_object": [100, 1000, 10000],
+        "unique_materials": [1, 10, 50],
+        "measure_fps": true,
+        "measure_draw_calls": true
+      },
+      "expected_behavior": "FPS degrades with complexity. Draw calls proportional to unique materials.",
+      "failure_indicators": ["fps < 30", "context_lost", "draw_calls > 1000", "memory > 1gb"]
+    },
+    {
+      "name": "texture_memory_scaling",
+      "category": "memory_profiling",
+      "description": "Load progressively more and larger textures to test GPU memory limits",
+      "parameters": {
+        "texture_counts": [1, 10, 50, 100],
+        "texture_sizes": ["256x256", "1024x1024", "4096x4096"],
+        "measure_gpu_memory": true,
+        "measure_fps": true
+      },
+      "expected_behavior": "GPU memory grows with texture count * size. Context lost when VRAM exceeded.",
+      "failure_indicators": ["context_lost", "fps_drop > 50%", "texture_swap_stutter"]
+    },
+    {
+      "name": "animation_loop_memory",
+      "category": "memory_profiling",
+      "description": "Run animation loop for extended time to detect memory leaks from per-frame allocations",
+      "parameters": {
+        "duration_minutes": 5,
+        "measure_interval_seconds": 30,
+        "measure_heap_size": true,
+        "measure_gpu_objects": true
+      },
+      "expected_behavior": "Memory should be stable. Growth indicates per-frame allocation leak.",
+      "failure_indicators": ["heap_growth_monotonic", "gpu_object_count_growing", "gc_pressure"]
+    },
+    {
+      "name": "dispose_cleanup_verification",
+      "category": "memory_profiling",
+      "description": "Create and dispose objects repeatedly to verify GPU resource cleanup",
+      "parameters": {
+        "cycles": [10, 100, 1000],
+        "objects_per_cycle": 100,
+        "measure_gpu_memory": true,
+        "measure_context_health": true
+      },
+      "expected_behavior": "With dispose: memory returns to baseline. Without: memory grows.",
+      "failure_indicators": ["memory_growth_with_dispose", "context_lost", "gpu_objects_accumulating"]
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "identity": {
+    "name": "prisma",
+    "npm_name": "@prisma/client",
+    "category": "database",
+    "description": "Type-safe database ORM with schema-driven development, migrations, and auto-generated query builder",
+    "current_stable_version": "6.2.0",
+    "min_supported_version": "5.0.0",
+    "version_notes": {
+      "6.2.0": "Improved query performance, better error messages, edge runtime support",
+      "6.0.0": "Prisma ORM and Prisma Postgres combined, improved connection management",
+      "5.0.0": "JSON protocol default, improved raw queries, client extensions stable"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Query engine runs as a sidecar (Rust binary) or WASM module. Connection pooling built-in. Type-safe queries compiled from Prisma schema. Performance depends on query complexity, connection pool size, and database latency.",
+    "concurrency_model": "connection_pool",
+    "bottlenecks": [
+      {
+        "name": "connection_pool_size",
+        "description": "Default connection pool: 2 * CPU cores + 1. Serverless environments (Vercel, Lambda) can exhaust connections quickly with cold starts.",
+        "impact": "Connection timeout when pool exhausted. Especially problematic in serverless."
+      },
+      {
+        "name": "n_plus_one_queries",
+        "description": "Prisma's include and select generate JOINs, but nested relations without include cause separate queries per record.",
+        "impact": "Query count grows with result set size for non-included relations"
+      },
+      {
+        "name": "query_engine_startup",
+        "description": "Prisma query engine binary has cold-start overhead. First query after initialization takes longer.",
+        "impact": "Cold start adds 100-500ms. Significant in serverless functions."
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_connections",
+        "typical_limit": "5-20",
+        "description": "Default pool size. Serverless may need PgBouncer or Prisma Accelerate for connection pooling."
+      },
+      {
+        "metric": "queries_per_second",
+        "typical_limit": "500-5000",
+        "description": "Depends on query complexity and database. Simple queries much higher."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 50,
+    "growth_pattern": "Higher baseline due to query engine binary. Memory from: connection pool, query results, and generated client module. In serverless, each function instance runs its own query engine.",
+    "known_leaks": [
+      {
+        "name": "prisma_client_instantiation",
+        "description": "Creating new PrismaClient() per request instead of reusing a singleton. Each instance starts a new query engine and connection pool.",
+        "trigger": "new PrismaClient() in request handler or API route without singleton pattern",
+        "versions_affected": "all"
+      },
+      {
+        "name": "transaction_not_committed",
+        "description": "Interactive transactions ($transaction) that timeout or error without proper cleanup hold connections.",
+        "trigger": "Long-running interactive transactions without timeout configuration",
+        "versions_affected": ">=4.7.0"
+      }
+    ],
+    "gc_behavior": "V8 GC for JS objects. Query engine (Rust binary) manages its own memory. $disconnect() releases connection pool."
+  },
+  "known_failure_modes": [
+    {
+      "name": "multiple_client_instances",
+      "description": "Creating multiple PrismaClient instances. Each starts a connection pool. Common in Next.js dev mode with hot reload. Exhausts database connections.",
+      "trigger_conditions": "new PrismaClient() in module scope of frequently-reloaded files",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "new PrismaClient() without singleton pattern, especially in Next.js API routes"
+    },
+    {
+      "name": "migration_drift",
+      "description": "Schema changes without running prisma migrate. Generated client doesn't match database schema. Queries fail at runtime.",
+      "trigger_conditions": "Editing schema.prisma without running prisma migrate dev",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "schema.prisma modified more recently than migrations directory"
+    },
+    {
+      "name": "serverless_connection_exhaustion",
+      "description": "Each serverless function instance creates its own connection pool. Many concurrent invocations exhaust database max connections.",
+      "trigger_conditions": "Prisma in serverless (Vercel, Lambda) without external connection pooler",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "PrismaClient in serverless function without connection pooler (PgBouncer, Prisma Accelerate)"
+    },
+    {
+      "name": "raw_query_injection",
+      "description": "Using $queryRaw or $executeRaw with string interpolation instead of tagged template. SQL injection vulnerability.",
+      "trigger_conditions": "Template literals with $queryRaw instead of tagged template $queryRaw`...`",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "$queryRaw() with string argument instead of $queryRaw`` tagged template"
+    },
+    {
+      "name": "env_database_url_missing",
+      "description": "DATABASE_URL not set in environment. Prisma gives cryptic error about datasource at PrismaClient initialization.",
+      "trigger_conditions": "Missing .env file or DATABASE_URL not configured",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No DATABASE_URL in .env, or .env not loaded before PrismaClient initialization"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_result_handling",
+      "description": "findUnique returns null, findFirst returns null, findMany returns []. Code that doesn't check for null crashes.",
+      "test_approach": "Run all detected queries against empty tables and non-matching conditions"
+    },
+    {
+      "name": "datetime_timezone",
+      "description": "Prisma stores DateTime in UTC. Client-side code may assume local timezone.",
+      "test_approach": "Store and retrieve dates across timezone boundaries"
+    },
+    {
+      "name": "large_batch_operations",
+      "description": "createMany, updateMany with thousands of records. Transaction size and memory limits.",
+      "test_approach": "Batch operations with increasing record counts"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["next", "express", "fastify", "zod", "typescript"],
+    "known_conflicts": [
+      {
+        "dependency": "mongoose",
+        "description": "Both are ORMs but for different databases. Using both in same project is confusing and unusual.",
+        "severity": "low"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["@prisma/client", "prisma", "@prisma/engines"],
+        "risk": "@prisma/client and prisma (CLI) versions must match exactly. Mismatch causes generation errors.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "connection_pool_stress",
+      "category": "concurrent_execution",
+      "description": "Concurrent queries to test connection pool behavior",
+      "parameters": {
+        "concurrent_queries": [5, 10, 20, 50, 100],
+        "query_duration_ms": 100,
+        "pool_size": 10,
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "Queries queue when pool exhausted. Timeout after pool limit.",
+      "failure_indicators": ["connection_timeout", "pool_exhaustion", "connection_leak", "too_many_connections"]
+    },
+    {
+      "name": "query_scaling",
+      "category": "data_volume_scaling",
+      "description": "Query progressively larger datasets",
+      "parameters": {
+        "row_counts": [100, 1000, 10000, 100000],
+        "query_types": ["findMany", "aggregate", "groupBy", "include_relation"],
+        "measure_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Query time proportional to result set. Include adds JOIN overhead.",
+      "failure_indicators": ["timeout", "MemoryError", "n_plus_one_detected"]
+    },
+    {
+      "name": "client_instantiation_stress",
+      "category": "memory_profiling",
+      "description": "Create multiple PrismaClient instances to test resource management",
+      "parameters": {
+        "instance_counts": [1, 5, 10, 50],
+        "measure_memory": true,
+        "measure_connections": true
+      },
+      "expected_behavior": "Each instance creates connection pool. Memory and connections multiply.",
+      "failure_indicators": ["connection_exhaustion", "memory > 500mb", "query_engine_crash"]
+    },
+    {
+      "name": "batch_operation_scaling",
+      "category": "data_volume_scaling",
+      "description": "Batch create/update with increasing record counts",
+      "parameters": {
+        "record_counts": [10, 100, 1000, 10000],
+        "operations": ["createMany", "updateMany", "deleteMany"],
+        "measure_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Time grows linearly. Large batches may hit transaction limits.",
+      "failure_indicators": ["timeout", "transaction_limit", "MemoryError"]
+    }
+  ]
+}

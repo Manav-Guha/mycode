@@ -1,0 +1,217 @@
+{
+  "identity": {
+    "name": "nextjs",
+    "npm_name": "next",
+    "category": "web_framework",
+    "description": "Full-stack React framework with server-side rendering, static generation, API routes, and App Router",
+    "current_stable_version": "15.1.0",
+    "min_supported_version": "13.0.0",
+    "version_notes": {
+      "15.1.0": "Turbopack stable for dev, React 19 support, improved caching",
+      "14.0.0": "Server Actions stable, partial prerendering preview, Turbopack improvements",
+      "13.0.0": "App Router introduced, Server Components, new file-based routing with app/ directory"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Server-side rendering and static generation framework. Server Components reduce client bundle size. API routes run as serverless functions or Node.js server. Performance depends on rendering strategy (SSR vs SSG vs ISR) and data fetching patterns.",
+    "concurrency_model": "event_loop_ssr",
+    "bottlenecks": [
+      {
+        "name": "ssr_cpu_per_request",
+        "description": "Server-side rendering requires CPU to render React components for each request. Complex pages with heavy computation block the event loop.",
+        "impact": "SSR throughput limited by CPU. Each request consumes server resources for rendering."
+      },
+      {
+        "name": "data_fetching_waterfalls",
+        "description": "Nested Server Components each fetching data create sequential waterfalls. Parent must render before children begin their fetches.",
+        "impact": "Page load time = sum of sequential fetch latencies in the component tree"
+      },
+      {
+        "name": "bundle_size_growth",
+        "description": "Client-side JavaScript bundle grows with app complexity. Large bundles increase initial page load time.",
+        "impact": "Time to Interactive degrades with bundle size, especially on mobile"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "ssr_requests_per_second",
+        "typical_limit": "50-500",
+        "description": "Depends on page complexity and server CPU. Simple pages much higher than complex data-heavy pages."
+      },
+      {
+        "metric": "client_bundle_size_mb",
+        "typical_limit": "1-5",
+        "description": "Beyond 1MB, initial load is noticeably slow on mobile. Code splitting helps."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 100,
+    "growth_pattern": "High baseline due to Node.js + Next.js server + Webpack/Turbopack runtime. Memory grows with: SSR render contexts per concurrent request, cached pages (ISR), API route handlers, and module cache.",
+    "known_leaks": [
+      {
+        "name": "module_cache_growth",
+        "description": "Node.js module cache grows as more pages and API routes are accessed. In development mode with hot reload, this is particularly pronounced.",
+        "trigger": "Large app with many routes accessed over time in development mode",
+        "versions_affected": "all"
+      },
+      {
+        "name": "ssr_render_context_leak",
+        "description": "Server Components that hold references to large data objects during render. If rendering is slow, many concurrent render contexts accumulate.",
+        "trigger": "High-concurrency SSR with slow data fetching in Server Components",
+        "versions_affected": ">=13.0.0"
+      }
+    ],
+    "gc_behavior": "Standard V8 GC. SSR render contexts should be GC-eligible after response is sent. ISR cached pages persist in memory."
+  },
+  "known_failure_modes": [
+    {
+      "name": "pages_vs_app_router_confusion",
+      "description": "Mixing pages/ and app/ directories. Different routing conventions, different data fetching patterns, different rendering models. Common source of confusion in vibe-coded apps.",
+      "trigger_conditions": "Having both pages/ and app/ directories with conflicting routes",
+      "severity": "high",
+      "versions_affected": ">=13.0.0",
+      "detection_hint": "Both pages/ and app/ directories present with overlapping routes"
+    },
+    {
+      "name": "server_client_component_boundary",
+      "description": "Importing client-side code (useState, useEffect, browser APIs) in Server Components. Causes build errors or runtime failures.",
+      "trigger_conditions": "Using hooks or browser APIs in files without 'use client' directive",
+      "severity": "critical",
+      "versions_affected": ">=13.0.0",
+      "detection_hint": "useState, useEffect, window, document access in files without 'use client'"
+    },
+    {
+      "name": "environment_variable_exposure",
+      "description": "Only NEXT_PUBLIC_ prefixed env vars are available client-side. Using process.env.SECRET in client code returns undefined. Server-only secrets accidentally exposed with NEXT_PUBLIC_ prefix.",
+      "trigger_conditions": "Accessing non-prefixed env vars in client components, or prefixing secrets with NEXT_PUBLIC_",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "process.env without NEXT_PUBLIC_ prefix in client components, or NEXT_PUBLIC_ on sensitive values"
+    },
+    {
+      "name": "api_route_body_size",
+      "description": "API routes have default body size limit (1MB in Vercel). Large file uploads or payloads fail silently or with cryptic 413 errors.",
+      "trigger_conditions": "POST requests with body >1MB to API routes",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "API routes handling file uploads without bodyParser configuration"
+    },
+    {
+      "name": "caching_surprises",
+      "description": "Next.js aggressively caches fetch() in Server Components. Data appears stale because revalidation is not configured. Behavior changed across versions.",
+      "trigger_conditions": "fetch() in Server Components without revalidate option",
+      "severity": "high",
+      "versions_affected": ">=13.0.0",
+      "detection_hint": "fetch() calls in Server Components without cache or next.revalidate options"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "dynamic_route_parameters",
+      "description": "Special characters in dynamic route segments ([slug]) can cause routing issues or security concerns.",
+      "test_approach": "Navigate to dynamic routes with encoded characters, slashes, and Unicode"
+    },
+    {
+      "name": "middleware_performance",
+      "description": "Middleware runs on every request. Expensive operations in middleware slow down all routes.",
+      "test_approach": "Add progressively more expensive middleware operations, measure impact on all routes"
+    },
+    {
+      "name": "isr_revalidation_race",
+      "description": "Multiple requests during ISR revalidation window may see stale or mixed content.",
+      "test_approach": "Request ISR pages during revalidation, verify content consistency"
+    },
+    {
+      "name": "hydration_mismatch",
+      "description": "Server-rendered HTML doesn't match client render (e.g., using Date.now() or Math.random()). Causes hydration errors and UI flickering.",
+      "test_approach": "Detect non-deterministic rendering code, verify server/client output match"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["react", "tailwindcss", "prisma", "next-auth", "vercel", "swr", "zustand"],
+    "known_conflicts": [
+      {
+        "dependency": "react",
+        "description": "Next.js 15 requires React 19. Next.js 14 works with React 18. Version must match.",
+        "severity": "critical"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["next", "react", "react-dom"],
+        "risk": "All three must be version-compatible. Next.js major versions require specific React versions.",
+        "severity": "high"
+      },
+      {
+        "chain": ["next", "webpack/turbopack"],
+        "risk": "Build tool is bundled with Next.js. Custom webpack configs may break on Next.js upgrades.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "ssr_concurrent_load",
+      "category": "concurrent_execution",
+      "description": "Increase concurrent SSR requests to measure throughput and memory",
+      "parameters": {
+        "concurrent_requests": [1, 10, 50, 100, 500],
+        "page_complexity": ["simple", "data_heavy"],
+        "measure_render_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Throughput scales until CPU or memory saturated. Memory grows with concurrent renders.",
+      "failure_indicators": ["render_time > 5s", "MemoryError", "event_loop_blocked", "timeout"]
+    },
+    {
+      "name": "bundle_size_analysis",
+      "category": "data_volume_scaling",
+      "description": "Analyze client bundle size and impact on load performance",
+      "parameters": {
+        "measure_bundle_size": true,
+        "measure_first_load_js": true,
+        "measure_time_to_interactive": true
+      },
+      "expected_behavior": "First Load JS should be under 100KB for fast initial load.",
+      "failure_indicators": ["first_load_js > 500kb", "tti > 5s", "no_code_splitting"]
+    },
+    {
+      "name": "api_route_throughput",
+      "category": "concurrent_execution",
+      "description": "Load test API routes with increasing request rates",
+      "parameters": {
+        "requests_per_second": [10, 50, 100, 500],
+        "payload_sizes_kb": [0.1, 1, 10],
+        "duration_seconds": 30,
+        "measure_latency": true
+      },
+      "expected_behavior": "Latency stable up to throughput limit. Body size limit enforced.",
+      "failure_indicators": ["latency > 2s", "413_unhandled", "memory_growth", "timeout"]
+    },
+    {
+      "name": "page_render_memory",
+      "category": "memory_profiling",
+      "description": "Monitor server memory during sustained SSR to detect leaks",
+      "parameters": {
+        "total_requests": 10000,
+        "batch_size": 100,
+        "measure_interval_requests": 1000,
+        "duration_minutes": 5
+      },
+      "expected_behavior": "Memory should stabilize after warmup. Continuous growth indicates leak.",
+      "failure_indicators": ["memory_growth_monotonic", "no_gc_reclamation", "MemoryError"]
+    },
+    {
+      "name": "edge_case_routes",
+      "category": "edge_case_input",
+      "description": "Test routing with edge-case URLs and parameters",
+      "parameters": {
+        "inputs": ["unicode_path", "very_long_url", "encoded_slashes", "null_bytes", "duplicate_params"],
+        "apply_to": "all_detected_routes"
+      },
+      "expected_behavior": "Routes handle gracefully or return proper error codes.",
+      "failure_indicators": ["server_crash", "500_error", "routing_bypass", "information_leak"]
+    }
+  ]
+}

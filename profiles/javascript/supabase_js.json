@@ -1,0 +1,185 @@
+{
+  "identity": {
+    "name": "supabase_js",
+    "npm_name": "@supabase/supabase-js",
+    "category": "backend_service",
+    "description": "JavaScript client for Supabase — PostgreSQL database, authentication, storage, and realtime subscriptions",
+    "current_stable_version": "2.47.0",
+    "min_supported_version": "2.0.0",
+    "version_notes": {
+      "2.47.0": "Improved realtime, edge function support, type generation improvements",
+      "2.0.0": "Major rewrite: modular architecture, improved auth, breaking API changes from 1.x"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "HTTP client wrapping Supabase REST API (PostgREST). Each query is an HTTP request. Realtime uses WebSocket. Performance limited by network latency and Supabase server capacity.",
+    "concurrency_model": "async_http",
+    "bottlenecks": [
+      {
+        "name": "network_latency_per_query",
+        "description": "Every database operation is an HTTP round-trip. Latency floor is network time.",
+        "impact": "Cannot achieve sub-millisecond query times. Sequential queries accumulate latency."
+      },
+      {
+        "name": "no_query_batching",
+        "description": "Each Supabase call is a separate HTTP request. No built-in batching.",
+        "impact": "N queries = N round-trips"
+      },
+      {
+        "name": "realtime_connection_limits",
+        "description": "Supabase limits concurrent realtime connections per project.",
+        "impact": "Connection rejected when limit reached"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "requests_per_second",
+        "typical_limit": "100-500",
+        "description": "Depends on Supabase plan"
+      },
+      {
+        "metric": "realtime_connections",
+        "typical_limit": 200,
+        "description": "Free tier limit. Pro tier higher."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 5,
+    "growth_pattern": "Lightweight client. Memory from: query result data, realtime subscription callbacks, and auth token storage.",
+    "known_leaks": [
+      {
+        "name": "realtime_subscription_accumulation",
+        "description": "Subscribing to channels without unsubscribing. Each subscription maintains a WebSocket listener.",
+        "trigger": "Component mount/unmount cycles without unsubscribing from channels",
+        "versions_affected": ">=2.0.0"
+      },
+      {
+        "name": "large_query_results",
+        "description": "Fetching large result sets and holding in component state.",
+        "trigger": "select('*') without limit on large tables",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. WebSocket connections need explicit cleanup via channel.unsubscribe()."
+  },
+  "known_failure_modes": [
+    {
+      "name": "rls_silent_empty_results",
+      "description": "Row Level Security blocks queries silently. Returns empty results instead of permission errors.",
+      "trigger_conditions": "Using anon key with RLS-enabled tables without proper policies",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Queries returning empty results unexpectedly, no error handling for empty data"
+    },
+    {
+      "name": "client_side_key_exposure",
+      "description": "Using service_role key in client-side code. This key bypasses RLS and exposes full database access.",
+      "trigger_conditions": "Service role key in browser-bundled code",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "SUPABASE_SERVICE_ROLE_KEY in client-side environment or code"
+    },
+    {
+      "name": "auth_token_handling",
+      "description": "Auth tokens stored in localStorage by default. XSS can steal tokens. Token refresh failures cause silent auth loss.",
+      "trigger_conditions": "XSS vulnerability in app, or network issues during token refresh",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No custom auth storage, no token refresh error handling"
+    },
+    {
+      "name": "pagination_missing",
+      "description": "Default query returns limited rows (1000). Code assumes all data returned.",
+      "trigger_conditions": "Tables with >1000 rows queried without .range() or pagination",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "select('*') without .range() on tables that may exceed 1000 rows"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "offline_behavior",
+      "description": "No built-in offline support. Network failures cause uncaught errors.",
+      "test_approach": "Simulate network disconnection during various operations"
+    },
+    {
+      "name": "concurrent_realtime_events",
+      "description": "Rapid database changes trigger many realtime events. Slow handlers cause backlog.",
+      "test_approach": "Generate rapid changes, monitor event processing lag"
+    },
+    {
+      "name": "file_upload_limits",
+      "description": "Storage upload limits vary by plan. Large files fail without clear errors.",
+      "test_approach": "Upload files of increasing sizes, verify error handling at limits"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["react", "next", "svelte", "vue", "react-native"],
+    "known_conflicts": [
+      {
+        "dependency": "next",
+        "description": "Supabase auth with Next.js requires @supabase/ssr package for proper server/client handling. Using @supabase/supabase-js directly causes auth issues with SSR.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["@supabase/supabase-js", "@supabase/postgrest-js", "@supabase/realtime-js"],
+        "risk": "Modular package — all sub-packages must be version-compatible.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "query_throughput",
+      "category": "concurrent_execution",
+      "description": "Increasing query rates to test rate limiting and latency",
+      "parameters": {
+        "queries_per_second": [1, 10, 50, 100],
+        "duration_seconds": 30,
+        "measure_latency": true,
+        "measure_errors": true
+      },
+      "expected_behavior": "Latency stable up to rate limit.",
+      "failure_indicators": ["rate_limit_hit", "timeout", "silent_failure"]
+    },
+    {
+      "name": "realtime_subscription_load",
+      "category": "memory_profiling",
+      "description": "Subscribe to increasing channels, generate events",
+      "parameters": {
+        "channel_counts": [1, 5, 10, 50],
+        "events_per_second": 10,
+        "duration_seconds": 60,
+        "measure_memory": true
+      },
+      "expected_behavior": "Memory grows per subscription. Events processed in order.",
+      "failure_indicators": ["memory_unbounded", "event_lag > 5s", "dropped_events"]
+    },
+    {
+      "name": "auth_flow_reliability",
+      "category": "edge_case_input",
+      "description": "Test auth flows under various conditions",
+      "parameters": {
+        "scenarios": ["sign_in", "token_refresh", "sign_out", "expired_token", "network_failure"],
+        "measure_success_rate": true
+      },
+      "expected_behavior": "Auth operations succeed or fail with clear errors.",
+      "failure_indicators": ["silent_auth_loss", "token_not_refreshed", "uncaught_error"]
+    },
+    {
+      "name": "large_result_handling",
+      "category": "data_volume_scaling",
+      "description": "Fetch progressively larger result sets",
+      "parameters": {
+        "row_counts": [100, 1000, 5000, 10000],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Results truncated at default limit. Memory proportional to result size.",
+      "failure_indicators": ["truncated_without_warning", "MemoryError", "timeout"]
+    }
+  ]
+}

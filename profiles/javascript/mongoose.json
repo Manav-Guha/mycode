@@ -1,0 +1,188 @@
+{
+  "identity": {
+    "name": "mongoose",
+    "npm_name": "mongoose",
+    "category": "database",
+    "description": "MongoDB object modeling for Node.js with schema validation, middleware, query building, and population",
+    "current_stable_version": "8.9.0",
+    "min_supported_version": "7.0.0",
+    "version_notes": {
+      "8.0.0": "Improved TypeScript support, removed deprecated features, Node.js 16+ required",
+      "7.0.0": "Dropped callback support, strictQuery default changed, improved connection handling"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "MongoDB client with ODM (Object-Document Mapper). Built-in connection pooling. Query performance depends on indexes, document size, and MongoDB server. Population (joins) are client-side.",
+    "concurrency_model": "connection_pool",
+    "bottlenecks": [
+      {
+        "name": "population_n_plus_one",
+        "description": "populate() fetches related documents in separate queries. Populating across collections creates N+1 query patterns.",
+        "impact": "Query count = 1 + populated fields. Deep population exponential."
+      },
+      {
+        "name": "document_hydration_overhead",
+        "description": "Converting raw MongoDB documents to Mongoose documents (with getters, setters, methods) has per-document CPU cost.",
+        "impact": "Hydration time grows linearly with result set size. lean() skips this."
+      },
+      {
+        "name": "connection_pool_default",
+        "description": "Default connection pool is 100. In serverless, many cold starts create many pools.",
+        "impact": "MongoDB max connections exhausted by serverless function instances"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_connections",
+        "typical_limit": "100",
+        "description": "Default pool size. Must match MongoDB server max connections."
+      },
+      {
+        "metric": "document_size_mb",
+        "typical_limit": 16,
+        "description": "MongoDB BSON document limit is 16MB"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 20,
+    "growth_pattern": "Memory from: connection pool, model definitions and schemas, query result documents (full Mongoose documents or lean objects), and middleware closures.",
+    "known_leaks": [
+      {
+        "name": "model_recompilation",
+        "description": "Calling mongoose.model() with the same name recreates the model, leaking the previous one's middleware and indexes.",
+        "trigger": "mongoose.model('User', schema) in hot-reloaded modules",
+        "versions_affected": "all"
+      },
+      {
+        "name": "query_result_retention",
+        "description": "Storing full Mongoose documents (with change tracking) instead of lean objects. Each document has internal state tracking.",
+        "trigger": "Caching query results without .lean()",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. Mongoose documents hold references to their model and schema. lean() documents are plain objects."
+  },
+  "known_failure_modes": [
+    {
+      "name": "connection_string_issues",
+      "description": "MongoDB connection string misconfigured. mongoose.connect() fails with opaque errors. Common with Atlas connection strings.",
+      "trigger_conditions": "Wrong connection string format, network issues, Atlas IP whitelist",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "mongoose.connect() without error handling, hardcoded connection strings"
+    },
+    {
+      "name": "schema_validation_bypass",
+      "description": "Updates via updateOne/updateMany bypass schema validation by default (runValidators option required). Data integrity issues.",
+      "trigger_conditions": "Update operations without { runValidators: true } option",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "updateOne, updateMany, findOneAndUpdate without runValidators"
+    },
+    {
+      "name": "missing_indexes",
+      "description": "Queries on unindexed fields do collection scans. Performance degrades linearly with collection size.",
+      "trigger_conditions": "find() with filter on fields without indexes in large collections",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Schema fields used in queries without index: true"
+    },
+    {
+      "name": "callback_removed_in_v7",
+      "description": "Mongoose 7+ removed callback support. Code using Model.find(query, callback) pattern breaks.",
+      "trigger_conditions": "Upgrading from Mongoose 6 to 7+ without migrating callbacks to promises",
+      "severity": "high",
+      "versions_affected": ">=7.0.0",
+      "detection_hint": "Callback-style Mongoose calls: Model.find(filter, callback)"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_collection_queries",
+      "description": "find() on empty collection returns []. findOne() returns null. Code often doesn't handle null.",
+      "test_approach": "Run all detected queries against empty collections"
+    },
+    {
+      "name": "large_document_arrays",
+      "description": "Documents with large arrays (>10K elements). Push operations create large updates. Population of array refs expensive.",
+      "test_approach": "Create documents with growing arrays, measure CRUD performance"
+    },
+    {
+      "name": "concurrent_document_modifications",
+      "description": "Multiple processes modifying the same document. Version key (__v) helps but only if used.",
+      "test_approach": "Concurrent save() on same document, verify version conflict handling"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["express", "next", "dotenv", "jsonwebtoken", "bcryptjs"],
+    "known_conflicts": [
+      {
+        "dependency": "mongodb",
+        "description": "Mongoose wraps the MongoDB driver. Installing mongodb directly alongside Mongoose can cause version conflicts.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["mongoose", "mongodb"],
+        "risk": "Mongoose pins MongoDB driver version. Upgrading driver independently breaks Mongoose.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "query_scaling",
+      "category": "data_volume_scaling",
+      "description": "Query collections of increasing size with and without indexes",
+      "parameters": {
+        "document_counts": [100, 1000, 10000, 100000],
+        "indexed": [true, false],
+        "query_types": ["find", "findOne", "aggregate", "populate"],
+        "measure_time": true
+      },
+      "expected_behavior": "Indexed: logarithmic. Unindexed: linear. Populate adds extra queries.",
+      "failure_indicators": ["query_time > 1s", "full_collection_scan", "connection_timeout"]
+    },
+    {
+      "name": "connection_pool_stress",
+      "category": "concurrent_execution",
+      "description": "Concurrent operations to test connection pool behavior",
+      "parameters": {
+        "concurrent_operations": [10, 50, 100, 200],
+        "operation_type": "find",
+        "pool_size": 100,
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "Operations queue when pool exhausted. Timeout after wait.",
+      "failure_indicators": ["connection_timeout", "pool_exhaustion", "max_connections_exceeded"]
+    },
+    {
+      "name": "document_hydration_overhead",
+      "category": "data_volume_scaling",
+      "description": "Compare Mongoose document vs lean() performance at scale",
+      "parameters": {
+        "result_sizes": [10, 100, 1000, 10000],
+        "methods": ["find", "find_lean"],
+        "measure_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "lean() 2-5x faster and lower memory than full Mongoose documents.",
+      "failure_indicators": ["lean_not_used_for_read_only", "memory > 5x_lean_equivalent"]
+    },
+    {
+      "name": "write_throughput",
+      "category": "concurrent_execution",
+      "description": "Bulk write operations at increasing rates",
+      "parameters": {
+        "documents_per_batch": [10, 100, 1000, 10000],
+        "methods": ["insertMany", "bulkWrite", "save_loop"],
+        "measure_time": true,
+        "measure_throughput": true
+      },
+      "expected_behavior": "insertMany/bulkWrite much faster than individual save(). Linear scaling.",
+      "failure_indicators": ["save_loop_timeout", "validation_overhead > 50%", "connection_timeout"]
+    }
+  ]
+}

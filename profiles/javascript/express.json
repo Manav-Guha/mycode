@@ -1,0 +1,218 @@
+{
+  "identity": {
+    "name": "express",
+    "npm_name": "express",
+    "category": "web_framework",
+    "description": "Minimal, unopinionated web framework for Node.js with middleware-based request handling",
+    "current_stable_version": "4.21.0",
+    "min_supported_version": "4.17.0",
+    "version_notes": {
+      "4.21.0": "Security fixes, dependency updates, Node.js 22 support",
+      "5.0.0": "Beta: async middleware support, removed deprecated APIs, path route matching changes",
+      "4.17.0": "Last widely-deployed stable. Most tutorials reference this version."
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Single-threaded event loop. Handles concurrent requests via non-blocking I/O. CPU-bound work blocks all requests. No built-in clustering — requires cluster module or process manager (PM2) for multi-core utilization.",
+    "concurrency_model": "event_loop",
+    "bottlenecks": [
+      {
+        "name": "single_thread_cpu_bound",
+        "description": "Any CPU-intensive work (JSON parsing large payloads, image processing, crypto) blocks the event loop, stalling all concurrent requests.",
+        "impact": "All requests freeze during CPU-bound computation"
+      },
+      {
+        "name": "middleware_chain_overhead",
+        "description": "Every request passes through all registered middleware in order. Many middleware layers add latency per request.",
+        "impact": "Latency grows with middleware count, even for routes that don't need all middleware"
+      },
+      {
+        "name": "synchronous_file_operations",
+        "description": "Using fs.readFileSync or other sync APIs in request handlers blocks the event loop.",
+        "impact": "Single slow sync operation blocks all concurrent requests"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_connections",
+        "typical_limit": "1000-10000",
+        "description": "Event loop handles many concurrent I/O-bound connections. CPU-bound work reduces this dramatically."
+      },
+      {
+        "metric": "requests_per_second",
+        "typical_limit": "5000-30000",
+        "description": "For simple JSON responses. Drops significantly with middleware, database queries, or template rendering."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 30,
+    "growth_pattern": "Lean baseline. Memory grows with: active connections, request body buffering, session storage, template cache, and middleware state. Long-running processes without memory management gradually grow.",
+    "known_leaks": [
+      {
+        "name": "event_listener_accumulation",
+        "description": "Adding event listeners on server or request objects without removing them. Each connection adds listeners.",
+        "trigger": "EventEmitter listeners added in middleware or route handlers without cleanup",
+        "versions_affected": "all"
+      },
+      {
+        "name": "session_store_memory",
+        "description": "Default MemoryStore for express-session leaks memory. Every session persists until server restart. Not designed for production.",
+        "trigger": "express-session with default MemoryStore in production",
+        "versions_affected": "all"
+      },
+      {
+        "name": "unclosed_database_connections",
+        "description": "Opening database connections per request without pooling or closing. Connection objects accumulate.",
+        "trigger": "Creating new DB connections in route handlers without connection pool",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "V8 GC. Request/response objects GC-eligible after response is sent. Closures in middleware retain scope references."
+  },
+  "known_failure_modes": [
+    {
+      "name": "unhandled_async_errors",
+      "description": "Express 4 does not catch errors from async route handlers. Unhandled promise rejections crash the process or hang the request.",
+      "trigger_conditions": "async function route handler that throws without try/catch",
+      "severity": "critical",
+      "versions_affected": "4.x",
+      "detection_hint": "async (req, res) => route handlers without try/catch or express-async-errors"
+    },
+    {
+      "name": "missing_error_middleware",
+      "description": "No error-handling middleware (4-argument function). Errors produce Express default HTML error page in production.",
+      "trigger_conditions": "Any unhandled error in route or middleware",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No app.use((err, req, res, next) => ...) middleware"
+    },
+    {
+      "name": "body_parser_missing_or_misconfigured",
+      "description": "JSON or URL-encoded body not parsed. req.body is undefined. Common with Express 4.16+ (built-in) vs older versions (separate middleware).",
+      "trigger_conditions": "POST/PUT routes accessing req.body without express.json() middleware",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "req.body access without express.json() or express.urlencoded() middleware"
+    },
+    {
+      "name": "cors_not_configured",
+      "description": "No CORS headers. Frontend on different origin gets opaque errors. Vibe-coded apps add cors() globally without understanding implications.",
+      "trigger_conditions": "Frontend and backend on different origins without CORS middleware",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "No cors middleware, or cors({origin: '*'}) in production"
+    },
+    {
+      "name": "path_traversal_in_static",
+      "description": "express.static() serving files from user-influenced paths. Without proper root restriction, path traversal is possible.",
+      "trigger_conditions": "express.static() with dynamic path or user-controlled directory",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "express.static() with user input in path, or res.sendFile with user-controlled path"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "route_order_dependency",
+      "description": "Express matches routes in definition order. A catch-all route before specific routes shadows them.",
+      "test_approach": "Verify route ordering doesn't shadow intended routes"
+    },
+    {
+      "name": "large_request_body",
+      "description": "express.json() default limit is 100KB. Larger payloads return 413. No limit if using custom parser.",
+      "test_approach": "Send progressively larger request bodies, verify limits and memory behavior"
+    },
+    {
+      "name": "slow_client_attacks",
+      "description": "Slowloris: client sends headers very slowly, keeping connection open. Without timeout, connections accumulate.",
+      "test_approach": "Simulate slow clients with partial requests, monitor connection count"
+    },
+    {
+      "name": "concurrent_response_writes",
+      "description": "Calling res.send() or res.json() multiple times. Second call causes 'headers already sent' error.",
+      "test_approach": "Detect routes that may call res.send/json conditionally without return statements"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["cors", "helmet", "morgan", "mongoose", "prisma", "jsonwebtoken", "dotenv", "express-session"],
+    "known_conflicts": [
+      {
+        "dependency": "body-parser",
+        "description": "Express 4.16+ has built-in body parsing. Using separate body-parser package alongside can cause double parsing.",
+        "severity": "low"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["express", "path-to-regexp"],
+        "risk": "Express uses path-to-regexp for route matching. Version 8+ has breaking changes. Express 5 migrates to new version.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "concurrent_request_load",
+      "category": "concurrent_execution",
+      "description": "Increase concurrent requests to measure throughput and event loop latency",
+      "parameters": {
+        "concurrent_requests": [10, 100, 500, 1000, 5000],
+        "request_type": "json_response",
+        "measure_latency": true,
+        "measure_event_loop_lag": true
+      },
+      "expected_behavior": "Throughput high for I/O-bound. Event loop lag increases under CPU load.",
+      "failure_indicators": ["event_loop_lag > 100ms", "timeout", "connection_refused", "memory > 500mb"]
+    },
+    {
+      "name": "middleware_chain_overhead",
+      "category": "data_volume_scaling",
+      "description": "Measure per-request overhead with increasing middleware count",
+      "parameters": {
+        "middleware_counts": [1, 5, 10, 20, 50],
+        "requests": 1000,
+        "measure_latency": true
+      },
+      "expected_behavior": "Latency grows linearly with middleware count.",
+      "failure_indicators": ["latency > 1ms_per_middleware", "middleware_error_unhandled"]
+    },
+    {
+      "name": "async_error_handling",
+      "category": "edge_case_input",
+      "description": "Test error handling in async routes, middleware, and error handlers",
+      "parameters": {
+        "error_sources": ["sync_throw", "async_reject", "callback_error", "timeout"],
+        "with_error_middleware": [true, false]
+      },
+      "expected_behavior": "All errors caught and handled. No hung requests or process crashes.",
+      "failure_indicators": ["process_crash", "hung_request", "unhandled_rejection", "default_error_page"]
+    },
+    {
+      "name": "memory_under_load",
+      "category": "memory_profiling",
+      "description": "Sustained request load to detect memory leaks in middleware and handlers",
+      "parameters": {
+        "total_requests": 50000,
+        "batch_size": 500,
+        "measure_interval_requests": 5000,
+        "duration_minutes": 10
+      },
+      "expected_behavior": "Memory should stabilize after warmup. Monotonic growth indicates leak.",
+      "failure_indicators": ["memory_growth_monotonic", "event_listener_count_growing", "connection_leak"]
+    },
+    {
+      "name": "large_payload_handling",
+      "category": "data_volume_scaling",
+      "description": "Send request and response payloads of increasing size",
+      "parameters": {
+        "payload_sizes_kb": [1, 10, 100, 1000, 10000],
+        "directions": ["request", "response"],
+        "measure_memory": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Memory proportional to buffered payload. 413 error at body parser limit.",
+      "failure_indicators": ["MemoryError", "no_body_limit", "timeout", "event_loop_blocked"]
+    }
+  ]
+}

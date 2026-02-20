@@ -1,0 +1,133 @@
+{
+  "identity": {
+    "name": "dotenv",
+    "npm_name": "dotenv",
+    "category": "configuration",
+    "description": "Loads environment variables from .env file into process.env for configuration management",
+    "current_stable_version": "16.4.7",
+    "min_supported_version": "16.0.0",
+    "version_notes": {
+      "16.4.0": "Multi-line value improvements, expand nested variables, vault support",
+      "16.0.0": "Preload support (node -r dotenv/config), improved parsing, dropped Node.js 10"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Runs once at startup. Reads .env file, parses key-value pairs, sets process.env. Zero runtime overhead after initialization. No impact on request handling.",
+    "concurrency_model": "startup_only",
+    "bottlenecks": [],
+    "scaling_limits": []
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 0,
+    "growth_pattern": "Negligible memory impact. Environment variables stored as strings in process.env (Node.js native). Only adds memory for the variable values themselves.",
+    "known_leaks": [],
+    "gc_behavior": "No ongoing memory allocation. dotenv module garbage collected after config() runs. Values persist in process.env."
+  },
+  "known_failure_modes": [
+    {
+      "name": "env_file_committed_to_git",
+      "description": "The .env file containing secrets committed to version control. Most common security issue with dotenv usage.",
+      "trigger_conditions": ".env file tracked by git (not in .gitignore)",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": ".env not in .gitignore, or .env in git tracked files"
+    },
+    {
+      "name": "env_file_not_found",
+      "description": "dotenv.config() silently succeeds even if .env doesn't exist. process.env variables are undefined. Code proceeds with undefined values.",
+      "trigger_conditions": ".env file missing in deployment, wrong working directory",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No .env file in project root, or process.env.VAR accessed without fallback/validation"
+    },
+    {
+      "name": "variable_not_validated",
+      "description": "process.env values are always strings or undefined. No type validation. 'false' is truthy. Missing vars are undefined, not empty string.",
+      "trigger_conditions": "if (process.env.FEATURE_FLAG) — 'false' string is truthy",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "process.env access without validation, especially for booleans, numbers, or required values"
+    },
+    {
+      "name": "client_side_env_exposure",
+      "description": "In frameworks like Next.js, only NEXT_PUBLIC_ prefixed vars reach the client. In plain React/Vite, all env vars may be bundled. Secrets exposed.",
+      "trigger_conditions": "process.env.SECRET in client-bundled code",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "process.env access in client-side code, especially secrets without PUBLIC prefix"
+    },
+    {
+      "name": "load_order_issues",
+      "description": "dotenv.config() must run before any code reads process.env. If imported after modules that read env vars, those modules get undefined.",
+      "trigger_conditions": "dotenv/config not the first import, or config() called after other modules initialize",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "dotenv import not at top of entry file, or require('dotenv').config() after other requires"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "special_characters_in_values",
+      "description": "Values with #, quotes, newlines, spaces. Parsing rules for quoted vs unquoted values differ.",
+      "test_approach": "Create .env with special characters in values, verify parsing"
+    },
+    {
+      "name": "multiline_values",
+      "description": "Multi-line values require double quotes. Parsing can be inconsistent across versions.",
+      "test_approach": "Test multi-line values with various quoting styles"
+    },
+    {
+      "name": "override_behavior",
+      "description": "By default, dotenv does NOT override existing environment variables. This can cause confusion in containerized environments.",
+      "test_approach": "Set env var before dotenv.config(), verify .env doesn't override"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["express", "next", "prisma", "mongoose", "stripe", "openai"],
+    "known_conflicts": [
+      {
+        "dependency": "dotenv-expand",
+        "description": "dotenv-expand adds variable expansion ($VAR references). Must be called after dotenv.config().",
+        "severity": "low"
+      }
+    ],
+    "dependency_chain_risks": []
+  },
+  "stress_test_templates": [
+    {
+      "name": "env_validation",
+      "category": "edge_case_input",
+      "description": "Verify all required environment variables are present and correctly typed",
+      "parameters": {
+        "check_required_vars": true,
+        "check_type_safety": true,
+        "check_gitignore": true,
+        "check_client_exposure": true
+      },
+      "expected_behavior": "All required vars present. Secrets not in client code. .env in .gitignore.",
+      "failure_indicators": ["missing_required_var", "secret_in_client_code", "env_in_git", "type_mismatch"]
+    },
+    {
+      "name": "env_parsing_edge_cases",
+      "category": "edge_case_input",
+      "description": "Test .env parsing with various value formats",
+      "parameters": {
+        "value_types": ["plain", "quoted", "multiline", "with_hash", "with_spaces", "empty", "unicode"],
+        "verify_parsed_values": true
+      },
+      "expected_behavior": "All values parsed correctly per dotenv spec.",
+      "failure_indicators": ["truncated_at_hash", "missing_quotes", "multiline_broken", "encoding_error"]
+    },
+    {
+      "name": "load_order_verification",
+      "category": "edge_case_input",
+      "description": "Verify dotenv loads before any code reads env vars",
+      "parameters": {
+        "check_import_order": true,
+        "check_early_access": true
+      },
+      "expected_behavior": "All process.env reads happen after dotenv.config().",
+      "failure_indicators": ["undefined_env_var", "race_condition", "module_init_before_dotenv"]
+    }
+  ]
+}

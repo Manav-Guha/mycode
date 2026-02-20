@@ -1,0 +1,186 @@
+{
+  "identity": {
+    "name": "svelte",
+    "npm_name": "svelte",
+    "category": "ui_framework",
+    "description": "Compiler-based UI framework that shifts work to build time, producing minimal runtime JavaScript",
+    "current_stable_version": "5.16.0",
+    "min_supported_version": "4.0.0",
+    "version_notes": {
+      "5.0.0": "Runes ($state, $derived, $effect), fine-grained reactivity, snippets replace slots, major breaking changes from Svelte 4",
+      "4.0.0": "Minimum Node 16, type narrowing, improved transitions"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Compiles components to imperative DOM operations at build time. No virtual DOM diffing at runtime. Fine-grained reactivity (Svelte 5) updates only what changed. Very small runtime footprint compared to React/Vue.",
+    "concurrency_model": "compiled_reactivity",
+    "bottlenecks": [
+      {
+        "name": "large_list_without_keyed_each",
+        "description": "Rendering large lists without keyed {#each} blocks. Svelte recreates all list items on any change instead of patching.",
+        "impact": "Re-render cost proportional to full list length on any list mutation"
+      },
+      {
+        "name": "build_time_scaling",
+        "description": "Compilation time grows with component count and complexity. Very large apps have longer build times than interpreted frameworks.",
+        "impact": "Development feedback loop slows with app size"
+      },
+      {
+        "name": "store_subscription_overhead",
+        "description": "Many components subscribing to the same store. Each store update notifies all subscribers.",
+        "impact": "Update cost proportional to subscriber count for frequently-changing stores"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "dom_elements",
+        "typical_limit": "10000-100000",
+        "description": "Direct DOM manipulation is faster than virtual DOM but still limited by browser rendering."
+      },
+      {
+        "metric": "component_count",
+        "typical_limit": "1000-10000",
+        "description": "No virtual DOM overhead per component. Limit is build time and browser capability."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 0.5,
+    "growth_pattern": "Very small runtime. Memory dominated by DOM nodes and reactive state. No virtual DOM tree doubling memory. Svelte 5 runes use signals (minimal overhead per reactive value).",
+    "known_leaks": [
+      {
+        "name": "unsubscribed_stores",
+        "description": "Manual store subscriptions (store.subscribe()) without calling the unsubscribe function returned.",
+        "trigger": "Calling $store.subscribe() in onMount without corresponding unsubscribe in onDestroy",
+        "versions_affected": "all"
+      },
+      {
+        "name": "effect_cleanup_missing",
+        "description": "Svelte 5: $effect() that creates resources without returning a cleanup function. Resources persist after component unmount.",
+        "trigger": "$effect() with event listeners, intervals, or subscriptions without cleanup return",
+        "versions_affected": ">=5.0.0"
+      }
+    ],
+    "gc_behavior": "Compiled code creates minimal closures. Components cleanup runs on unmount (onDestroy). DOM references released when component is destroyed."
+  },
+  "known_failure_modes": [
+    {
+      "name": "svelte_4_to_5_migration",
+      "description": "Svelte 5 replaces reactive declarations ($:) with runes ($state, $derived, $effect). Export let for props replaced with $props(). Major rewrite required.",
+      "trigger_conditions": "Upgrading from Svelte 4 to 5 without migrating reactive patterns",
+      "severity": "critical",
+      "versions_affected": ">=5.0.0",
+      "detection_hint": "$: reactive declarations, export let for props, on: event handlers"
+    },
+    {
+      "name": "ssr_hydration_mismatch",
+      "description": "Server-rendered HTML doesn't match client-side hydration. Causes visual flickering and hydration warnings.",
+      "trigger_conditions": "Non-deterministic rendering (dates, random values) or browser-only APIs in SSR",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "new Date(), Math.random(), or window/document access in component body"
+    },
+    {
+      "name": "reactive_assignment_required",
+      "description": "Svelte 4: reactivity requires assignment (array.push doesn't trigger; array = [...array, item] does). Common gotcha for new users.",
+      "trigger_conditions": "Mutating arrays/objects without reassignment in Svelte 4",
+      "severity": "high",
+      "versions_affected": "4.x",
+      "detection_hint": "Array .push(), .splice(), object property assignment without reassignment"
+    },
+    {
+      "name": "each_block_without_key",
+      "description": "Unkeyed {#each} blocks reuse DOM elements by index. Reordering or filtering lists causes state bugs (input values stuck in wrong rows).",
+      "trigger_conditions": "{#each items as item} without (item.id) key expression",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "{#each} blocks without parenthesized key expression"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "rapid_reactive_updates",
+      "description": "Many rapid reactive state changes. Svelte batches within the same microtask but not across.",
+      "test_approach": "Trigger many state changes in quick succession, verify DOM update efficiency"
+    },
+    {
+      "name": "transition_interruption",
+      "description": "Removing elements mid-transition can cause visual glitches or orphaned DOM nodes.",
+      "test_approach": "Rapidly toggle elements with transitions, verify cleanup"
+    },
+    {
+      "name": "deeply_nested_reactivity",
+      "description": "Deeply nested reactive objects. Svelte 4 doesn't track deep mutations. Svelte 5 $state is deep by default.",
+      "test_approach": "Mutate deeply nested state properties, verify UI updates"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["sveltekit", "tailwindcss", "vite", "svelte-routing", "d3"],
+    "known_conflicts": [
+      {
+        "dependency": "sveltekit",
+        "description": "SvelteKit version must match Svelte version. SvelteKit 2 requires Svelte 4/5. Mixing versions causes build failures.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["svelte", "vite", "svelte-plugin"],
+        "risk": "Svelte relies on Vite for development. vite-plugin-svelte version must match Svelte major version.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "list_rendering_scaling",
+      "category": "data_volume_scaling",
+      "description": "Render lists of increasing length with keyed and unkeyed each blocks",
+      "parameters": {
+        "list_lengths": [100, 1000, 5000, 10000, 50000],
+        "keyed": [true, false],
+        "operations": ["render", "reorder", "filter", "append"],
+        "measure_render_time": true
+      },
+      "expected_behavior": "Keyed: efficient updates. Unkeyed: full list re-render on mutation.",
+      "failure_indicators": ["render_time > 100ms", "state_bugs_on_reorder", "browser_unresponsive"]
+    },
+    {
+      "name": "reactive_update_throughput",
+      "category": "concurrent_execution",
+      "description": "Measure throughput of reactive state changes and DOM updates",
+      "parameters": {
+        "updates_per_second": [60, 120, 500, 1000],
+        "reactive_bindings": [10, 50, 100],
+        "duration_seconds": 10,
+        "measure_dropped_frames": true
+      },
+      "expected_behavior": "DOM updates batched efficiently. Frame rate stable at 60fps for moderate update rates.",
+      "failure_indicators": ["dropped_frames > 10%", "update_backlog", "memory_growth"]
+    },
+    {
+      "name": "component_lifecycle_memory",
+      "category": "memory_profiling",
+      "description": "Mount and unmount components repeatedly to detect memory leaks",
+      "parameters": {
+        "cycles": [100, 1000, 5000],
+        "component_complexity": ["simple", "with_stores", "with_effects"],
+        "measure_memory": true
+      },
+      "expected_behavior": "Memory returns to baseline after unmount. No DOM node or listener accumulation.",
+      "failure_indicators": ["memory_growth_per_cycle", "dom_node_accumulation", "listener_leak"]
+    },
+    {
+      "name": "store_subscriber_scaling",
+      "category": "data_volume_scaling",
+      "description": "Increase store subscribers to test notification overhead",
+      "parameters": {
+        "subscriber_counts": [10, 50, 100, 500],
+        "update_frequency": 60,
+        "measure_update_time": true
+      },
+      "expected_behavior": "Update time grows linearly with subscriber count.",
+      "failure_indicators": ["update_time > 16ms", "missed_updates", "subscriber_leak"]
+    }
+  ]
+}
