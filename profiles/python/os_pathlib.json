@@ -1,0 +1,232 @@
+{
+  "identity": {
+    "name": "os_pathlib",
+    "pypi_name": null,
+    "category": "filesystem",
+    "description": "Python standard library modules for file system operations (os, os.path, pathlib) — file I/O, path manipulation, directory operations, and environment access",
+    "current_stable_version": "stdlib",
+    "min_supported_version": "stdlib",
+    "version_notes": {
+      "python_3.12": "pathlib.Path.walk() added, os.path performance improvements",
+      "python_3.11": "No major os/pathlib changes",
+      "python_3.10": "pathlib pattern matching improvements, os.path.realpath strict mode"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Direct OS system calls for file operations. Performance determined by filesystem type, I/O subsystem, and file sizes. Path operations are CPU-bound string manipulation. File I/O is blocking by default.",
+    "concurrency_model": "blocking_io",
+    "bottlenecks": [
+      {
+        "name": "blocking_file_io",
+        "description": "All file operations (read, write, stat, listdir) block the calling thread. In web applications, this blocks the request handler.",
+        "impact": "Worker thread blocked during file I/O. Concurrent requests queue up."
+      },
+      {
+        "name": "directory_listing_scaling",
+        "description": "os.listdir() and Path.iterdir() return all entries at once. Directories with millions of files consume memory and time.",
+        "impact": "Memory and time grow linearly with directory entry count"
+      },
+      {
+        "name": "recursive_operations",
+        "description": "os.walk(), shutil.copytree(), shutil.rmtree() traverse entire directory trees. Deep hierarchies with many files are slow.",
+        "impact": "Time proportional to total file count in tree. No progress feedback by default."
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "open_file_handles",
+        "typical_limit": "1024-65536",
+        "description": "OS limit on open file descriptors per process. Default 1024 on many Linux systems."
+      },
+      {
+        "metric": "directory_entries",
+        "typical_limit": "100K-1M",
+        "description": "Listing performance degrades with directory size. Filesystem-dependent."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 0,
+    "growth_pattern": "No baseline — these are stdlib modules. Memory from: file contents read into memory (read()/read_text()), directory listings held in lists, and accumulated Path objects.",
+    "known_leaks": [
+      {
+        "name": "unclosed_file_handles",
+        "description": "Opening files with open() without close() or context manager. File handles accumulate until GC finalizer runs or process hits FD limit.",
+        "trigger": "open() calls without 'with' statement or explicit close()",
+        "versions_affected": "all"
+      },
+      {
+        "name": "large_file_read_into_memory",
+        "description": "read() and read_text() load the entire file into memory. Vibe-coded apps read large files without streaming.",
+        "trigger": "Path.read_text() or open().read() on files >100MB",
+        "versions_affected": "all"
+      },
+      {
+        "name": "recursive_walk_accumulation",
+        "description": "Storing all results from os.walk() in a list instead of processing iteratively. Huge directory trees produce huge lists.",
+        "trigger": "list(os.walk(root)) on large directory trees",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "File objects have finalizers that close handles on GC. But GC timing is unpredictable — handles may not be released promptly."
+  },
+  "known_failure_modes": [
+    {
+      "name": "path_traversal_vulnerability",
+      "description": "Constructing file paths from user input without sanitization. os.path.join('/safe/dir', '../../../etc/passwd') resolves outside the safe directory.",
+      "trigger_conditions": "User-controlled input used in file path construction",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "os.path.join or Path() with user-provided path components without validation"
+    },
+    {
+      "name": "file_not_found_unhandled",
+      "description": "FileNotFoundError not caught. Code assumes files exist. Common when paths are constructed dynamically or from config.",
+      "trigger_conditions": "Accessing files that don't exist, misconfigured paths, missing config files",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "open() or Path operations without try/except FileNotFoundError"
+    },
+    {
+      "name": "permission_errors_unhandled",
+      "description": "PermissionError when accessing files or directories without proper permissions. Common in containerized environments.",
+      "trigger_conditions": "Running as different user, read-only filesystem, container restrictions",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "File operations without PermissionError handling"
+    },
+    {
+      "name": "race_conditions_toctou",
+      "description": "Time-of-check-to-time-of-use: checking if file exists then operating on it. File can be deleted/modified between check and use.",
+      "trigger_conditions": "if os.path.exists(f): open(f) pattern in concurrent environment",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "os.path.exists() or Path.exists() followed by file operation without try/except"
+    },
+    {
+      "name": "encoding_errors",
+      "description": "Reading text files with wrong encoding. Default encoding varies by platform (UTF-8 on Linux/macOS, locale-dependent on Windows). UnicodeDecodeError on mismatched encoding.",
+      "trigger_conditions": "Reading files created on different OS or with different encoding",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "open() or read_text() without explicit encoding parameter"
+    },
+    {
+      "name": "symlink_following",
+      "description": "Path operations follow symlinks by default. In user-controlled environments, symlinks can point outside expected directories.",
+      "trigger_conditions": "Operating on directories where users can create symlinks",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "File operations in user-writable directories without follow_symlinks=False"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_file_handling",
+      "description": "Reading empty files returns empty string. Code that processes file contents may fail on empty input.",
+      "test_approach": "Create empty files and run all detected file-reading operations"
+    },
+    {
+      "name": "special_characters_in_paths",
+      "description": "File paths with spaces, Unicode, newlines, or null bytes. os.path functions handle most, but shell commands may not.",
+      "test_approach": "Create files with special characters in names, test all path operations"
+    },
+    {
+      "name": "very_large_files",
+      "description": "Files larger than available RAM. read() will fail with MemoryError.",
+      "test_approach": "Read files of increasing size, monitor memory and measure read time"
+    },
+    {
+      "name": "deeply_nested_directories",
+      "description": "Path lengths approaching OS limits (260 chars Windows, 4096 Linux). Deeply nested directories hit limits.",
+      "test_approach": "Create increasingly deep directory structures, test path operations at each depth"
+    },
+    {
+      "name": "concurrent_file_access",
+      "description": "Multiple threads/processes reading and writing the same file. No built-in file locking in os/pathlib.",
+      "test_approach": "Concurrent reads and writes to same file, verify data integrity"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["json", "csv", "shutil", "tempfile", "glob", "configparser"],
+    "known_conflicts": [
+      {
+        "dependency": "aiofiles",
+        "description": "Mixing sync os/pathlib operations with async aiofiles in async code. Easy to accidentally use blocking open() in async context.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["os", "platform_filesystem"],
+        "risk": "Behavior varies across operating systems. Path separators, case sensitivity, symlink behavior, and permission models differ between Linux, macOS, and Windows.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "file_io_scaling",
+      "category": "data_volume_scaling",
+      "description": "Read and write files of increasing size to measure I/O performance and memory behavior",
+      "parameters": {
+        "file_sizes_mb": [0.01, 0.1, 1, 10, 100, 1000],
+        "operations": ["read_text", "read_bytes", "write_text", "readline"],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Read time proportional to file size. read() memory equals file size. readline() constant memory.",
+      "failure_indicators": ["MemoryError", "memory > 2x_file_size", "timeout", "encoding_error"]
+    },
+    {
+      "name": "directory_listing_scaling",
+      "category": "data_volume_scaling",
+      "description": "List directories with increasing file counts to test scaling behavior",
+      "parameters": {
+        "file_counts": [10, 100, 1000, 10000, 100000],
+        "methods": ["listdir", "iterdir", "glob", "walk"],
+        "measure_memory": true,
+        "measure_time": true
+      },
+      "expected_behavior": "Time linear with file count. iterdir() is lazy; listdir() loads all at once.",
+      "failure_indicators": ["time_superlinear", "MemoryError", "too_many_open_files"]
+    },
+    {
+      "name": "file_handle_exhaustion",
+      "category": "memory_profiling",
+      "description": "Open files without closing to test file handle limits",
+      "parameters": {
+        "open_count": [10, 100, 500, 1024, 2048],
+        "with_close": [true, false],
+        "measure_handles": true
+      },
+      "expected_behavior": "Without close: hits FD limit. With close/context manager: handles released.",
+      "failure_indicators": ["too_many_open_files", "handle_leak_after_close", "OSError"]
+    },
+    {
+      "name": "concurrent_file_access",
+      "category": "concurrent_execution",
+      "description": "Multiple threads reading and writing same files to test data integrity",
+      "parameters": {
+        "thread_count": [2, 4, 8],
+        "operations_per_thread": 100,
+        "operations": ["read", "write", "append"],
+        "timeout_seconds": 30
+      },
+      "expected_behavior": "Concurrent reads safe. Concurrent writes may interleave. Appends may lose data.",
+      "failure_indicators": ["data_corruption", "file_truncation", "interleaved_writes", "OSError"]
+    },
+    {
+      "name": "path_security_edge_cases",
+      "category": "edge_case_input",
+      "description": "Test path construction with malicious and edge-case inputs",
+      "parameters": {
+        "path_inputs": ["../../../etc/passwd", "file%00.txt", "CON", "NUL", "very/deep/nested/path", "unicode_\u00e9\u00e8\u00ea"],
+        "operations": ["join", "resolve", "open", "exists"],
+        "apply_to": "all_detected_path_operations"
+      },
+      "expected_behavior": "Path traversal should be blocked by application logic. Special filenames handled per OS.",
+      "failure_indicators": ["path_traversal_success", "null_byte_injection", "unhandled_OSError"]
+    }
+  ]
+}

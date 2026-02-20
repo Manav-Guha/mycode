@@ -1,0 +1,232 @@
+{
+  "identity": {
+    "name": "chromadb",
+    "pypi_name": "chromadb",
+    "category": "database",
+    "description": "Open-source embedding database for AI applications — stores, indexes, and queries vector embeddings",
+    "current_stable_version": "0.6.3",
+    "min_supported_version": "0.4.0",
+    "version_notes": {
+      "0.6.0": "New storage engine, improved query performance, breaking API changes for client initialization",
+      "0.5.0": "Async support, new distance functions, collection configuration changes",
+      "0.4.0": "Client/server architecture, persistent storage rewrite, Settings() configuration"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "In-process or client/server vector database. In-memory mode is fast but limited by RAM. Persistent mode uses SQLite + hnswlib. Query performance depends on collection size, embedding dimensions, and index parameters.",
+    "concurrency_model": "single_writer_concurrent_readers",
+    "bottlenecks": [
+      {
+        "name": "in_memory_collection_size",
+        "description": "Default in-memory mode stores all embeddings in RAM. Large collections exhaust available memory quickly.",
+        "impact": "MemoryError when collection exceeds available RAM. 1M 1536-dim vectors = ~6GB."
+      },
+      {
+        "name": "hnsw_index_build_time",
+        "description": "HNSW index rebuild on large inserts is CPU-intensive. Bulk additions trigger index rebalancing.",
+        "impact": "Insert time grows with collection size. Large batch inserts can take minutes."
+      },
+      {
+        "name": "embedding_generation_not_included",
+        "description": "ChromaDB can auto-generate embeddings via embedding functions, but each add() or query() call triggers API calls to the embedding provider.",
+        "impact": "Throughput limited by embedding API rate limits when using auto-embedding"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "vectors_in_memory",
+        "typical_limit": "100K-1M",
+        "description": "Depends on embedding dimensions and available RAM. 1536-dim float32 = 6KB per vector."
+      },
+      {
+        "metric": "query_latency_ms",
+        "typical_limit": "1-50",
+        "description": "HNSW approximate nearest neighbor. Sub-millisecond for small collections, grows logarithmically."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 30,
+    "growth_pattern": "Memory dominated by: HNSW index (embeddings + graph structure ~1.5x raw embedding size), document metadata storage, and SQLite page cache for persistent mode. Collections remain in memory even when using persistent storage.",
+    "known_leaks": [
+      {
+        "name": "collection_not_deleted",
+        "description": "Creating multiple collections without deleting old ones. Each collection maintains its own index in memory.",
+        "trigger": "Repeated client.create_collection() without client.delete_collection()",
+        "versions_affected": "all"
+      },
+      {
+        "name": "query_result_accumulation",
+        "description": "Query results contain full documents, metadata, and embeddings. Storing many results accumulates large objects.",
+        "trigger": "Querying with include=['embeddings', 'documents'] and storing results in lists",
+        "versions_affected": "all"
+      },
+      {
+        "name": "persistent_cache_growth",
+        "description": "Persistent mode caches frequently accessed segments. Cache grows without bound under diverse query patterns.",
+        "trigger": "Querying many different collections or segments in persistent mode",
+        "versions_affected": ">=0.4.0"
+      }
+    ],
+    "gc_behavior": "Collections loaded into memory on first access. Deleting collection object does not free memory until GC runs. Persistent storage uses SQLite which has its own page cache."
+  },
+  "known_failure_modes": [
+    {
+      "name": "api_breaking_changes",
+      "description": "ChromaDB has had multiple breaking API changes across minor versions (0.4 to 0.5 to 0.6). Client initialization, collection creation, and query APIs changed.",
+      "trigger_conditions": "Upgrading chromadb without updating client code",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "chromadb.Client() vs chromadb.PersistentClient() vs chromadb.HttpClient() patterns"
+    },
+    {
+      "name": "embedding_dimension_mismatch",
+      "description": "Adding embeddings of different dimensions to the same collection. ChromaDB may not validate dimensions on add, causing corrupt index or query failures.",
+      "trigger_conditions": "Switching embedding models without creating a new collection",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Different embedding functions used with same collection"
+    },
+    {
+      "name": "duplicate_id_overwrite",
+      "description": "Adding documents with duplicate IDs silently overwrites existing entries. No warning or error. Vibe-coded apps often use sequential IDs that collide.",
+      "trigger_conditions": "Using non-unique IDs in collection.add()",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "IDs generated without uniqueness guarantee (sequential integers, timestamps)"
+    },
+    {
+      "name": "persistent_storage_corruption",
+      "description": "Abrupt termination during write can corrupt persistent storage. No WAL or crash recovery by default.",
+      "trigger_conditions": "Process killed during add() or update() operations in persistent mode",
+      "severity": "high",
+      "versions_affected": "<0.6.0",
+      "detection_hint": "PersistentClient usage without graceful shutdown handling"
+    },
+    {
+      "name": "metadata_filter_limitations",
+      "description": "Metadata filters have specific syntax. Complex filters may not work as expected. Some operations (regex, LIKE) not supported.",
+      "trigger_conditions": "Complex where or where_document filters in queries",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Complex metadata filter expressions in query() calls"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_collection_query",
+      "description": "Querying an empty collection returns empty results but some code expects non-empty arrays.",
+      "test_approach": "Query empty collections, verify return type and shape"
+    },
+    {
+      "name": "very_high_n_results",
+      "description": "Requesting n_results larger than collection size. Behavior varies by version.",
+      "test_approach": "Query with n_results > collection.count(), verify behavior"
+    },
+    {
+      "name": "special_characters_in_metadata",
+      "description": "Metadata values with special characters, very long strings, or non-string types.",
+      "test_approach": "Store and query metadata with edge-case values"
+    },
+    {
+      "name": "concurrent_add_and_query",
+      "description": "Adding documents while querying. Consistency guarantees unclear for in-process mode.",
+      "test_approach": "Concurrent add() and query() operations, verify result consistency"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["langchain", "llama-index", "openai", "sentence-transformers", "tiktoken"],
+    "known_conflicts": [
+      {
+        "dependency": "sqlite3",
+        "description": "ChromaDB uses SQLite internally. System SQLite version must support certain features. Old systems may have incompatible SQLite.",
+        "severity": "medium"
+      },
+      {
+        "dependency": "hnswlib",
+        "description": "ChromaDB bundles hnswlib. Installing hnswlib separately can cause version conflicts.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["chromadb", "hnswlib"],
+        "risk": "hnswlib is a C++ library with Python bindings. Build failures on some platforms (ARM Linux, older macOS).",
+        "severity": "medium"
+      },
+      {
+        "chain": ["chromadb", "sqlite3", "system_sqlite"],
+        "risk": "ChromaDB requires recent SQLite features. System-provided SQLite may be too old on some Linux distributions.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "collection_size_scaling",
+      "category": "data_volume_scaling",
+      "description": "Add progressively more vectors to test memory, query time, and insert time scaling",
+      "parameters": {
+        "vector_counts": [100, 1000, 10000, 100000],
+        "embedding_dimensions": 1536,
+        "measure_memory": true,
+        "measure_insert_time": true,
+        "measure_query_time": true
+      },
+      "expected_behavior": "Memory grows linearly with vector count. Query time grows logarithmically (HNSW). Insert time grows with index rebalancing.",
+      "failure_indicators": ["MemoryError", "query_time > 1s", "insert_time_superlinear", "index_corruption"]
+    },
+    {
+      "name": "concurrent_operations",
+      "category": "concurrent_execution",
+      "description": "Concurrent reads and writes to test thread safety and consistency",
+      "parameters": {
+        "reader_threads": [2, 5, 10],
+        "writer_threads": [1, 2],
+        "operations_per_thread": 100,
+        "collection_size": 10000,
+        "timeout_seconds": 60
+      },
+      "expected_behavior": "Reads are concurrent-safe. Writes serialize. No data corruption.",
+      "failure_indicators": ["data_corruption", "inconsistent_count", "deadlock", "timeout"]
+    },
+    {
+      "name": "batch_insert_memory",
+      "category": "memory_profiling",
+      "description": "Insert large batches to test memory behavior during index building",
+      "parameters": {
+        "batch_sizes": [100, 1000, 10000],
+        "total_vectors": 100000,
+        "measure_peak_memory": true,
+        "measure_insert_time": true
+      },
+      "expected_behavior": "Larger batches are more efficient. Peak memory during insert higher than steady state.",
+      "failure_indicators": ["MemoryError", "peak_memory > 3x_steady_state", "insert_failure"]
+    },
+    {
+      "name": "query_accuracy_at_scale",
+      "category": "data_volume_scaling",
+      "description": "Verify retrieval quality doesn't degrade with collection size (approximate nearest neighbor)",
+      "parameters": {
+        "collection_sizes": [100, 1000, 10000, 100000],
+        "n_results": 10,
+        "known_nearest_neighbors": true,
+        "measure_recall": true
+      },
+      "expected_behavior": "HNSW maintains high recall (>95%) even at scale. Slight degradation possible at extreme sizes.",
+      "failure_indicators": ["recall < 90%", "wrong_results", "query_failure"]
+    },
+    {
+      "name": "persistence_reliability",
+      "category": "edge_case_input",
+      "description": "Test data persistence across restart cycles with various interruption scenarios",
+      "parameters": {
+        "operations": ["add_restart_query", "add_kill_restart_query", "concurrent_add_restart"],
+        "collection_size": 1000,
+        "restart_cycles": 5
+      },
+      "expected_behavior": "Data persists across clean restarts. Graceful degradation on forced kill.",
+      "failure_indicators": ["data_loss", "corruption_after_restart", "index_rebuild_required"]
+    }
+  ]
+}

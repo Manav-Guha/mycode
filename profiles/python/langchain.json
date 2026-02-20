@@ -1,0 +1,235 @@
+{
+  "identity": {
+    "name": "langchain",
+    "pypi_name": "langchain",
+    "category": "ai_framework",
+    "description": "Framework for building applications with large language models — chains, agents, retrieval, and memory",
+    "current_stable_version": "0.3.14",
+    "min_supported_version": "0.2.0",
+    "version_notes": {
+      "0.3.0": "Pydantic v2 required, deprecated imports removed, langchain-community split completed",
+      "0.2.0": "Package split: langchain-core, langchain-community, langchain-openai etc. Old monolithic imports break."
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Orchestration layer — performance dominated by LLM API calls and retrieval operations. Chain execution is sequential by default. Agent loops can make unbounded LLM calls. Token costs scale with chain complexity and context window usage.",
+    "concurrency_model": "sequential_chain",
+    "bottlenecks": [
+      {
+        "name": "sequential_chain_latency",
+        "description": "Chains execute steps sequentially. A 5-step chain makes 5 serial LLM calls. Total latency = sum of all call latencies.",
+        "impact": "Response time grows linearly with chain length. No parallelism by default."
+      },
+      {
+        "name": "agent_loop_unbounded",
+        "description": "Agent loops can make unlimited LLM calls until they decide to stop. Without max_iterations, a confused agent loops indefinitely.",
+        "impact": "Unbounded cost and latency. Single request can consume hundreds of API calls."
+      },
+      {
+        "name": "context_window_stuffing",
+        "description": "Retrieval chains stuff retrieved documents into the context. More documents = more tokens = higher cost and latency per call.",
+        "impact": "Token cost and latency grow with number of retrieved documents"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "chain_steps",
+        "typical_limit": "3-10",
+        "description": "Practical limit before latency becomes unacceptable (3-30 seconds per step)"
+      },
+      {
+        "metric": "agent_iterations",
+        "typical_limit": "5-15",
+        "description": "Agents that don't converge within 15 iterations usually won't converge at all"
+      },
+      {
+        "metric": "concurrent_chain_executions",
+        "typical_limit": "10-50",
+        "description": "Limited by LLM API rate limits and memory for context accumulation"
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 50,
+    "growth_pattern": "Moderate baseline. Memory grows with: conversation history in memory objects, retrieved documents held in context, chain intermediate results, and vector store embeddings if in-process. Long conversations with ConversationBufferMemory grow without bound.",
+    "known_leaks": [
+      {
+        "name": "conversation_memory_unbounded",
+        "description": "ConversationBufferMemory stores entire conversation history. No automatic truncation or summarization.",
+        "trigger": "Long conversations without ConversationSummaryMemory or max token limits",
+        "versions_affected": "all"
+      },
+      {
+        "name": "document_retention_in_chains",
+        "description": "Retrieved documents stored in chain intermediate results. RetrievalQA with many documents accumulates document objects.",
+        "trigger": "High-frequency retrieval chains with many documents per query",
+        "versions_affected": "all"
+      },
+      {
+        "name": "callback_handler_accumulation",
+        "description": "Custom callback handlers that store data (logging, tracing) accumulate across invocations without cleanup.",
+        "trigger": "Callback handlers appending to lists or dicts without size limits",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Chain and memory objects persist as long as referenced. Vector store backends may hold large embeddings in-process."
+  },
+  "known_failure_modes": [
+    {
+      "name": "package_split_import_errors",
+      "description": "LangChain 0.2+ split into langchain-core, langchain-community, langchain-openai, etc. Old import paths (from langchain.llms import OpenAI) fail.",
+      "trigger_conditions": "Code written for langchain 0.1.x running with 0.2+ installed",
+      "severity": "critical",
+      "versions_affected": ">=0.2.0",
+      "detection_hint": "Imports from langchain.llms, langchain.chat_models, langchain.embeddings (should be langchain-openai etc.)"
+    },
+    {
+      "name": "agent_infinite_loop",
+      "description": "Agents without max_iterations can loop indefinitely, making unlimited LLM calls. Each iteration costs tokens.",
+      "trigger_conditions": "Agent with ambiguous task and no max_iterations or time limit",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "AgentExecutor without max_iterations parameter"
+    },
+    {
+      "name": "api_key_exposure_in_chain",
+      "description": "API keys stored in chain objects. Serializing or logging chains can expose keys.",
+      "trigger_conditions": "Serializing chain to JSON/dict, verbose logging enabled",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Chain serialization, verbose=True in production"
+    },
+    {
+      "name": "token_limit_exceeded",
+      "description": "Context window overflow when conversation memory + retrieved docs + prompt template exceed model's token limit. Results in API error or silent truncation.",
+      "trigger_conditions": "Long conversation + large retrieval context + verbose prompt template",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No max_token_limit on memory, large k value in retriever"
+    },
+    {
+      "name": "pydantic_v1_v2_conflict",
+      "description": "LangChain 0.3+ requires Pydantic v2. Earlier versions used Pydantic v1. Mixed dependencies cause validation errors.",
+      "trigger_conditions": "Upgrading langchain without upgrading Pydantic, or vice versa",
+      "severity": "high",
+      "versions_affected": ">=0.3.0",
+      "detection_hint": "Pydantic v1 patterns (.dict(), .schema()) in LangChain custom classes"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_retrieval_results",
+      "description": "Vector store returns no results for a query. Chain may fail or produce hallucinated answers without retrieved context.",
+      "test_approach": "Query retrieval chains with topics not in the vector store"
+    },
+    {
+      "name": "llm_api_rate_limiting",
+      "description": "Concurrent chain executions hitting LLM API rate limits. No built-in retry with backoff by default.",
+      "test_approach": "Run multiple chains concurrently, increasing rate until API rate limit hit"
+    },
+    {
+      "name": "malformed_llm_output",
+      "description": "LLM returns unexpected format. Output parsers fail, breaking chain execution.",
+      "test_approach": "Inject malformed responses to test output parser resilience"
+    },
+    {
+      "name": "very_long_input_text",
+      "description": "User input that approaches or exceeds token limit leaves no room for LLM response or retrieved context.",
+      "test_approach": "Send progressively longer inputs, verify graceful handling of token overflow"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["openai", "anthropic", "chromadb", "faiss-cpu", "pinecone-client", "tiktoken", "pydantic"],
+    "known_conflicts": [
+      {
+        "dependency": "pydantic",
+        "description": "LangChain 0.3+ requires Pydantic v2. Projects using Pydantic v1 patterns with LangChain will break.",
+        "severity": "high"
+      },
+      {
+        "dependency": "openai",
+        "description": "LangChain wraps OpenAI SDK. Version mismatches between langchain-openai and openai SDK cause attribute errors.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["langchain", "langchain-core", "langchain-community"],
+        "risk": "The package split means all three packages must be version-compatible. Mixing versions causes import errors.",
+        "severity": "high"
+      },
+      {
+        "chain": ["langchain", "tiktoken"],
+        "risk": "Token counting depends on tiktoken. Missing tiktoken causes fallback to approximate counting, affecting memory management.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "chain_length_scaling",
+      "category": "data_volume_scaling",
+      "description": "Execute chains with increasing number of steps to measure latency and token cost growth",
+      "parameters": {
+        "chain_steps": [1, 3, 5, 10],
+        "input_token_sizes": [100, 500, 2000],
+        "measure_latency": true,
+        "measure_token_count": true
+      },
+      "expected_behavior": "Latency and cost grow linearly with chain steps. Each step adds one LLM round-trip.",
+      "failure_indicators": ["timeout", "token_limit_exceeded", "cost > budget", "chain_error"]
+    },
+    {
+      "name": "agent_iteration_limit",
+      "category": "edge_case_input",
+      "description": "Test agent behavior with ambiguous tasks to verify iteration limits work",
+      "parameters": {
+        "max_iterations": [5, 10, 25, null],
+        "task_ambiguity": ["clear", "moderate", "highly_ambiguous"],
+        "measure_iterations": true,
+        "measure_cost": true
+      },
+      "expected_behavior": "Agent converges or hits max_iterations. Without limit, may loop indefinitely.",
+      "failure_indicators": ["infinite_loop", "no_max_iterations", "cost > 10x_expected", "timeout"]
+    },
+    {
+      "name": "conversation_memory_growth",
+      "category": "memory_profiling",
+      "description": "Run extended conversations to test memory growth with different memory strategies",
+      "parameters": {
+        "conversation_turns": [10, 50, 100, 500],
+        "memory_types": ["buffer", "summary", "window"],
+        "message_size_tokens": 200,
+        "measure_memory": true,
+        "measure_token_count": true
+      },
+      "expected_behavior": "Buffer memory grows linearly. Window memory stays constant. Summary memory grows slowly.",
+      "failure_indicators": ["memory_unbounded_growth", "token_limit_exceeded", "MemoryError"]
+    },
+    {
+      "name": "retrieval_volume_scaling",
+      "category": "data_volume_scaling",
+      "description": "Increase number of retrieved documents to test context window management",
+      "parameters": {
+        "k_values": [1, 5, 10, 20, 50],
+        "document_sizes_tokens": [100, 500, 1000],
+        "measure_token_count": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Token count grows linearly with k * doc_size. At some k, context window exceeded.",
+      "failure_indicators": ["token_limit_exceeded", "silent_truncation", "retrieval_timeout"]
+    },
+    {
+      "name": "concurrent_chain_execution",
+      "category": "concurrent_execution",
+      "description": "Execute multiple chains concurrently to test rate limiting and resource contention",
+      "parameters": {
+        "concurrent_chains": [2, 5, 10, 25],
+        "chain_type": "simple_llm_chain",
+        "timeout_seconds": 120
+      },
+      "expected_behavior": "Throughput limited by API rate limits. Errors on rate limit with no retry.",
+      "failure_indicators": ["rate_limit_error", "timeout", "inconsistent_results", "memory_spike"]
+    }
+  ]
+}

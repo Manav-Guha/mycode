@@ -1,0 +1,229 @@
+{
+  "identity": {
+    "name": "llamaindex",
+    "pypi_name": "llama-index",
+    "category": "ai_framework",
+    "description": "Data framework for LLM applications — indexing, retrieval, and query engines over custom data",
+    "current_stable_version": "0.12.3",
+    "min_supported_version": "0.10.0",
+    "version_notes": {
+      "0.12.0": "Workflow engine stable, improved async support, new document transformations",
+      "0.11.0": "Package restructuring, llama-index-core split, new ingestion pipeline",
+      "0.10.0": "Major package split into llama-index-core and integration packages"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Indexing and query orchestration over custom data. Performance dominated by embedding generation, vector store operations, and LLM calls. Index building is I/O-bound (embedding API calls). Query time depends on retrieval strategy and LLM response generation.",
+    "concurrency_model": "sequential_with_async",
+    "bottlenecks": [
+      {
+        "name": "embedding_generation_at_index_time",
+        "description": "Building an index requires generating embeddings for all documents. Each chunk is an API call (or batched call). Large document sets take significant time.",
+        "impact": "Index build time = documents * chunks_per_doc * embedding_latency. Can take hours for large corpora."
+      },
+      {
+        "name": "llm_calls_per_query",
+        "description": "Complex query engines (tree summarize, multi-step) make multiple LLM calls per user query. Cost and latency multiply.",
+        "impact": "Single query can trigger 5-20 LLM calls depending on response synthesis strategy"
+      },
+      {
+        "name": "in_memory_index_size",
+        "description": "Default VectorStoreIndex stores embeddings in memory. Large document sets require proportional RAM.",
+        "impact": "Memory grows with index size. 100K documents with 1536-dim embeddings = ~600MB just for vectors."
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "documents_in_memory_index",
+        "typical_limit": "10K-100K",
+        "description": "Depends on embedding dimensions and available RAM. External vector stores needed beyond this."
+      },
+      {
+        "metric": "concurrent_queries",
+        "typical_limit": "5-20",
+        "description": "Limited by LLM API rate limits. Each query makes 1+ LLM calls."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 60,
+    "growth_pattern": "Memory dominated by: in-memory vector index (embeddings), document store (raw text), node storage, and LLM response caches. Index persistence to disk reduces runtime memory but loading deserializes everything.",
+    "known_leaks": [
+      {
+        "name": "index_rebuild_accumulation",
+        "description": "Rebuilding indexes without clearing old ones accumulates multiple copies of embeddings in memory.",
+        "trigger": "Repeated VectorStoreIndex.from_documents() calls without deleting old index",
+        "versions_affected": "all"
+      },
+      {
+        "name": "response_cache_growth",
+        "description": "LLM response caches grow without eviction policy. Repeated queries with unique inputs accumulate cached responses.",
+        "trigger": "Many unique queries with caching enabled",
+        "versions_affected": "all"
+      },
+      {
+        "name": "document_store_duplication",
+        "description": "Re-ingesting documents without deduplication creates duplicate nodes in the index. Memory and retrieval quality affected.",
+        "trigger": "Running ingestion pipeline on already-indexed documents",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Index objects hold large numpy arrays for embeddings. Deleting index object frees memory if no other references exist."
+  },
+  "known_failure_modes": [
+    {
+      "name": "package_split_import_errors",
+      "description": "LlamaIndex 0.10+ split into llama-index-core and integration packages. Old imports (from llama_index import VectorStoreIndex) may fail.",
+      "trigger_conditions": "Code written for llama-index <0.10 running with newer version",
+      "severity": "critical",
+      "versions_affected": ">=0.10.0",
+      "detection_hint": "Imports from llama_index directly instead of llama_index.core"
+    },
+    {
+      "name": "api_key_not_configured",
+      "description": "LlamaIndex defaults to OpenAI for embeddings and LLM. Missing OPENAI_API_KEY causes cryptic error on first query, not at import time.",
+      "trigger_conditions": "No API key set, using default OpenAI settings",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No explicit LLM or embed_model configuration, no OPENAI_API_KEY in environment"
+    },
+    {
+      "name": "context_window_overflow",
+      "description": "Retrieved nodes plus prompt plus query exceed model context window. Results in API error or truncated context.",
+      "trigger_conditions": "Large similarity_top_k with long documents and verbose prompt templates",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "High similarity_top_k (>10) without chunk size management"
+    },
+    {
+      "name": "embedding_dimension_mismatch",
+      "description": "Querying an index built with one embedding model using a different model. Dimension mismatch causes silent bad results or errors.",
+      "trigger_conditions": "Changing embedding model after building index, or loading persisted index with different model",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "embed_model changed between index build and query time"
+    },
+    {
+      "name": "index_persistence_corruption",
+      "description": "Persisted index files become incompatible after LlamaIndex version upgrade. Loading old index with new version fails.",
+      "trigger_conditions": "Upgrading llama-index with persisted index directory",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "storage_context.persist() / load_index_from_storage patterns"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_document_set",
+      "description": "Building index with no documents or documents that produce no nodes after chunking.",
+      "test_approach": "Build index with empty documents, single-character documents, and documents shorter than chunk size"
+    },
+    {
+      "name": "very_long_documents",
+      "description": "Documents that exceed chunk size by orders of magnitude produce many nodes. Index size and retrieval quality affected.",
+      "test_approach": "Index progressively longer documents, measure node count, memory, and retrieval relevance"
+    },
+    {
+      "name": "non_text_content",
+      "description": "PDF, HTML, or other formats with extraction failures produce empty or garbled text nodes.",
+      "test_approach": "Index documents with images, tables, encoded content, and verify extracted text quality"
+    },
+    {
+      "name": "concurrent_index_modification",
+      "description": "Inserting documents while querying. In-memory index is not thread-safe for concurrent writes.",
+      "test_approach": "Concurrent insert and query operations on shared index"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["openai", "anthropic", "chromadb", "pinecone-client", "weaviate-client", "pypdf", "beautifulsoup4"],
+    "known_conflicts": [
+      {
+        "dependency": "langchain",
+        "description": "Both frameworks provide similar functionality. Using both in same project creates confusion about which retrieval/chain to use. Dependency version conflicts common.",
+        "severity": "medium"
+      },
+      {
+        "dependency": "openai",
+        "description": "LlamaIndex wraps OpenAI SDK. Version mismatches between llama-index-llms-openai and openai SDK cause errors.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["llama-index", "llama-index-core", "llama-index-llms-openai"],
+        "risk": "Package split means core and integration packages must be version-compatible. Mixed versions cause import errors.",
+        "severity": "high"
+      },
+      {
+        "chain": ["llama-index", "tiktoken"],
+        "risk": "Token counting for chunk sizing depends on tiktoken. Missing or wrong version affects chunk boundaries.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "index_build_scaling",
+      "category": "data_volume_scaling",
+      "description": "Build indexes with increasing document counts to measure time, memory, and API call scaling",
+      "parameters": {
+        "document_counts": [10, 50, 100, 500, 1000],
+        "document_size_tokens": 500,
+        "measure_memory": true,
+        "measure_time": true,
+        "measure_api_calls": true
+      },
+      "expected_behavior": "Time and API calls grow linearly with document count. Memory proportional to index size.",
+      "failure_indicators": ["MemoryError", "api_rate_limit", "timeout", "cost > budget"]
+    },
+    {
+      "name": "query_retrieval_scaling",
+      "category": "data_volume_scaling",
+      "description": "Query with increasing similarity_top_k to test context management and response quality",
+      "parameters": {
+        "k_values": [1, 5, 10, 20, 50],
+        "index_sizes": [100, 1000],
+        "measure_token_count": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Token count grows linearly with k. At some k, context window exceeded.",
+      "failure_indicators": ["context_overflow", "silent_truncation", "response_quality_degradation", "timeout"]
+    },
+    {
+      "name": "index_memory_profiling",
+      "category": "memory_profiling",
+      "description": "Monitor memory during index build, query, and rebuild cycles",
+      "parameters": {
+        "documents": 500,
+        "cycles": 5,
+        "operations_per_cycle": ["build", "query_10", "rebuild"],
+        "measure_interval": "per_operation"
+      },
+      "expected_behavior": "Memory should release after index replacement. Steady growth indicates leak.",
+      "failure_indicators": ["memory_growth_per_cycle", "no_gc_after_rebuild", "MemoryError"]
+    },
+    {
+      "name": "concurrent_query_load",
+      "category": "concurrent_execution",
+      "description": "Run concurrent queries against shared index to test thread safety and API rate limits",
+      "parameters": {
+        "concurrent_queries": [2, 5, 10, 25],
+        "queries_per_batch": 10,
+        "timeout_seconds": 120
+      },
+      "expected_behavior": "Throughput limited by API rate limits. In-memory index reads are thread-safe.",
+      "failure_indicators": ["rate_limit_error", "corrupted_results", "timeout", "index_corruption"]
+    },
+    {
+      "name": "edge_case_documents",
+      "category": "edge_case_input",
+      "description": "Index and query with edge-case documents: empty, huge, non-text, special characters",
+      "parameters": {
+        "document_types": ["empty", "single_char", "100k_tokens", "unicode_heavy", "binary_content"],
+        "operations": ["index", "query"]
+      },
+      "expected_behavior": "Graceful handling of all document types. Empty docs skipped, large docs chunked properly.",
+      "failure_indicators": ["crash_on_empty", "MemoryError_on_large", "encoding_error", "silent_skip"]
+    }
+  ]
+}

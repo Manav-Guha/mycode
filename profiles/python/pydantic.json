@@ -1,0 +1,230 @@
+{
+  "identity": {
+    "name": "pydantic",
+    "pypi_name": "pydantic",
+    "category": "data_processing",
+    "description": "Data validation library using Python type annotations — runtime type checking, serialization, and settings management",
+    "current_stable_version": "2.10.5",
+    "min_supported_version": "2.0.0",
+    "version_notes": {
+      "2.10.0": "Performance improvements, new model_post_init handling, discriminated union enhancements",
+      "2.0.0": "Complete rewrite with Rust core (pydantic-core). Breaking API changes: .dict() → .model_dump(), .schema() → .model_json_schema(), Config class → model_config dict, validator → field_validator/model_validator.",
+      "1.10.0": "Last 1.x release. Widely used in tutorials and vibe-coded projects."
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Validation library, not an application framework. Performance characteristics affect every request in web frameworks that use it (FastAPI, LangChain). v2 Rust core is 5-50x faster than v1 pure Python. Validation overhead significant for complex nested models.",
+    "concurrency_model": "synchronous_cpu",
+    "bottlenecks": [
+      {
+        "name": "complex_model_validation",
+        "description": "Deeply nested models with many validators add per-instance CPU cost. In hot paths (every request), this compounds.",
+        "impact": "Microseconds per simple model, milliseconds per complex nested model. At 1000 req/s, this matters."
+      },
+      {
+        "name": "schema_generation_at_import",
+        "description": "Pydantic generates JSON schemas at class definition time. Many complex models slow down import/startup.",
+        "impact": "Startup time increases with model count and complexity. Cold start affected in serverless."
+      },
+      {
+        "name": "serialization_of_large_models",
+        "description": "model_dump() and model_dump_json() on large models (many fields, nested objects) has CPU cost.",
+        "impact": "Serialization can dominate response time for large API responses"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "validations_per_second",
+        "typical_limit": "100K-1M",
+        "description": "v2 with simple models. Drops to 10K-100K for complex nested models."
+      },
+      {
+        "metric": "model_fields",
+        "typical_limit": "100-500",
+        "description": "Models with hundreds of fields have slow schema generation and validation."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 5,
+    "growth_pattern": "Minimal standalone footprint. Memory from: model instance data, cached validators and schemas, and serialized outputs. Model schemas are generated once and cached per class.",
+    "known_leaks": [
+      {
+        "name": "dynamic_model_creation",
+        "description": "Creating models dynamically with create_model() in a loop. Each call generates a new class with cached validators.",
+        "trigger": "Repeated create_model() or type() calls to generate Pydantic model classes",
+        "versions_affected": "all"
+      },
+      {
+        "name": "validator_closure_retention",
+        "description": "Custom validators that capture large objects in closures. Each model class retains these closures.",
+        "trigger": "Validators referencing large external data structures",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Model instances are regular Python objects, GC-eligible when unreferenced. Class-level schemas and validators persist for the lifetime of the class."
+  },
+  "known_failure_modes": [
+    {
+      "name": "v1_to_v2_migration_break",
+      "description": "Pydantic v2 is a complete rewrite with breaking changes. Every v1 pattern breaks: .dict() → .model_dump(), .schema() → .model_json_schema(), validator → field_validator. Most vibe-coded projects use v1 patterns from tutorials.",
+      "trigger_conditions": "Code using Pydantic v1 API with v2 installed",
+      "severity": "critical",
+      "versions_affected": ">=2.0.0",
+      "detection_hint": ".dict(), .schema(), .parse_obj(), .parse_raw(), class Config:, @validator decorator"
+    },
+    {
+      "name": "silent_type_coercion",
+      "description": "Pydantic coerces types by default (string '123' → int 123). This can mask bugs where wrong types are passed. strict mode disables coercion but is opt-in.",
+      "trigger_conditions": "Passing string numbers, boolean-like strings, or other coercible values",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "No strict=True in model_config, fields accepting multiple types implicitly"
+    },
+    {
+      "name": "validation_error_information_leak",
+      "description": "ValidationError messages include field values by default. In web APIs, this can expose sensitive data in error responses.",
+      "trigger_conditions": "Invalid input to models containing sensitive fields (passwords, tokens)",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Models with sensitive fields without custom error handlers"
+    },
+    {
+      "name": "circular_reference_models",
+      "description": "Models referencing each other (e.g., Parent has list[Child], Child has Parent). Requires model_rebuild() or forward references. Often misconfigured in vibe code.",
+      "trigger_conditions": "Two models with mutual type references",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Forward reference strings in model field types, model_rebuild() calls"
+    },
+    {
+      "name": "json_schema_incompatibility",
+      "description": "Generated JSON schemas may not be compatible with all schema consumers. Custom types may produce schemas that OpenAPI/Swagger can't render.",
+      "trigger_conditions": "Complex custom types, Union types, or discriminated unions in API models",
+      "severity": "medium",
+      "versions_affected": ">=2.0.0",
+      "detection_hint": "Complex Union types or custom types in FastAPI response models"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "none_vs_missing_field",
+      "description": "Distinction between None value and missing field. Optional[int] = None vs field not provided. Behavior changed between v1 and v2.",
+      "test_approach": "Create instances with None values, missing fields, and explicit defaults"
+    },
+    {
+      "name": "deeply_nested_validation",
+      "description": "Deeply nested models (5+ levels) with validators at each level. Validation error messages become very long.",
+      "test_approach": "Validate data with increasing nesting depth, measure time and error message size"
+    },
+    {
+      "name": "extra_fields_handling",
+      "description": "Extra fields in input data. Default behavior (ignore in v2) can cause silent data loss if field name is misspelled.",
+      "test_approach": "Pass data with extra fields, misspelled field names, and verify behavior"
+    },
+    {
+      "name": "very_large_model_instances",
+      "description": "Models with thousands of instances created in batch. Memory and validation time at scale.",
+      "test_approach": "Create batches of model instances of increasing size, measure memory and time"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["fastapi", "sqlalchemy", "langchain", "openai", "anthropic", "pydantic-settings"],
+    "known_conflicts": [
+      {
+        "dependency": "fastapi",
+        "description": "FastAPI >=0.100 requires Pydantic v2. FastAPI <0.100 requires Pydantic v1. Must match versions.",
+        "severity": "critical"
+      },
+      {
+        "dependency": "langchain",
+        "description": "LangChain 0.3+ requires Pydantic v2. Earlier versions require v1. Version mismatch causes import errors.",
+        "severity": "high"
+      },
+      {
+        "dependency": "sqlalchemy",
+        "description": "SQLModel and some ORMs bridge Pydantic and SQLAlchemy. Pydantic version affects these bridges.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["pydantic", "pydantic-core"],
+        "risk": "Pydantic v2 depends on pydantic-core (Rust compiled). Build failures on unsupported platforms. Version must match exactly.",
+        "severity": "high"
+      },
+      {
+        "chain": ["pydantic", "pydantic-settings"],
+        "risk": "Settings management split into separate package in v2. Missing pydantic-settings causes ImportError for BaseSettings.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "validation_throughput",
+      "category": "data_volume_scaling",
+      "description": "Validate increasing numbers of model instances to measure throughput and memory",
+      "parameters": {
+        "instance_counts": [100, 1000, 10000, 100000],
+        "model_complexity": ["simple_5_fields", "nested_3_levels", "complex_50_fields"],
+        "measure_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "v2: 100K+ simple validations/second. Scales linearly. Complex models slower.",
+      "failure_indicators": ["throughput < 10K/s_simple", "memory_growth_per_instance", "validation_error_spam"]
+    },
+    {
+      "name": "nested_model_depth",
+      "category": "data_volume_scaling",
+      "description": "Validate models with increasing nesting depth to find performance cliffs",
+      "parameters": {
+        "nesting_depths": [1, 3, 5, 10, 20],
+        "fields_per_level": 5,
+        "instances_per_depth": 1000,
+        "measure_time": true
+      },
+      "expected_behavior": "Validation time grows with nesting. Error messages grow with depth.",
+      "failure_indicators": ["validation_time > 10ms_at_depth_5", "RecursionError", "error_message > 10KB"]
+    },
+    {
+      "name": "serialization_performance",
+      "category": "data_volume_scaling",
+      "description": "Serialize models of increasing size and complexity",
+      "parameters": {
+        "field_counts": [5, 20, 50, 100, 500],
+        "instances": 10000,
+        "methods": ["model_dump", "model_dump_json"],
+        "measure_time": true,
+        "measure_output_size": true
+      },
+      "expected_behavior": "Serialization time proportional to field count. JSON output size proportional to data.",
+      "failure_indicators": ["serialization_time > 1ms_per_instance", "memory_spike_during_serialization"]
+    },
+    {
+      "name": "dynamic_model_creation_stress",
+      "category": "memory_profiling",
+      "description": "Create many dynamic models to test schema cache memory behavior",
+      "parameters": {
+        "model_count": [10, 100, 1000, 10000],
+        "fields_per_model": 10,
+        "measure_memory": true,
+        "measure_creation_time": true
+      },
+      "expected_behavior": "Each model class consumes memory for schema. Creation time constant per model.",
+      "failure_indicators": ["memory_growth_per_model > 100KB", "creation_time_increasing", "MemoryError"]
+    },
+    {
+      "name": "edge_case_validation",
+      "category": "edge_case_input",
+      "description": "Validate with edge-case inputs: wrong types, extra fields, missing fields, None values",
+      "parameters": {
+        "input_types": ["correct", "wrong_type", "extra_fields", "missing_required", "all_none", "empty_dict"],
+        "models": "all_detected",
+        "measure_error_quality": true
+      },
+      "expected_behavior": "Clear ValidationError for invalid inputs. No silent data corruption.",
+      "failure_indicators": ["silent_coercion_bug", "confusing_error_message", "data_loss", "crash"]
+    }
+  ]
+}

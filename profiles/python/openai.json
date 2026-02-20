@@ -1,0 +1,228 @@
+{
+  "identity": {
+    "name": "openai",
+    "pypi_name": "openai",
+    "category": "ai_framework",
+    "description": "Official Python client for the OpenAI API — chat completions, embeddings, images, audio, and assistants",
+    "current_stable_version": "1.61.0",
+    "min_supported_version": "1.0.0",
+    "version_notes": {
+      "1.61.0": "Responses API support, structured outputs improvements, streaming enhancements",
+      "1.0.0": "Complete API rewrite: new client-based interface, Pydantic models for responses, async support. Breaking change from 0.x."
+    }
+  },
+  "scaling_characteristics": {
+    "description": "HTTP client wrapping OpenAI REST API. Performance dominated by API latency (500ms-60s depending on model and token count). Supports sync and async clients. Connection pooling via httpx. Rate limited by OpenAI per-organization quotas.",
+    "concurrency_model": "http_client_async",
+    "bottlenecks": [
+      {
+        "name": "api_latency",
+        "description": "Each API call has minimum latency of 500ms-2s for simple completions, up to 60s+ for large contexts. Streaming reduces time-to-first-token but not total time.",
+        "impact": "Sequential calls accumulate latency. Chain of 5 calls = 5x single-call latency."
+      },
+      {
+        "name": "rate_limiting",
+        "description": "OpenAI enforces rate limits per organization (requests/min and tokens/min). Burst traffic quickly hits limits.",
+        "impact": "429 errors with retry-after headers. Throughput capped at tier-specific limits."
+      },
+      {
+        "name": "token_cost_scaling",
+        "description": "Cost scales with input + output tokens. Large contexts (RAG, long conversations) increase cost per call significantly.",
+        "impact": "Cost can grow 10-100x with increasing context size"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "requests_per_minute",
+        "typical_limit": "60-10000",
+        "description": "Depends on OpenAI tier. Free tier: 60 RPM. Tier 5: 10,000 RPM."
+      },
+      {
+        "metric": "tokens_per_minute",
+        "typical_limit": "40000-30000000",
+        "description": "Depends on model and tier. GPT-4: lower limits. GPT-3.5: higher limits."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 15,
+    "growth_pattern": "Client itself is lightweight (httpx-based). Memory growth from: response objects retained in variables, streaming chunks accumulated in memory, conversation history built up for multi-turn interactions.",
+    "known_leaks": [
+      {
+        "name": "streaming_response_not_closed",
+        "description": "Streaming responses that are not fully consumed or closed keep HTTP connections open.",
+        "trigger": "Breaking out of streaming loop early without closing the response",
+        "versions_affected": ">=1.0.0"
+      },
+      {
+        "name": "conversation_history_accumulation",
+        "description": "Building messages list for multi-turn conversations. Each turn adds user + assistant messages. Without truncation, memory and token cost grow without bound.",
+        "trigger": "Appending to messages list without trimming old messages",
+        "versions_affected": "all"
+      },
+      {
+        "name": "response_object_retention",
+        "description": "Storing full ChatCompletion response objects in lists. Each contains full response, usage stats, and metadata.",
+        "trigger": "Logging or accumulating response objects in memory",
+        "versions_affected": ">=1.0.0"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Client uses httpx connection pool, cleaned up on client.close() or GC."
+  },
+  "known_failure_modes": [
+    {
+      "name": "v0_to_v1_migration_break",
+      "description": "OpenAI SDK 1.0 completely rewrote the API. openai.ChatCompletion.create() → client.chat.completions.create(). All 0.x code breaks.",
+      "trigger_conditions": "Code written for openai 0.x running with 1.x installed",
+      "severity": "critical",
+      "versions_affected": ">=1.0.0",
+      "detection_hint": "openai.ChatCompletion, openai.Completion, openai.Embedding class-level calls"
+    },
+    {
+      "name": "api_key_exposure",
+      "description": "API key hardcoded in source or logged. Common in vibe-coded apps where key is set inline: openai.api_key = 'sk-...'",
+      "trigger_conditions": "API key in source code, logs, or error messages",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "Literal 'sk-' strings in source, openai.api_key assignment"
+    },
+    {
+      "name": "rate_limit_no_retry",
+      "description": "Hitting rate limits without retry logic. SDK raises RateLimitError but vibe-coded apps don't catch it.",
+      "trigger_conditions": "Burst traffic exceeding per-minute rate limits",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "API calls without try/except for openai.RateLimitError"
+    },
+    {
+      "name": "context_window_overflow",
+      "description": "Sending more tokens than the model's context window. API returns error, but conversation history builders often don't check token count.",
+      "trigger_conditions": "Long conversation + large system prompt exceeds model context",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Growing messages list without token counting or truncation"
+    },
+    {
+      "name": "streaming_error_handling",
+      "description": "Errors during streaming (network drop, API error mid-stream) can leave partial responses. Many apps don't handle mid-stream failures.",
+      "trigger_conditions": "Network interruption during stream=True response",
+      "severity": "medium",
+      "versions_affected": ">=1.0.0",
+      "detection_hint": "stream=True without try/except around the streaming loop"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_messages_list",
+      "description": "Sending empty messages list or messages without required 'role' field causes API error.",
+      "test_approach": "Send requests with empty messages, missing roles, and invalid message structures"
+    },
+    {
+      "name": "very_long_system_prompt",
+      "description": "System prompt consuming most of the context window leaves little room for user input and response.",
+      "test_approach": "Send requests with system prompts of increasing size, measure response quality and token usage"
+    },
+    {
+      "name": "special_characters_in_content",
+      "description": "Unicode, control characters, and very long strings in message content.",
+      "test_approach": "Send messages with various Unicode categories, null bytes, and extreme lengths"
+    },
+    {
+      "name": "concurrent_streaming_responses",
+      "description": "Multiple simultaneous streaming responses consume connection pool slots and memory per stream.",
+      "test_approach": "Open multiple streaming connections concurrently, monitor memory and connection pool"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["langchain", "llama-index", "tiktoken", "pydantic", "flask", "fastapi", "streamlit"],
+    "known_conflicts": [
+      {
+        "dependency": "langchain-openai",
+        "description": "LangChain wraps the OpenAI SDK. Version mismatches between langchain-openai and openai cause attribute errors.",
+        "severity": "high"
+      },
+      {
+        "dependency": "httpx",
+        "description": "OpenAI SDK uses httpx internally. Pinning httpx to a different version can break the SDK.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["openai", "httpx", "httpcore"],
+        "risk": "OpenAI SDK depends on httpx which depends on httpcore. Breaking changes in transport layer affect SDK.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["openai", "pydantic"],
+        "risk": "OpenAI SDK 1.x uses Pydantic for response models. Pydantic version must be compatible.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "rate_limit_stress",
+      "category": "concurrent_execution",
+      "description": "Send increasing request rates to identify rate limiting thresholds and test error handling",
+      "parameters": {
+        "requests_per_second": [1, 5, 10, 50],
+        "duration_seconds": 30,
+        "model": "gpt-3.5-turbo",
+        "measure_errors": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Requests succeed up to rate limit, then 429 errors. Latency stable below limit.",
+      "failure_indicators": ["unhandled_429", "no_retry_logic", "timeout", "silent_failure"]
+    },
+    {
+      "name": "context_window_scaling",
+      "category": "data_volume_scaling",
+      "description": "Send requests with increasing context sizes to test token limit handling",
+      "parameters": {
+        "context_sizes_tokens": [100, 1000, 5000, 10000, 50000],
+        "measure_latency": true,
+        "measure_cost": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Latency and cost grow with context size. Error at context window limit.",
+      "failure_indicators": ["context_overflow_unhandled", "cost > budget", "timeout", "memory_spike"]
+    },
+    {
+      "name": "conversation_memory_growth",
+      "category": "memory_profiling",
+      "description": "Simulate multi-turn conversation with growing message history",
+      "parameters": {
+        "conversation_turns": [10, 50, 100, 500],
+        "message_size_tokens": 200,
+        "measure_memory": true,
+        "measure_token_count": true
+      },
+      "expected_behavior": "Token count and memory grow linearly with conversation length. Eventually hits context limit.",
+      "failure_indicators": ["memory_unbounded", "context_overflow", "no_truncation_strategy", "cost_explosion"]
+    },
+    {
+      "name": "streaming_reliability",
+      "category": "edge_case_input",
+      "description": "Test streaming response handling under various conditions",
+      "parameters": {
+        "scenarios": ["normal_stream", "early_disconnect", "slow_consumption", "concurrent_streams"],
+        "concurrent_streams": [1, 5, 10],
+        "measure_memory": true
+      },
+      "expected_behavior": "Streams complete or fail cleanly. Resources released on completion or error.",
+      "failure_indicators": ["unclosed_stream", "memory_leak", "partial_response_not_handled", "connection_leak"]
+    },
+    {
+      "name": "error_handling_resilience",
+      "category": "edge_case_input",
+      "description": "Test handling of various API errors: auth, rate limit, server error, network failure",
+      "parameters": {
+        "error_types": ["invalid_key", "rate_limit", "server_error", "timeout", "malformed_request"],
+        "with_retry": [true, false]
+      },
+      "expected_behavior": "Each error type raises specific exception. Retry logic handles transient errors.",
+      "failure_indicators": ["unhandled_exception", "silent_failure", "infinite_retry", "key_in_error_message"]
+    }
+  ]
+}

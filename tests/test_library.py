@@ -416,8 +416,23 @@ class TestNormalizeName:
     def test_dot_to_underscore(self):
         assert _normalize_dep_name("some.pkg") == "some_pkg"
 
-    def test_known_alias(self):
+    def test_known_alias_supabase(self):
         assert _normalize_dep_name("supabase_py") == "supabase"
+
+    def test_known_alias_llama_index(self):
+        assert _normalize_dep_name("llama-index") == "llamaindex"
+        assert _normalize_dep_name("llama_index_core") == "llamaindex"
+
+    def test_known_alias_langchain(self):
+        assert _normalize_dep_name("langchain-core") == "langchain"
+        assert _normalize_dep_name("langchain-community") == "langchain"
+
+    def test_known_alias_os_pathlib(self):
+        assert _normalize_dep_name("os") == "os_pathlib"
+        assert _normalize_dep_name("pathlib") == "os_pathlib"
+
+    def test_known_alias_pydantic_core(self):
+        assert _normalize_dep_name("pydantic-core") == "pydantic"
 
     def test_unknown_passthrough(self):
         assert _normalize_dep_name("my-custom-lib") == "my_custom_lib"
@@ -506,7 +521,7 @@ class TestRealProfiles:
     def test_all_python_profiles_load(self, real_library):
         """Every JSON file in profiles/python/ should load without errors."""
         profiles = real_library.load_all("python")
-        assert len(profiles) >= 10  # We created 10 profiles
+        assert len(profiles) >= 18  # All 18 Python profiles
 
     def test_all_profiles_have_required_sections(self, real_library):
         """Every loaded profile must have all required sections populated."""
@@ -548,10 +563,15 @@ class TestRealProfiles:
                 )
 
     def test_expected_profiles_present(self, real_library):
-        """All 10 specified Python profiles should be present."""
+        """All 18 specified Python profiles should be present."""
         expected = {
-            "flask", "fastapi", "streamlit", "pandas", "numpy",
-            "sqlite3", "sqlalchemy", "supabase", "requests", "httpx",
+            "flask", "fastapi", "streamlit", "gradio",
+            "pandas", "numpy",
+            "sqlite3", "sqlalchemy", "supabase",
+            "langchain", "llamaindex", "chromadb",
+            "openai", "anthropic",
+            "requests", "httpx",
+            "pydantic", "os_pathlib",
         }
         available = set(real_library.list_profiles("python"))
         missing = expected - available
@@ -580,8 +600,33 @@ class TestRealProfiles:
         valid_categories = {
             "web_framework", "data_processing", "numerical_computing",
             "database", "backend_service", "http_client",
+            "ai_framework", "filesystem",
         }
         for name, profile in real_library.load_all("python").items():
             assert profile.category in valid_categories, (
                 f"{name} has unexpected category: {profile.category}"
             )
+
+    def test_alias_resolution_llama_index(self, real_library):
+        """llama-index and llama_index should resolve to llamaindex profile."""
+        deps = [{"name": "llama-index"}, {"name": "llama_index_core"}]
+        matches = real_library.match_dependencies("python", deps)
+        for m in matches:
+            assert m.profile is not None, f"{m.dependency_name} should resolve"
+            assert m.profile.name == "llamaindex"
+
+    def test_alias_resolution_langchain_variants(self, real_library):
+        """langchain-core and langchain-community should resolve to langchain profile."""
+        deps = [{"name": "langchain-core"}, {"name": "langchain-community"}]
+        matches = real_library.match_dependencies("python", deps)
+        for m in matches:
+            assert m.profile is not None, f"{m.dependency_name} should resolve"
+            assert m.profile.name == "langchain"
+
+    def test_alias_resolution_os_pathlib(self, real_library):
+        """os and pathlib should resolve to os_pathlib profile."""
+        deps = [{"name": "os"}, {"name": "pathlib"}]
+        matches = real_library.match_dependencies("python", deps)
+        for m in matches:
+            assert m.profile is not None, f"{m.dependency_name} should resolve"
+            assert m.profile.name == "os_pathlib"

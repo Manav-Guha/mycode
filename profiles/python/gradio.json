@@ -1,0 +1,228 @@
+{
+  "identity": {
+    "name": "gradio",
+    "pypi_name": "gradio",
+    "category": "web_framework",
+    "description": "Build and share machine learning demos and web apps with a Python-first interface",
+    "current_stable_version": "5.12.0",
+    "min_supported_version": "4.0.0",
+    "version_notes": {
+      "5.0.0": "Major rewrite: new component API, Svelte 5 frontend, breaking changes to custom components",
+      "4.0.0": "Blocks API stable, streaming support, queueing system overhaul"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Each user session maintains server-side state. Built-in queueing system serializes requests by default. Designed for demo/prototype use, not high-throughput production. FastAPI backend with WebSocket-based event streaming.",
+    "concurrency_model": "queue_based",
+    "bottlenecks": [
+      {
+        "name": "default_queue_serialization",
+        "description": "Default queue processes one request at a time per endpoint. Concurrent users wait in queue.",
+        "impact": "Response time grows linearly with queue depth. Second user waits for first to complete."
+      },
+      {
+        "name": "model_inference_blocking",
+        "description": "ML model inference in event handlers blocks the worker. GPU-bound work serializes all requests.",
+        "impact": "Queue backs up during long inference. No request-level parallelism without explicit concurrency_count."
+      },
+      {
+        "name": "large_file_transfer",
+        "description": "Files uploaded/downloaded through Gradio are serialized through the server. Large images, audio, and video consume memory and bandwidth.",
+        "impact": "Memory spikes proportional to file size per concurrent upload"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "concurrent_users",
+        "typical_limit": "10-50",
+        "description": "Depends on handler complexity. Simple text apps handle more; ML inference apps far fewer."
+      },
+      {
+        "metric": "file_upload_size_mb",
+        "typical_limit": 100,
+        "description": "Default upload limit. Large files consume server memory during transfer."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 100,
+    "growth_pattern": "High baseline due to FastAPI + Uvicorn + Gradio frontend assets + component registry. Memory grows with: loaded ML models, queued request data, uploaded files in temp storage, and session state per connected client.",
+    "known_leaks": [
+      {
+        "name": "temp_file_accumulation",
+        "description": "Uploaded and generated files stored in temp directory. Not cleaned up until server restart in some configurations.",
+        "trigger": "Repeated file uploads or image/audio generation without explicit cleanup",
+        "versions_affected": "all"
+      },
+      {
+        "name": "state_accumulation_in_blocks",
+        "description": "gr.State objects persist per session. Complex state objects (large DataFrames, model outputs) accumulate if sessions are not cleaned up.",
+        "trigger": "Long-running sessions with gr.State holding large objects",
+        "versions_affected": ">=4.0.0"
+      },
+      {
+        "name": "event_listener_buildup",
+        "description": "Dynamically created components with .change() or .click() handlers accumulate event listeners on the server.",
+        "trigger": "Programmatically generating components inside event handlers",
+        "versions_affected": ">=4.0.0"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Temp files managed by Gradio's file system (cleaned on restart). Session state cleaned when client disconnects (if timeout configured)."
+  },
+  "known_failure_modes": [
+    {
+      "name": "share_link_security",
+      "description": "share=True creates a public tunnel via Gradio's servers. Exposes the app to the internet without authentication. Common in vibe-coded demos.",
+      "trigger_conditions": "launch(share=True) in production or with sensitive data",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "share=True in launch() call"
+    },
+    {
+      "name": "blocking_event_handler",
+      "description": "Synchronous ML inference or heavy computation in event handlers blocks the entire queue. No timeout by default.",
+      "trigger_conditions": "Event handler with model.predict() or heavy computation without async or concurrency_count",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Synchronous ML inference calls in gr.Button.click() or similar handlers"
+    },
+    {
+      "name": "component_api_breaking_changes",
+      "description": "Gradio 5.x changed component APIs significantly. Code written for 4.x (common in tutorials) breaks on upgrade.",
+      "trigger_conditions": "Upgrading from Gradio 4.x to 5.x without code changes",
+      "severity": "high",
+      "versions_affected": ">=5.0.0",
+      "detection_hint": "Deprecated component parameters, old-style Interface() patterns"
+    },
+    {
+      "name": "queue_timeout_silent_failure",
+      "description": "Requests that exceed queue timeout are dropped silently. User sees spinner indefinitely or gets a generic error.",
+      "trigger_conditions": "Long-running handlers with default queue timeout",
+      "severity": "medium",
+      "versions_affected": ">=4.0.0",
+      "detection_hint": "No explicit queue configuration with long-running handlers"
+    },
+    {
+      "name": "cors_and_iframe_issues",
+      "description": "Embedding Gradio in iframes or cross-origin pages fails without proper CORS configuration. Common when embedding in websites.",
+      "trigger_conditions": "Embedding Gradio app in external website iframe",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "App designed for iframe embedding without allowed_paths or CORS config"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "rapid_input_changes",
+      "description": "Sliders, textboxes with .change() trigger on every keystroke/movement. Rapid changes flood the queue.",
+      "test_approach": "Rapidly change input components, verify queue handles burst without dropping or duplicating"
+    },
+    {
+      "name": "large_gallery_rendering",
+      "description": "gr.Gallery with hundreds of images loads all into browser memory. Server serializes all images.",
+      "test_approach": "Display progressively more images in Gallery, monitor memory and render time"
+    },
+    {
+      "name": "concurrent_file_operations",
+      "description": "Multiple users uploading files simultaneously compete for temp directory space and memory.",
+      "test_approach": "Simulate concurrent file uploads from multiple sessions"
+    },
+    {
+      "name": "unicode_and_special_inputs",
+      "description": "Non-ASCII text, emoji, RTL text in textboxes can cause rendering or processing issues.",
+      "test_approach": "Submit various Unicode categories through all text input components"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["openai", "anthropic", "transformers", "torch", "pillow", "numpy", "pandas"],
+    "known_conflicts": [
+      {
+        "dependency": "streamlit",
+        "description": "Both serve web apps on default ports. Running both simultaneously causes port conflicts.",
+        "severity": "low"
+      },
+      {
+        "dependency": "matplotlib",
+        "description": "Using plt.show() in Gradio handlers causes blocking. Must return figure objects directly.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["gradio", "fastapi", "uvicorn"],
+        "risk": "Gradio bundles its own FastAPI app. Conflicts possible if user also runs FastAPI separately on same port.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["gradio", "pydantic"],
+        "risk": "Gradio depends on Pydantic. Version conflicts with other Pydantic-dependent libraries (FastAPI, LangChain) common.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "concurrent_user_load",
+      "category": "concurrent_execution",
+      "description": "Simulate increasing concurrent users submitting requests through the queue",
+      "parameters": {
+        "concurrent_users": [1, 5, 10, 25, 50],
+        "requests_per_user": 5,
+        "handler_delay_seconds": 1,
+        "timeout_seconds": 120
+      },
+      "expected_behavior": "Queue depth grows linearly. Wait time proportional to queue depth / concurrency_count.",
+      "failure_indicators": ["queue_timeout", "dropped_requests", "server_unresponsive", "memory > 2gb"]
+    },
+    {
+      "name": "file_upload_scaling",
+      "category": "data_volume_scaling",
+      "description": "Upload files of increasing size to test memory and temp storage behavior",
+      "parameters": {
+        "file_sizes_mb": [1, 10, 50, 100, 500],
+        "concurrent_uploads": 3,
+        "measure_memory": true,
+        "measure_temp_storage": true
+      },
+      "expected_behavior": "Memory spikes during upload. Temp directory grows with accumulated files.",
+      "failure_indicators": ["MemoryError", "disk_full", "upload_timeout", "temp_not_cleaned"]
+    },
+    {
+      "name": "state_accumulation",
+      "category": "memory_profiling",
+      "description": "Simulate long-running sessions with gr.State to detect memory accumulation",
+      "parameters": {
+        "sessions": 10,
+        "interactions_per_session": 100,
+        "state_size_kb": 100,
+        "duration_minutes": 10
+      },
+      "expected_behavior": "Memory grows with active sessions. Should stabilize when sessions disconnect.",
+      "failure_indicators": ["memory_growth_after_disconnect", "no_session_cleanup", "MemoryError"]
+    },
+    {
+      "name": "queue_stress",
+      "category": "concurrent_execution",
+      "description": "Flood the queue with requests to test backpressure and timeout behavior",
+      "parameters": {
+        "request_rate_per_second": [1, 10, 50, 100],
+        "handler_time_seconds": 2,
+        "queue_size": 100,
+        "duration_seconds": 60
+      },
+      "expected_behavior": "Queue fills up. Excess requests rejected or queued. Timeout kicks in for old requests.",
+      "failure_indicators": ["silent_request_drop", "queue_overflow_crash", "no_backpressure"]
+    },
+    {
+      "name": "edge_case_inputs",
+      "category": "edge_case_input",
+      "description": "Send malformed, oversized, and unexpected inputs through all detected components",
+      "parameters": {
+        "input_types": ["empty", "very_long_text", "binary_data", "unicode_edge_cases", "null"],
+        "apply_to": "all_detected_components"
+      },
+      "expected_behavior": "Components should validate or handle gracefully. No server crashes.",
+      "failure_indicators": ["server_crash", "uncaught_exception", "corrupted_output", "queue_stuck"]
+    }
+  ]
+}

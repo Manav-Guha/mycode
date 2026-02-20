@@ -1,0 +1,225 @@
+{
+  "identity": {
+    "name": "anthropic",
+    "pypi_name": "anthropic",
+    "category": "ai_framework",
+    "description": "Official Python client for the Anthropic API — Claude chat completions with tool use, vision, and streaming",
+    "current_stable_version": "0.44.0",
+    "min_supported_version": "0.18.0",
+    "version_notes": {
+      "0.44.0": "Extended thinking support, improved streaming, token counting endpoint",
+      "0.25.0": "Tool use (function calling) GA, streaming tool use",
+      "0.18.0": "Messages API stable, migration from completions to messages"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "HTTP client wrapping Anthropic REST API. Similar architecture to OpenAI SDK. Performance dominated by API latency. Supports sync and async clients. Connection pooling via httpx. Rate limited per organization.",
+    "concurrency_model": "http_client_async",
+    "bottlenecks": [
+      {
+        "name": "api_latency",
+        "description": "Each API call has minimum latency of 500ms-2s for simple completions. Claude models with large contexts can take 30-120s.",
+        "impact": "Sequential calls accumulate latency. Extended thinking can add significant time."
+      },
+      {
+        "name": "rate_limiting",
+        "description": "Anthropic enforces rate limits per organization (requests/min and tokens/min). Stricter at lower tiers.",
+        "impact": "429 errors on burst traffic. Must implement backoff."
+      },
+      {
+        "name": "large_context_cost",
+        "description": "Claude supports 200K token contexts. Sending very large contexts is expensive and slow.",
+        "impact": "Cost and latency grow linearly with context size. 200K context calls are expensive."
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "requests_per_minute",
+        "typical_limit": "50-4000",
+        "description": "Depends on tier. Build tier: 50 RPM. Scale tier: 4,000 RPM."
+      },
+      {
+        "metric": "tokens_per_minute",
+        "typical_limit": "40000-400000",
+        "description": "Depends on tier and model. Higher tiers get higher limits."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 15,
+    "growth_pattern": "Lightweight client (httpx-based). Memory growth same patterns as OpenAI SDK: conversation history accumulation, streaming chunks, response object retention.",
+    "known_leaks": [
+      {
+        "name": "streaming_response_not_closed",
+        "description": "Streaming responses (with client.messages.stream()) that aren't fully consumed or closed keep connections open.",
+        "trigger": "Breaking out of streaming context manager early or not using context manager",
+        "versions_affected": "all"
+      },
+      {
+        "name": "conversation_history_growth",
+        "description": "Messages list for multi-turn conversations grows without bound. Anthropic's 200K context allows very long conversations before API error, but memory grows.",
+        "trigger": "Appending to messages list without truncation across many turns",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Standard CPython GC. Client uses httpx connection pool. Cleaned up on client.close() or GC."
+  },
+  "known_failure_modes": [
+    {
+      "name": "completions_to_messages_migration",
+      "description": "Old tutorials use completions API (anthropic.Anthropic().completions.create). Current API is messages-only. Old code breaks.",
+      "trigger_conditions": "Code written for Anthropic SDK <0.18.0 using completions API",
+      "severity": "critical",
+      "versions_affected": ">=0.18.0",
+      "detection_hint": "client.completions.create() instead of client.messages.create()"
+    },
+    {
+      "name": "api_key_exposure",
+      "description": "API key hardcoded or logged. Anthropic keys start with 'sk-ant-' making them identifiable in logs.",
+      "trigger_conditions": "Key in source code, logs, or error output",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "Literal 'sk-ant-' strings in source, ANTHROPIC_API_KEY set inline"
+    },
+    {
+      "name": "message_format_errors",
+      "description": "Messages must alternate user/assistant roles. System message is a separate parameter, not in messages list. Common mistakes from OpenAI migration.",
+      "trigger_conditions": "System role in messages list, consecutive same-role messages, missing roles",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Messages with role='system' in the messages list instead of system= parameter"
+    },
+    {
+      "name": "tool_use_response_handling",
+      "description": "Tool use responses require specific response format. Failing to return tool results causes API error or confused model behavior.",
+      "trigger_conditions": "Model returns tool_use stop_reason but next message doesn't include tool_result",
+      "severity": "high",
+      "versions_affected": ">=0.25.0",
+      "detection_hint": "Tool use configured but tool_result handling missing in response loop"
+    },
+    {
+      "name": "rate_limit_no_backoff",
+      "description": "No built-in exponential backoff. SDK raises RateLimitError but most vibe-coded apps don't implement retry.",
+      "trigger_conditions": "Burst traffic exceeding rate limits",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "API calls without try/except for anthropic.RateLimitError"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_content_blocks",
+      "description": "Messages with empty content or empty text blocks. API may reject or handle unexpectedly.",
+      "test_approach": "Send messages with empty strings, empty content lists, and whitespace-only content"
+    },
+    {
+      "name": "multimodal_input_sizes",
+      "description": "Image inputs (base64) in messages consume significant tokens and memory. Large images are expensive.",
+      "test_approach": "Send progressively larger images, measure token usage and memory"
+    },
+    {
+      "name": "tool_definition_complexity",
+      "description": "Complex tool schemas with many parameters or deeply nested types increase prompt token usage.",
+      "test_approach": "Define tools with increasing schema complexity, measure token overhead"
+    },
+    {
+      "name": "max_tokens_vs_context",
+      "description": "max_tokens too high relative to remaining context window causes unexpected behavior.",
+      "test_approach": "Set max_tokens to various values relative to input size and context limit"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["langchain", "llama-index", "tiktoken", "pydantic", "flask", "fastapi", "streamlit"],
+    "known_conflicts": [
+      {
+        "dependency": "langchain-anthropic",
+        "description": "LangChain wraps Anthropic SDK. Version mismatches between langchain-anthropic and anthropic cause errors.",
+        "severity": "high"
+      },
+      {
+        "dependency": "httpx",
+        "description": "Anthropic SDK uses httpx internally. Version conflicts with other httpx-dependent packages possible.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["anthropic", "httpx", "httpcore"],
+        "risk": "Same transport layer risk as OpenAI SDK. Breaking changes in httpx/httpcore affect the SDK.",
+        "severity": "medium"
+      },
+      {
+        "chain": ["anthropic", "tokenizers"],
+        "risk": "Token counting may depend on tokenizers library. Missing or incompatible version affects token estimation.",
+        "severity": "low"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "rate_limit_stress",
+      "category": "concurrent_execution",
+      "description": "Send increasing request rates to identify rate limiting thresholds",
+      "parameters": {
+        "requests_per_second": [1, 5, 10, 50],
+        "duration_seconds": 30,
+        "model": "claude-sonnet-4-20250514",
+        "measure_errors": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Requests succeed up to rate limit, then 429 errors. Retry-after header respected.",
+      "failure_indicators": ["unhandled_429", "no_retry_logic", "timeout", "silent_failure"]
+    },
+    {
+      "name": "context_window_scaling",
+      "category": "data_volume_scaling",
+      "description": "Send requests with increasing context sizes up to 200K token limit",
+      "parameters": {
+        "context_sizes_tokens": [1000, 10000, 50000, 100000, 200000],
+        "measure_latency": true,
+        "measure_cost": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Latency grows with context. Cost proportional to tokens. Error at 200K limit.",
+      "failure_indicators": ["context_overflow_unhandled", "cost > budget", "timeout > 120s", "memory_spike"]
+    },
+    {
+      "name": "conversation_turn_growth",
+      "category": "memory_profiling",
+      "description": "Simulate multi-turn conversations to test memory and token growth",
+      "parameters": {
+        "conversation_turns": [10, 50, 100, 500],
+        "message_size_tokens": 200,
+        "measure_memory": true,
+        "measure_token_count": true
+      },
+      "expected_behavior": "Token count grows linearly. Memory grows with conversation history.",
+      "failure_indicators": ["memory_unbounded", "context_overflow", "cost_explosion", "no_truncation"]
+    },
+    {
+      "name": "tool_use_stress",
+      "category": "edge_case_input",
+      "description": "Test tool use with increasing tool count and schema complexity",
+      "parameters": {
+        "tool_counts": [1, 5, 10, 50],
+        "schema_complexity": ["simple", "nested", "deeply_nested"],
+        "measure_token_overhead": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Token overhead grows with tool count and complexity. Latency may increase with many tools.",
+      "failure_indicators": ["token_overhead > 50%_of_context", "tool_choice_confusion", "timeout"]
+    },
+    {
+      "name": "streaming_reliability",
+      "category": "edge_case_input",
+      "description": "Test streaming under various conditions including early termination and concurrent streams",
+      "parameters": {
+        "scenarios": ["normal_stream", "early_close", "concurrent_streams", "long_response"],
+        "concurrent_streams": [1, 5, 10],
+        "measure_memory": true
+      },
+      "expected_behavior": "Streams complete or fail cleanly. Resources released properly.",
+      "failure_indicators": ["unclosed_stream", "memory_leak", "connection_leak", "partial_response_lost"]
+    }
+  ]
+}
