@@ -33,6 +33,14 @@ from mycode.engine import (
     ScenarioResult,
     StepResult,
 )
+from mycode.interface import (
+    ConversationalInterface,
+    InterfaceError,
+    InterfaceResult,
+    OperationalIntent,
+    ScenarioReview,
+    summarize_ingestion,
+)
 from mycode.pipeline import (
     LanguageDetectionError,
     PipelineConfig,
@@ -99,4 +107,11 @@ __all__ = [
     "StageResult",
     "PipelineError",
     "LanguageDetectionError",
+    # Conversational Interface (E1)
+    "ConversationalInterface",
+    "InterfaceResult",
+    "OperationalIntent",
+    "ScenarioReview",
+    "InterfaceError",
+    "summarize_ingestion",
 ]
