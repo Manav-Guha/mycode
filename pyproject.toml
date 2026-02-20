@@ -1,0 +1,9 @@
+[project]
+name = "mycode"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: integration tests that create real virtual environments",
+]
