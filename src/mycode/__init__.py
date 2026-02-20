@@ -33,6 +33,15 @@ from mycode.engine import (
     ScenarioResult,
     StepResult,
 )
+from mycode.pipeline import (
+    LanguageDetectionError,
+    PipelineConfig,
+    PipelineError,
+    PipelineResult,
+    StageResult,
+    detect_language,
+    run_pipeline,
+)
 from mycode.session import (
     DependencyInstallError,
     EnvironmentInfo,
@@ -82,4 +91,12 @@ __all__ = [
     "ScenarioResult",
     "StepResult",
     "EngineError",
+    # Pipeline (D3)
+    "run_pipeline",
+    "detect_language",
+    "PipelineConfig",
+    "PipelineResult",
+    "StageResult",
+    "PipelineError",
+    "LanguageDetectionError",
 ]
