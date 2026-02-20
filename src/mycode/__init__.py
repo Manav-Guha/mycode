@@ -26,6 +26,13 @@ from mycode.scenario import (
     ScenarioGeneratorResult,
     StressTestScenario,
 )
+from mycode.engine import (
+    EngineError,
+    ExecutionEngine,
+    ExecutionEngineResult,
+    ScenarioResult,
+    StepResult,
+)
 from mycode.session import (
     DependencyInstallError,
     EnvironmentInfo,
@@ -69,4 +76,10 @@ __all__ = [
     "ScenarioError",
     "LLMError",
     "LLMResponseError",
+    # Execution Engine (D2)
+    "ExecutionEngine",
+    "ExecutionEngineResult",
+    "ScenarioResult",
+    "StepResult",
+    "EngineError",
 ]
