@@ -48,6 +48,12 @@ from mycode.report import (
     ReportError,
     ReportGenerator,
 )
+from mycode.recorder import (
+    ConsentError,
+    InteractionRecorder,
+    RecorderError,
+    SessionRecord,
+)
 from mycode.pipeline import (
     LanguageDetectionError,
     PipelineConfig,
@@ -127,4 +133,9 @@ __all__ = [
     "Finding",
     "DegradationPoint",
     "ReportError",
+    # Interaction Recorder (E3)
+    "InteractionRecorder",
+    "SessionRecord",
+    "RecorderError",
+    "ConsentError",
 ]
