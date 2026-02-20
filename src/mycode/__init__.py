@@ -41,6 +41,13 @@ from mycode.interface import (
     ScenarioReview,
     summarize_ingestion,
 )
+from mycode.report import (
+    DegradationPoint,
+    DiagnosticReport,
+    Finding,
+    ReportError,
+    ReportGenerator,
+)
 from mycode.pipeline import (
     LanguageDetectionError,
     PipelineConfig,
@@ -114,4 +121,10 @@ __all__ = [
     "ScenarioReview",
     "InterfaceError",
     "summarize_ingestion",
+    # Report Generator (E2)
+    "ReportGenerator",
+    "DiagnosticReport",
+    "Finding",
+    "DegradationPoint",
+    "ReportError",
 ]
