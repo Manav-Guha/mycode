@@ -354,6 +354,8 @@ class ExecutionEngine:
         """Generate a self-contained Python test harness script."""
         if behavior and behavior in _PY_COUPLING_BODIES:
             body = _PY_COUPLING_BODIES[behavior]
+        elif behavior and behavior in _PY_LIB_BODIES:
+            body = _PY_LIB_BODIES[behavior]
         else:
             body = _CATEGORY_BODIES.get(category, _BODY_GENERIC)
         return _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
@@ -1210,6 +1212,224 @@ _PY_COUPLING_BODIES: dict[str, str] = {
     "api_caller": _PY_COUPLING_BODY_API_CALLER,
     "dom_render": _PY_COUPLING_BODY_DOM_RENDER,
     "error_handler": _PY_COUPLING_BODY_ERROR_HANDLER,
+}
+
+
+# ── Python Library-Specific Standalone Bodies ──
+#
+# Standalone bodies for server framework library scenarios.  They do NOT
+# reference _callables or _modules — all operations are synthetic, stdlib-only,
+# exercising the same computational patterns the framework uses internally.
+# This avoids importing user code that would start a blocking server.
+
+_PY_LIB_BODY_FLASK_SERVER_STRESS = '''\
+import concurrent.futures
+import json as _json
+import hashlib
+_params = CONFIG.get("parameters", {})
+
+# 1. Request parsing + JSON body processing at scaling data sizes
+_payload_sizes = _params.get("payload_sizes_kb", [1, 10, 100, 1000])
+for _sz in _payload_sizes:
+    def _run(_s=_sz):
+        _body = {("field_%d" % _i): {"value": _i, "label": "item_%d" % _i} for _i in range(_s * 10)}
+        _encoded = _json.dumps(_body).encode("utf-8")
+        _parsed = _json.loads(_encoded)
+        # Simulate response serialization
+        _response = _json.dumps({"status": "ok", "data": _parsed}).encode("utf-8")
+        _ = len(_response)
+    _measure_step("wsgi_payload_%dkb" % _sz, {"payload_size_kb": _sz}, _run)
+
+# 2. Concurrent request handler simulation
+_concurrency_levels = _params.get("concurrent", [1, 5, 10, 50])
+for _conc in _concurrency_levels:
+    def _run(_n=_conc):
+        def _handle_request(req_id):
+            _body = {("key_%d" % _i): "val_%d" % _i for _i in range(50)}
+            _resp = _json.dumps(_body)
+            _hash = hashlib.sha256(_resp.encode()).hexdigest()
+            return {"id": req_id, "hash": _hash}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_n) as _pool:
+            _futs = [_pool.submit(_handle_request, _i) for _i in range(_n)]
+            for _f in concurrent.futures.as_completed(_futs, timeout=30):
+                try:
+                    _f.result()
+                except Exception as _exc:
+                    _record_error(_exc, "request_handler")
+    _measure_step("wsgi_concurrent_%d" % _conc, {"concurrent_requests": _conc}, _run)
+
+# 3. Session state serialization under concurrent access
+import threading
+_session_cycles = _params.get("session_cycles", [10, 100, 1000])
+for _sc in _session_cycles:
+    def _run(_n=_sc):
+        _session = {}
+        _lock = threading.Lock()
+        def _session_write(writer_id, count):
+            for _c in range(count):
+                with _lock:
+                    _session["user_%d" % writer_id] = {
+                        "counter": _c,
+                        "data": _json.dumps({"ts": _c, "payload": "x" * 100}),
+                    }
+        _threads = []
+        for _w in range(4):
+            _t = threading.Thread(target=_session_write, args=(_w, _n))
+            _threads.append(_t)
+            _t.start()
+        for _t in _threads:
+            _t.join(timeout=30)
+    _measure_step("session_writes_%d" % _sc, {"session_cycles": _sc}, _run)
+'''
+
+_PY_LIB_BODY_FASTAPI_SERVER_STRESS = '''\
+import concurrent.futures
+import json as _json
+import asyncio
+_params = CONFIG.get("parameters", {})
+
+# 1. Pydantic-style nested dict validation at scaling complexity
+_field_counts = _params.get("field_counts", [5, 20, 50, 100, 500])
+for _fc in _field_counts:
+    def _run(_n=_fc):
+        # Simulate Pydantic model validation with nested dicts
+        _model = {}
+        for _i in range(_n):
+            _model["field_%d" % _i] = {
+                "type": "string" if _i % 3 == 0 else ("integer" if _i % 3 == 1 else "nested"),
+                "required": _i % 2 == 0,
+                "default": None,
+            }
+            if _i % 3 == 2:
+                _model["field_%d" % _i]["children"] = {
+                    ("sub_%d" % _j): {"type": "string", "max_length": 255}
+                    for _j in range(min(10, _n // 5 + 1))
+                }
+        # Validate an input against the model
+        _input_data = {("field_%d" % _i): ("value_%d" % _i) for _i in range(_n)}
+        _errors = []
+        for _key, _spec in _model.items():
+            if _spec["required"] and _key not in _input_data:
+                _errors.append({"field": _key, "error": "required"})
+            if _spec["type"] == "nested" and "children" in _spec:
+                for _ck in _spec["children"]:
+                    pass  # validate children
+        _ = len(_errors)
+    _measure_step("validation_fields_%d" % _fc, {"field_count": _fc}, _run)
+
+# 2. Async task simulation (concurrent coroutines via asyncio)
+_async_levels = _params.get("concurrent", [10, 50, 100, 500])
+for _al in _async_levels:
+    def _run(_n=_al):
+        _loop = asyncio.new_event_loop()
+        async def _handler(_id):
+            _data = {("k_%d" % _i): _i for _i in range(100)}
+            _resp = _json.dumps(_data)
+            return {"id": _id, "size": len(_resp)}
+        async def _main():
+            _tasks = [_handler(_i) for _i in range(_n)]
+            return await asyncio.gather(*_tasks)
+        try:
+            _results = _loop.run_until_complete(_main())
+            _ = len(_results)
+        finally:
+            _loop.close()
+    _measure_step("async_handlers_%d" % _al, {"concurrent_async": _al}, _run)
+
+# 3. Thread pool exhaustion simulation (sync handlers)
+_sync_levels = _params.get("sync_concurrent", [10, 20, 40, 80])
+for _sl in _sync_levels:
+    def _run(_n=_sl):
+        import time as _time
+        def _sync_handler(handler_id):
+            _time.sleep(0.001)  # simulate minimal I/O
+            _data = {("field_%d" % _i): "value" for _i in range(50)}
+            return _json.dumps(_data)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(_n, 40)) as _pool:
+            _futs = [_pool.submit(_sync_handler, _i) for _i in range(_n)]
+            _completed = 0
+            for _f in concurrent.futures.as_completed(_futs, timeout=30):
+                try:
+                    _f.result()
+                    _completed += 1
+                except Exception as _exc:
+                    _record_error(_exc, "sync_handler")
+            _ = _completed
+    _measure_step("sync_threadpool_%d" % _sl, {"sync_concurrent": _sl}, _run)
+'''
+
+_PY_LIB_BODY_STREAMLIT_SERVER_STRESS = '''\
+import json as _json
+import time as _time
+import hashlib
+_params = CONFIG.get("parameters", {})
+
+# 1. Full script rerun simulation (repeated computation, no caching vs caching)
+_data_sizes = _params.get("data_row_counts", [100, 1000, 10000, 100000])
+for _ds in _data_sizes:
+    def _run(_n=_ds):
+        # Simulate expensive computation run on every rerun (no cache)
+        _data = [{"id": _i, "value": _i * 3.14, "label": "row_%d" % _i} for _i in range(_n)]
+        _filtered = [r for r in _data if r["value"] > _n * 0.5]
+        _sorted_data = sorted(_filtered, key=lambda r: r["value"], reverse=True)
+        _serialized = _json.dumps(_sorted_data[:100])
+        _ = len(_serialized)
+    _measure_step("rerun_rows_%d" % _ds, {"data_rows": _ds}, _run)
+
+# Simulate with caching (memoization dict)
+_cache = {}
+for _ds in _data_sizes:
+    def _run(_n=_ds, _c=_cache):
+        _key = "data_%d" % _n
+        if _key in _c:
+            _result = _c[_key]
+        else:
+            _data = [{"id": _i, "value": _i * 3.14, "label": "row_%d" % _i} for _i in range(_n)]
+            _filtered = [r for r in _data if r["value"] > _n * 0.5]
+            _result = sorted(_filtered, key=lambda r: r["value"], reverse=True)
+            _c[_key] = _result
+        _ = len(_result)
+    _measure_step("cached_rows_%d" % _ds, {"data_rows": _ds, "cached": True}, _run)
+
+# 2. Session state accumulation (growing dicts per "rerun")
+_rerun_counts = _params.get("rerun_counts", [10, 50, 100, 500])
+for _rc in _rerun_counts:
+    def _run(_n=_rc):
+        _session_state = {}
+        for _rerun in range(_n):
+            # Each rerun appends to session state (common anti-pattern)
+            _session_state["history"] = _session_state.get("history", [])
+            _session_state["history"].append({
+                "rerun": _rerun,
+                "data": list(range(100)),
+                "timestamp": _time.perf_counter(),
+            })
+            # Simulate widget state accumulation
+            for _w in range(10):
+                _session_state["widget_%d" % _w] = _rerun
+        _ = len(_session_state.get("history", []))
+    _measure_step("session_reruns_%d" % _rc, {"rerun_count": _rc}, _run)
+
+# 3. Large tabular data serialization at scale
+_table_sizes = _params.get("table_sizes_kb", [10, 100, 1000, 10000])
+for _ts in _table_sizes:
+    def _run(_s=_ts):
+        _rows = _s * 10  # ~100 bytes per row
+        _table = [
+            {"col_a": _i, "col_b": "x" * 50, "col_c": _i * 1.5, "col_d": _i % 2 == 0}
+            for _i in range(_rows)
+        ]
+        _serialized = _json.dumps(_table)
+        _hash = hashlib.sha256(_serialized.encode()).hexdigest()
+        _ = _hash
+    _measure_step("table_serialize_%dkb" % _ts, {"table_size_kb": _ts}, _run)
+'''
+
+# Server framework library -> body mapping
+_PY_LIB_BODIES: dict[str, str] = {
+    "flask_server_stress": _PY_LIB_BODY_FLASK_SERVER_STRESS,
+    "fastapi_server_stress": _PY_LIB_BODY_FASTAPI_SERVER_STRESS,
+    "streamlit_server_stress": _PY_LIB_BODY_STREAMLIT_SERVER_STRESS,
 }
 
 

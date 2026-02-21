@@ -793,6 +793,12 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             if match.profile is not None and match.profile.browser_only:
                 browser_only_deps.append(match.dependency_name)
 
+        # Collect server-framework deps — use synthetic standalone bodies
+        server_framework_deps: list[str] = []
+        for match in recognized:
+            if match.profile is not None and match.profile.server_framework:
+                server_framework_deps.append(match.dependency_name)
+
         # 1. Profile-based scenarios from stress_test_templates
         for match in recognized:
             profile = match.profile
@@ -807,16 +813,20 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 cat = template.get("category", "")
                 if cat not in valid_categories:
                     continue
+                tc: dict = {
+                    "parameters": template.get("parameters", {}),
+                    "measurements": _infer_measurements(cat),
+                    "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                }
+                # Server frameworks: route to standalone body to avoid blocking
+                if profile.server_framework:
+                    tc["behavior"] = f"{profile.name}_server_stress"
                 scenarios.append(StressTestScenario(
                     name=f"{profile.name}_{template['name']}",
                     category=cat,
                     description=template.get("description", ""),
                     target_dependencies=[match.dependency_name],
-                    test_config={
-                        "parameters": template.get("parameters", {}),
-                        "measurements": _infer_measurements(cat),
-                        "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
-                    },
+                    test_config=tc,
                     expected_behavior=template.get("expected_behavior", ""),
                     failure_indicators=template.get("failure_indicators", []),
                     priority=_infer_priority_from_template(template),
@@ -830,6 +840,12 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
 
             # Browser-only deps: skip failure mode tests too (they import browser libs)
             if profile.browser_only:
+                continue
+
+            # Server frameworks: skip failure mode tests (they describe patterns
+            # best detected by static analysis, and the edge_case_input body has
+            # nothing to call without importing user code)
+            if profile.server_framework:
                 continue
 
             for mode in profile.known_failure_modes:
@@ -1100,6 +1116,15 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 f"Rendering stress tests require a browser environment "
                 f"(planned for future release). "
                 f"Data flow and coupling tests were performed."
+            )
+
+        # Add warning for server-framework deps that use synthetic workloads
+        if server_framework_deps:
+            dep_list = ", ".join(sorted(set(server_framework_deps)))
+            warnings.append(
+                f"Server framework deps ({dep_list}): library-specific tests "
+                f"use synthetic workloads instead of importing user code to "
+                f"avoid blocking on server startup."
             )
 
         return ScenarioGeneratorResult(

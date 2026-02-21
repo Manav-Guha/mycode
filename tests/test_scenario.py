@@ -1649,3 +1649,237 @@ class TestBrowserOnlyHandling:
         assert len(render_scenarios) >= 1
         for s in render_scenarios:
             assert s.test_config.get("skip_imports") is True
+
+
+# ── Tests: Server Framework Handling ──
+
+
+def _make_server_framework_profile(
+    name: str, category: str = "web_framework",
+) -> DependencyProfile:
+    """Create a server_framework DependencyProfile for testing."""
+    raw = {
+        "identity": {
+            "name": name,
+            "pypi_name": name,
+            "category": category,
+            "description": f"Server framework test profile for {name}",
+            "current_stable_version": "1.0.0",
+            "min_supported_version": "1.0.0",
+            "version_notes": {},
+            "server_framework": True,
+        },
+        "scaling_characteristics": {"description": "test", "concurrency_model": "test",
+                                    "bottlenecks": [], "scaling_limits": []},
+        "memory_behavior": {"baseline_footprint_mb": 10, "growth_pattern": "test",
+                           "known_leaks": [], "gc_behavior": "test"},
+        "known_failure_modes": [
+            {
+                "name": "dev_server_in_production",
+                "description": "Using dev server in production",
+                "trigger_conditions": "Deploying with app.run()",
+                "severity": "critical",
+                "versions_affected": "all",
+                "detection_hint": "app.run() without WSGI server",
+            },
+        ],
+        "edge_case_sensitivities": [],
+        "interaction_patterns": {
+            "commonly_used_with": [],
+            "known_conflicts": [],
+            "dependency_chain_risks": [],
+        },
+        "stress_test_templates": [
+            {
+                "name": "concurrent_request_load",
+                "category": "concurrent_execution",
+                "description": "Concurrent requests to server",
+                "parameters": {"concurrent": [1, 10, 100]},
+                "expected_behavior": "Degrades gracefully",
+                "failure_indicators": ["timeout", "crash"],
+            },
+            {
+                "name": "large_payload_response",
+                "category": "data_volume_scaling",
+                "description": "Large JSON payload test",
+                "parameters": {"payload_sizes_kb": [1, 10, 100]},
+                "expected_behavior": "Memory proportional to response",
+                "failure_indicators": ["MemoryError"],
+            },
+        ],
+    }
+    return DependencyProfile(
+        identity=raw["identity"],
+        scaling_characteristics=raw["scaling_characteristics"],
+        memory_behavior=raw["memory_behavior"],
+        known_failure_modes=raw["known_failure_modes"],
+        edge_case_sensitivities=raw["edge_case_sensitivities"],
+        interaction_patterns=raw["interaction_patterns"],
+        stress_test_templates=raw["stress_test_templates"],
+        raw=raw,
+    )
+
+
+class TestServerFrameworkHandling:
+    """Test server framework deps route to standalone bodies with a warning."""
+
+    def test_server_framework_scenarios_have_behavior(self):
+        """Flask profile with server_framework=True → scenarios get behavior key."""
+        profile = _make_server_framework_profile("flask")
+        match = ProfileMatch(
+            dependency_name="flask",
+            profile=profile,
+            installed_version="3.1.0",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A web app", "python")
+
+        flask_scenarios = [s for s in result.scenarios if s.name.startswith("flask_")]
+        assert len(flask_scenarios) >= 2
+        for s in flask_scenarios:
+            assert s.test_config.get("behavior") == "flask_server_stress", (
+                f"Scenario '{s.name}' missing behavior key"
+            )
+
+    def test_server_framework_skips_failure_modes(self):
+        """Server framework deps should NOT generate failure mode scenarios."""
+        profile = _make_server_framework_profile("flask")
+        match = ProfileMatch(
+            dependency_name="flask",
+            profile=profile,
+            installed_version="3.1.0",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A web app", "python")
+
+        failure_scenarios = [s for s in result.scenarios if s.name.endswith("_check")]
+        assert len(failure_scenarios) == 0
+
+    def test_non_server_framework_no_behavior(self):
+        """Non-server-framework profile (e.g. pandas) should NOT get behavior key."""
+        profile = _make_profile("pandas", "data_processing")
+        match = ProfileMatch(
+            dependency_name="pandas",
+            profile=profile,
+            installed_version="2.2.0",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A data app", "python")
+
+        pandas_scenarios = [s for s in result.scenarios if s.name.startswith("pandas_")]
+        assert len(pandas_scenarios) >= 1
+        for s in pandas_scenarios:
+            assert "behavior" not in s.test_config, (
+                f"Non-server-framework scenario '{s.name}' should not have behavior"
+            )
+
+    def test_server_framework_warning_emitted(self):
+        """Server framework deps should produce a warning about synthetic workloads."""
+        profile = _make_server_framework_profile("flask")
+        match = ProfileMatch(
+            dependency_name="flask",
+            profile=profile,
+            installed_version="3.1.0",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A web app", "python")
+
+        server_warnings = [w for w in result.warnings if "Server framework" in w]
+        assert len(server_warnings) == 1
+        assert "flask" in server_warnings[0]
+        assert "synthetic workloads" in server_warnings[0]
+
+    def test_server_framework_warning_lists_all_deps(self):
+        """Warning should list all server framework deps."""
+        flask_profile = _make_server_framework_profile("flask")
+        fastapi_profile = _make_server_framework_profile("fastapi")
+        matches = [
+            ProfileMatch(dependency_name="flask", profile=flask_profile),
+            ProfileMatch(dependency_name="fastapi", profile=fastapi_profile),
+        ]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "A web app", "python")
+
+        server_warnings = [w for w in result.warnings if "Server framework" in w]
+        assert len(server_warnings) == 1
+        assert "fastapi" in server_warnings[0]
+        assert "flask" in server_warnings[0]
+
+    def test_non_server_framework_no_warning(self):
+        """Non-server-framework profile should not produce a server framework warning."""
+        profile = _make_profile("pandas", "data_processing")
+        match = ProfileMatch(
+            dependency_name="pandas",
+            profile=profile,
+            installed_version="2.2.0",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A data app", "python")
+
+        server_warnings = [w for w in result.warnings if "Server framework" in w]
+        assert len(server_warnings) == 0
+
+    def test_real_flask_profile_has_server_framework(self):
+        """Real Flask profile from disk should have server_framework=True."""
+        library = ComponentLibrary()
+        flask_profile = library.get_profile("python", "flask")
+        assert flask_profile.server_framework is True
+
+    def test_real_fastapi_profile_has_server_framework(self):
+        """Real FastAPI profile from disk should have server_framework=True."""
+        library = ComponentLibrary()
+        fastapi_profile = library.get_profile("python", "fastapi")
+        assert fastapi_profile.server_framework is True
+
+    def test_real_streamlit_profile_has_server_framework(self):
+        """Real Streamlit profile from disk should have server_framework=True."""
+        library = ComponentLibrary()
+        streamlit_profile = library.get_profile("python", "streamlit")
+        assert streamlit_profile.server_framework is True
+
+    def test_real_pandas_profile_not_server_framework(self):
+        """Real Pandas profile should NOT have server_framework=True."""
+        library = ComponentLibrary()
+        pandas_profile = library.get_profile("python", "pandas")
+        assert pandas_profile.server_framework is False

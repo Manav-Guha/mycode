@@ -3,6 +3,7 @@
     "name": "flask",
     "pypi_name": "Flask",
     "category": "web_framework",
+    "server_framework": true,
     "description": "Lightweight WSGI web application framework with development server and debugger",
     "current_stable_version": "3.1.0",
     "min_supported_version": "2.0.0",

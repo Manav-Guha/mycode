@@ -73,6 +73,11 @@ class DependencyProfile:
         return self.identity.get("browser_only", False)
 
     @property
+    def server_framework(self) -> bool:
+        """Whether this dependency is a server framework that blocks on run."""
+        return self.identity.get("server_framework", False)
+
+    @property
     def pypi_name(self) -> Optional[str]:
         """PyPI package name, or None for stdlib modules."""
         return self.identity.get("pypi_name")

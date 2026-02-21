@@ -25,6 +25,7 @@ from mycode.engine import (
     _JS_HARNESS_PREAMBLE,
     _JS_HARNESS_POSTAMBLE,
     _PY_COUPLING_BODIES,
+    _PY_LIB_BODIES,
     _RESULTS_START,
     _RESULTS_END,
 )
@@ -1520,3 +1521,102 @@ class TestPyCouplingBodies:
         )
         # Should fall back to data_volume_scaling body
         assert "data_sizes" in harness
+
+
+class TestPyLibBodies:
+    """Test standalone Python library body templates for server frameworks."""
+
+    def test_flask_server_stress_routing(self, tmp_path):
+        """behavior='flask_server_stress' routes to Flask lib body."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        harness = engine._build_harness(
+            "concurrent_execution",
+            behavior="flask_server_stress",
+        )
+        # Should contain Flask body, not concurrent_execution body
+        assert "wsgi_payload" in harness
+        assert "session_writes" in harness
+
+    def test_fastapi_server_stress_routing(self, tmp_path):
+        """behavior='fastapi_server_stress' routes to FastAPI lib body."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        harness = engine._build_harness(
+            "data_volume_scaling",
+            behavior="fastapi_server_stress",
+        )
+        assert "validation_fields" in harness
+        assert "async_handlers" in harness
+
+    def test_streamlit_server_stress_routing(self, tmp_path):
+        """behavior='streamlit_server_stress' routes to Streamlit lib body."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        harness = engine._build_harness(
+            "memory_profiling",
+            behavior="streamlit_server_stress",
+        )
+        assert "rerun_rows" in harness
+        assert "session_reruns" in harness
+
+    def test_unknown_behavior_falls_back_to_category(self, tmp_path):
+        """Unknown behavior not in coupling or lib bodies falls back to category."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        harness = engine._build_harness(
+            "concurrent_execution",
+            behavior="unknown_server_stress",
+        )
+        # Should fall back to concurrent_execution body
+        assert "ThreadPoolExecutor" in harness
+        assert "wsgi_payload" not in harness
+
+    def test_all_lib_bodies_registered(self):
+        """All 3 server framework keys present in _PY_LIB_BODIES."""
+        expected = {
+            "flask_server_stress",
+            "fastapi_server_stress",
+            "streamlit_server_stress",
+        }
+        assert set(_PY_LIB_BODIES.keys()) == expected
+
+    def test_lib_bodies_compile(self):
+        """Every Python lib body must produce valid Python."""
+        for name, body in _PY_LIB_BODIES.items():
+            script = _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
+            try:
+                compile(script, f"harness_lib_{name}.py", "exec")
+            except SyntaxError as e:
+                pytest.fail(f"Python lib body '{name}' has syntax error: {e}")
+
+    def test_lib_bodies_valid_structure(self):
+        """Every Python lib body produces complete harness with markers."""
+        for name, body in _PY_LIB_BODIES.items():
+            script = _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
+            assert "__MYCODE_RESULTS_START__" in script, f"'{name}' missing start marker"
+            assert "__MYCODE_RESULTS_END__" in script, f"'{name}' missing end marker"
+            assert "CONFIG" in body, f"'{name}' does not reference CONFIG"
+
+    def test_lib_bodies_do_not_use_callables(self):
+        """Python lib bodies must not reference _callables or _modules."""
+        for name, body in _PY_LIB_BODIES.items():
+            assert "_callables" not in body, f"'{name}' references _callables"
+            assert "_modules" not in body, f"'{name}' references _modules"
+            assert "importlib" not in body, f"'{name}' references importlib"
+
+    def test_coupling_body_takes_priority(self, tmp_path):
+        """A behavior in _PY_COUPLING_BODIES takes priority over _PY_LIB_BODIES."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        harness = engine._build_harness(
+            "data_volume_scaling",
+            behavior="pure_computation",
+        )
+        # pure_computation is in _PY_COUPLING_BODIES, should use that
+        assert "_workload_for_source" in harness

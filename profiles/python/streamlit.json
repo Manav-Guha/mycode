@@ -3,6 +3,7 @@
     "name": "streamlit",
     "pypi_name": "streamlit",
     "category": "web_framework",
+    "server_framework": true,
     "description": "Turns Python scripts into interactive web apps. Re-runs the entire script on every user interaction.",
     "current_stable_version": "1.41.0",
     "min_supported_version": "1.20.0",

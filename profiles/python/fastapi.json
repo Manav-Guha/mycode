@@ -3,6 +3,7 @@
     "name": "fastapi",
     "pypi_name": "fastapi",
     "category": "web_framework",
+    "server_framework": true,
     "description": "Modern async web framework built on Starlette and Pydantic with automatic OpenAPI docs",
     "current_stable_version": "0.115.0",
     "min_supported_version": "0.100.0",
