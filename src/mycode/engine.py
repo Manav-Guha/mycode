@@ -29,8 +29,8 @@ _RESULTS_END = "__MYCODE_RESULTS_END__"
 # Truncation limits
 _SNIPPET_MAX = 2000
 
-# JavaScript-only categories — skipped until JS execution support is added
-_JS_ONLY_CATEGORIES = frozenset({
+# JavaScript-specific categories — executed via Node.js harness
+_JS_CATEGORIES = frozenset({
     "async_failures",
     "event_listener_accumulation",
     "state_management_degradation",
@@ -212,18 +212,6 @@ class ExecutionEngine:
             "Executing scenario: %s [%s]", scenario.name, scenario.category,
         )
 
-        # Skip JS-only categories
-        if scenario.category in _JS_ONLY_CATEGORIES:
-            return ScenarioResult(
-                scenario_name=scenario.name,
-                scenario_category=scenario.category,
-                status="skipped",
-                summary=(
-                    "JavaScript-specific scenario — "
-                    "JS execution not yet supported."
-                ),
-            )
-
         config = scenario.test_config
         resource_limits = config.get("resource_limits", {})
         timeout = resource_limits.get(
@@ -232,16 +220,26 @@ class ExecutionEngine:
 
         start = time.perf_counter()
 
-        # Build harness script and config
+        # Build harness script and config — route JS categories to Node.js
+        is_js = scenario.category in _JS_CATEGORIES
         harness_config = self._build_harness_config(scenario)
-        harness_content = self._build_harness(scenario.category)
-        harness_path, config_path = self._write_harness(
-            harness_content, harness_config, scenario.name,
-        )
+
+        if is_js:
+            harness_content = self._build_js_harness(scenario.category)
+            harness_path, config_path = self._write_harness(
+                harness_content, harness_config, scenario.name, ext=".js",
+            )
+            runner = "node"
+        else:
+            harness_content = self._build_harness(scenario.category)
+            harness_path, config_path = self._write_harness(
+                harness_content, harness_config, scenario.name,
+            )
+            runner = "python"
 
         # Run harness in session sandbox
         session_result = self.session.run_in_session(
-            ["python", str(harness_path), str(config_path)],
+            [runner, str(harness_path), str(config_path)],
             timeout=timeout,
         )
 
@@ -312,11 +310,17 @@ class ExecutionEngine:
         body = _CATEGORY_BODIES.get(category, _BODY_GENERIC)
         return _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
 
+    def _build_js_harness(self, category: str) -> str:
+        """Generate a self-contained JavaScript test harness script."""
+        body = _JS_CATEGORY_BODIES.get(category, _JS_BODY_GENERIC)
+        return _JS_HARNESS_PREAMBLE + "\n" + body + "\n" + _JS_HARNESS_POSTAMBLE
+
     def _write_harness(
         self,
         script_content: str,
         harness_config: dict,
         scenario_name: str,
+        ext: str = ".py",
     ) -> tuple[Path, Path]:
         """Write harness script and config to the session workspace."""
         safe = "".join(
@@ -326,7 +330,7 @@ class ExecutionEngine:
         uid = uuid.uuid4().hex[:8]
 
         harness_path = (
-            self.session.project_copy_dir / f"_mycode_harness_{safe}_{uid}.py"
+            self.session.project_copy_dir / f"_mycode_harness_{safe}_{uid}{ext}"
         )
         config_path = (
             self.session.project_copy_dir / f"_mycode_config_{safe}_{uid}.json"
@@ -849,4 +853,279 @@ _CATEGORY_BODIES: dict[str, str] = {
     "concurrent_execution": _BODY_CONCURRENT_EXECUTION,
     "blocking_io": _BODY_BLOCKING_IO,
     "gil_contention": _BODY_GIL_CONTENTION,
+}
+
+
+# ── JavaScript Harness Templates ──
+#
+# The JS harness is a self-contained Node.js script that runs inside the
+# session sandbox.  It uses ONLY Node.js built-in modules.
+#
+# Structure:  _JS_HARNESS_PREAMBLE  +  category body  +  _JS_HARNESS_POSTAMBLE
+#
+# Configuration is passed via a JSON file (process.argv[2]).
+
+_JS_HARNESS_PREAMBLE = '''\
+#!/usr/bin/env node
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const { EventEmitter } = require("events");
+
+const CONFIG = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+
+const _steps = [];
+let _stepErrors = [];
+const _importErrors = [];
+const _modules = {};
+const _callables = [];
+
+// ── Module Import ──
+for (const _modName of (CONFIG.target_modules || [])) {
+    try {
+        const _modPath = path.resolve(process.cwd(), _modName.replace(/\\./g, path.sep));
+        _modules[_modName] = require(_modPath);
+    } catch (_e) {
+        _importErrors.push({
+            type: _e.constructor.name,
+            message: String(_e).slice(0, 500),
+            module: _modName,
+        });
+    }
+}
+
+// ── Callable Discovery ──
+for (const _fi of (CONFIG.target_functions || [])) {
+    const _mn = _fi.module;
+    const _fn = _fi.name;
+    if (_modules[_mn]) {
+        const _attr = _modules[_mn][_fn];
+        if (typeof _attr === "function") {
+            _callables.push({
+                name: _mn + "." + _fn,
+                func: _attr,
+                args: _fi.args || [],
+                is_async: _fi.is_async || false,
+            });
+        }
+    }
+}
+
+// ── Helpers ──
+
+function _recordError(exc, target) {
+    _stepErrors.push({
+        type: (exc && exc.constructor) ? exc.constructor.name : "Error",
+        message: String(exc).slice(0, 500),
+        target: target || "",
+    });
+}
+
+async function _measureStep(stepName, params, func) {
+    _stepErrors = [];
+    const _t0 = performance.now();
+    let _cap = "";
+    try {
+        const _result = func();
+        if (_result && typeof _result.then === "function") {
+            await _result;
+        }
+    } catch (_e) {
+        if (_e instanceof RangeError && /call stack/i.test(String(_e))) {
+            _cap = "memory";
+        }
+        _stepErrors.push({
+            type: (_e && _e.constructor) ? _e.constructor.name : "Error",
+            message: String(_e).slice(0, 500),
+            traceback: (_e && _e.stack) ? _e.stack.slice(-1000) : "",
+        });
+    }
+    const _elapsed = performance.now() - _t0;
+    const _mem = process.memoryUsage();
+    const _peakMb = _mem.heapUsed / 1048576;
+    _steps.push({
+        step_name: stepName,
+        parameters: params,
+        execution_time_ms: Math.round(_elapsed * 100) / 100,
+        memory_peak_mb: Math.round(_peakMb * 100) / 100,
+        error_count: _stepErrors.length,
+        errors: [..._stepErrors],
+        resource_cap_hit: _cap,
+    });
+}
+
+function _callSafely(entry, args) {
+    const _f = entry.func;
+    if (args !== undefined) {
+        if (Array.isArray(args)) return _f(...args);
+        return _f(args);
+    }
+    const _params = (entry.args || []).filter(function(p) { return p !== "this"; });
+    if (_params.length === 0) return _f();
+    try {
+        return _f();
+    } catch (_e) {
+        return _f(...new Array(_params.length).fill(null));
+    }
+}
+
+// ── Test Body ──
+(async () => {
+'''
+
+_JS_HARNESS_POSTAMBLE = '''
+})().then(() => {
+    console.log("__MYCODE_RESULTS_START__");
+    console.log(JSON.stringify({steps: _steps, import_errors: _importErrors}));
+    console.log("__MYCODE_RESULTS_END__");
+}).catch((_fatalErr) => {
+    console.error("Harness error:", _fatalErr);
+    console.log("__MYCODE_RESULTS_START__");
+    console.log(JSON.stringify({steps: _steps, import_errors: _importErrors}));
+    console.log("__MYCODE_RESULTS_END__");
+    process.exitCode = 1;
+});
+'''
+
+# ── JS Category-Specific Test Bodies ──
+
+_JS_BODY_ASYNC_FAILURES = '''\
+const _params = CONFIG.parameters || {};
+const _levels = _params.concurrent || [10, 50, 100];
+for (const _lvl of _levels) {
+    await _measureStep("async_load_" + _lvl, {concurrent_promises: _lvl}, () => {
+        const _promises = [];
+        for (let _i = 0; _i < _lvl; _i++) {
+            if (_callables.length > 0) {
+                _promises.push(
+                    Promise.resolve()
+                        .then(() => _callSafely(_callables[_i % _callables.length]))
+                        .catch((_e) => _recordError(_e, _callables[_i % _callables.length].name))
+                );
+            } else {
+                _promises.push(
+                    new Promise((resolve, reject) => {
+                        setTimeout(() => {
+                            if (_i % 7 === 0) reject(new Error("async_failure_" + _i));
+                            else resolve(_i);
+                        }, 0);
+                    }).catch((_e) => _recordError(_e, "promise_" + _i))
+                );
+            }
+        }
+        return Promise.allSettled(_promises);
+    });
+}
+const _chainLengths = _params.chain_lengths || [5, 10, 20];
+for (const _depth of _chainLengths) {
+    await _measureStep("rejection_chain_" + _depth, {chain_depth: _depth}, () => {
+        let _chain = Promise.resolve();
+        for (let _i = 0; _i < _depth; _i++) {
+            _chain = _chain.then(() => {
+                if (_callables.length > 0) return _callSafely(_callables[0]);
+                return _i;
+            });
+        }
+        _chain = _chain.then(() => { throw new Error("end_of_chain_rejection"); });
+        return _chain.catch((_e) => _recordError(_e, "rejection_chain"));
+    });
+}
+'''
+
+_JS_BODY_EVENT_LISTENER_ACCUMULATION = '''\
+const _params = CONFIG.parameters || {};
+const _listenerCounts = _params.listener_counts || [10, 100, 500, 1000];
+for (const _count of _listenerCounts) {
+    await _measureStep("listeners_" + _count, {listener_count: _count}, () => {
+        const _emitter = new EventEmitter();
+        _emitter.setMaxListeners(0);
+        for (let _i = 0; _i < _count; _i++) {
+            _emitter.on("test_event", () => {});
+        }
+        for (let _j = 0; _j < 10; _j++) {
+            _emitter.emit("test_event", {iteration: _j});
+        }
+        if (_callables.length > 0) {
+            for (const _e of _callables.slice(0, 3)) {
+                try { _callSafely(_e); } catch (_exc) { _recordError(_exc, _e.name); }
+            }
+        }
+    });
+}
+const _iterations = _params.iterations || 50;
+const _batch = Math.max(1, Math.floor(_iterations / 10));
+for (let _b = 0; _b < _iterations; _b += _batch) {
+    const _batchCount = Math.min(_batch, _iterations - _b);
+    await _measureStep("leak_batch_" + _b, {batch_start: _b, batch_count: _batchCount}, () => {
+        const _emitter = new EventEmitter();
+        _emitter.setMaxListeners(0);
+        for (let _i = 0; _i < _batchCount * 100; _i++) {
+            _emitter.on("data", () => {});
+        }
+        for (let _j = 0; _j < _batchCount; _j++) {
+            _emitter.emit("data", {value: _j});
+        }
+    });
+}
+'''
+
+_JS_BODY_STATE_MANAGEMENT_DEGRADATION = '''\
+const _params = CONFIG.parameters || {};
+const _iterations = _params.iterations || 50;
+const _batch = Math.max(1, Math.floor(_iterations / 10));
+for (let _b = 0; _b < _iterations; _b += _batch) {
+    const _count = Math.min(_batch, _iterations - _b);
+    await _measureStep("state_batch_" + _b, {batch_start: _b, batch_count: _count}, () => {
+        const _store = {};
+        for (let _i = 0; _i < _count * 1000; _i++) {
+            _store["key_" + (_b * 1000 + _i)] = {
+                value: "x".repeat(100),
+                timestamp: Date.now(),
+                nested: {a: _i, b: [_i, _i + 1, _i + 2]},
+            };
+        }
+        if (_callables.length > 0) {
+            for (const _e of _callables.slice(0, 3)) {
+                try { _callSafely(_e); } catch (_exc) { _recordError(_exc, _e.name); }
+            }
+        }
+        const _keys = Object.keys(_store);
+        for (let _j = 0; _j < Math.min(1000, _keys.length); _j++) {
+            void _store[_keys[Math.floor(Math.random() * _keys.length)]];
+        }
+    });
+}
+const _closureCounts = _params.closure_counts || [100, 500, 1000];
+for (const _cc of _closureCounts) {
+    await _measureStep("closures_" + _cc, {closure_count: _cc}, () => {
+        const _retained = [];
+        for (let _i = 0; _i < _cc; _i++) {
+            const _largeData = new Array(1000).fill(_i);
+            _retained.push(() => _largeData.reduce((a, b) => a + b, 0));
+        }
+        let _sum = 0;
+        for (const _fn of _retained) { _sum += _fn(); }
+    });
+}
+'''
+
+_JS_BODY_GENERIC = '''\
+const _params = CONFIG.parameters || {};
+const _iterations = _params.iterations || 10;
+for (let _i = 0; _i < _iterations; _i++) {
+    await _measureStep("iteration_" + _i, {iteration: _i}, () => {
+        if (_callables.length > 0) {
+            for (const _e of _callables.slice(0, 5)) {
+                try { _callSafely(_e); } catch (_exc) { _recordError(_exc, _e.name); }
+            }
+        }
+    });
+}
+'''
+
+# JS Category -> body mapping
+_JS_CATEGORY_BODIES: dict[str, str] = {
+    "async_failures": _JS_BODY_ASYNC_FAILURES,
+    "event_listener_accumulation": _JS_BODY_EVENT_LISTENER_ACCUMULATION,
+    "state_management_degradation": _JS_BODY_STATE_MANAGEMENT_DEGRADATION,
 }

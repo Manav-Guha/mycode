@@ -19,6 +19,10 @@ from mycode.engine import (
     _BODY_GENERIC,
     _HARNESS_PREAMBLE,
     _HARNESS_POSTAMBLE,
+    _JS_CATEGORY_BODIES,
+    _JS_BODY_GENERIC,
+    _JS_HARNESS_PREAMBLE,
+    _JS_HARNESS_POSTAMBLE,
     _RESULTS_START,
     _RESULTS_END,
 )
@@ -267,18 +271,24 @@ class TestExecute:
         assert len(result.scenario_results) == 3
         assert result.scenarios_completed == 3
 
-    def test_js_scenario_skipped(self, tmp_path):
+    def test_js_scenario_executed_via_node(self, tmp_path):
         session = _make_session(tmp_path)
-        engine = ExecutionEngine(session, _make_ingestion())
+        harness_stdout = _make_harness_output(steps=[_make_step_data()])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout=harness_stdout, stderr="",
+        )
 
+        engine = ExecutionEngine(session, _make_ingestion())
         scenario = _make_scenario(name="async_test", category="async_failures")
         result = engine.execute([scenario])
 
-        assert result.scenarios_skipped == 1
-        assert result.scenario_results[0].status == "skipped"
-        assert "JavaScript" in result.scenario_results[0].summary
-        # run_in_session should not be called for skipped scenarios
-        session.run_in_session.assert_not_called()
+        assert result.scenarios_skipped == 0
+        assert result.scenarios_completed == 1
+        assert result.scenario_results[0].status == "completed"
+        # run_in_session should be called with node
+        call_args = session.run_in_session.call_args[0][0]
+        assert call_args[0] == "node"
+        assert call_args[1].endswith(".js")
 
     def test_engine_error_during_scenario(self, tmp_path):
         session = _make_session(tmp_path)
@@ -405,6 +415,57 @@ class TestHarnessGeneration:
         # Should not have slashes or spaces in filename
         assert "/" not in harness_path.name
         assert " " not in harness_path.name
+
+    def test_all_js_category_bodies_valid_structure(self):
+        """Every JS category body + generic produces a complete script with markers."""
+        bodies = list(_JS_CATEGORY_BODIES.items()) + [("generic", _JS_BODY_GENERIC)]
+        for name, body in bodies:
+            script = _JS_HARNESS_PREAMBLE + "\n" + body + "\n" + _JS_HARNESS_POSTAMBLE
+            # Must contain the output markers
+            assert "__MYCODE_RESULTS_START__" in script, f"JS '{name}' missing start marker"
+            assert "__MYCODE_RESULTS_END__" in script, f"JS '{name}' missing end marker"
+            # Must have the async IIFE wrapper
+            assert "(async () => {" in script, f"JS '{name}' missing async IIFE"
+            assert "})().then(" in script, f"JS '{name}' missing .then()"
+            # Must not have unclosed braces (basic structural check)
+            opens = script.count("{")
+            closes = script.count("}")
+            assert opens == closes, (
+                f"JS '{name}' brace mismatch: {opens} opens vs {closes} closes"
+            )
+
+    def test_build_js_harness_uses_category_body(self, tmp_path):
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion())
+
+        harness = engine._build_js_harness("async_failures")
+        assert "async_load_" in harness
+        assert "Promise.allSettled" in harness
+        assert "__MYCODE_RESULTS_START__" in harness
+
+    def test_build_js_harness_falls_back_to_generic(self, tmp_path):
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion())
+
+        harness = engine._build_js_harness("unknown_js_category")
+        assert "iteration_" in harness
+
+    def test_write_harness_js_extension(self, tmp_path):
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion())
+
+        harness_path, config_path = engine._write_harness(
+            "console.log('hello')",
+            {"key": "value"},
+            "test_js_scenario",
+            ext=".js",
+        )
+
+        assert harness_path.exists()
+        assert config_path.exists()
+        assert harness_path.name.endswith(".js")
+        assert "_mycode_harness_" in harness_path.name
+        assert harness_path.read_text() == "console.log('hello')"
 
 
 # ── Output Parsing Tests ──
@@ -794,14 +855,65 @@ class TestScenarioExecution:
         call_kwargs = session.run_in_session.call_args
         assert call_kwargs.kwargs.get("timeout") == 120 or call_kwargs[1].get("timeout") == 120
 
-    def test_js_category_skipped(self, tmp_path):
+    def test_js_category_executed_via_node(self, tmp_path):
         session = _make_session(tmp_path)
-        engine = ExecutionEngine(session, _make_ingestion())
+        harness_stdout = _make_harness_output(steps=[_make_step_data()])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout=harness_stdout, stderr="",
+        )
 
+        engine = ExecutionEngine(session, _make_ingestion())
         for cat in ("async_failures", "event_listener_accumulation", "state_management_degradation"):
+            session.run_in_session.reset_mock()
+            session.run_in_session.return_value = SessionResult(
+                returncode=0, stdout=harness_stdout, stderr="",
+            )
             scenario = _make_scenario(name=f"js_{cat}", category=cat)
             result = engine._execute_scenario(scenario)
-            assert result.status == "skipped"
+            assert result.status == "completed", f"JS category {cat} should complete"
+            # Verify node was used, not python
+            call_args = session.run_in_session.call_args[0][0]
+            assert call_args[0] == "node", f"JS category {cat} should use node"
+            assert call_args[1].endswith(".js"), f"JS category {cat} should write .js file"
+
+    def test_all_js_categories_generate_valid_harness(self, tmp_path):
+        """Verify that every JS category produces a harness and completes."""
+        session = _make_session(tmp_path)
+        harness_stdout = _make_harness_output(steps=[
+            _make_step_data("async_load_10"),
+            _make_step_data("async_load_50"),
+        ])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout=harness_stdout, stderr="",
+        )
+
+        engine = ExecutionEngine(session, _make_ingestion())
+        categories = [
+            "async_failures",
+            "event_listener_accumulation",
+            "state_management_degradation",
+        ]
+
+        for cat in categories:
+            scenario = _make_scenario(name=f"test_{cat}", category=cat)
+            result = engine._execute_scenario(scenario)
+            assert result.status == "completed", f"JS category {cat} should complete"
+
+    def test_js_harness_files_cleaned_up(self, tmp_path):
+        session = _make_session(tmp_path)
+        harness_stdout = _make_harness_output(steps=[_make_step_data()])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout=harness_stdout, stderr="",
+        )
+
+        engine = ExecutionEngine(session, _make_ingestion())
+        scenario = _make_scenario(name="js_async", category="async_failures")
+        engine._execute_scenario(scenario)
+
+        # Harness .js and config files should be cleaned up
+        project_dir = session.project_copy_dir
+        remaining = list(project_dir.glob("_mycode_*"))
+        assert remaining == []
 
     def test_all_python_categories_generate_valid_harness(self, tmp_path):
         """Verify that every Python category produces a runnable harness."""
@@ -1004,3 +1116,61 @@ class TestEdgeCases:
         # No end marker → treated as crash
         assert result.status == "failed"
         assert result.steps[0].step_name == "harness_crash"
+
+
+# ── JavaScript Harness Template Tests ──
+
+
+class TestJSHarnessTemplates:
+    """Test JS harness template content and structure."""
+
+    def test_async_failures_body_has_promise_testing(self):
+        harness = _JS_HARNESS_PREAMBLE + "\n" + _JS_CATEGORY_BODIES["async_failures"] + "\n" + _JS_HARNESS_POSTAMBLE
+        assert "Promise.allSettled" in harness
+        assert "async_load_" in harness
+        assert "rejection_chain_" in harness
+        assert "_callSafely" in harness
+
+    def test_event_listener_body_has_emitter_testing(self):
+        harness = _JS_HARNESS_PREAMBLE + "\n" + _JS_CATEGORY_BODIES["event_listener_accumulation"] + "\n" + _JS_HARNESS_POSTAMBLE
+        assert "EventEmitter" in harness
+        assert "setMaxListeners" in harness
+        assert "listeners_" in harness
+        assert "leak_batch_" in harness
+
+    def test_state_management_body_has_state_testing(self):
+        harness = _JS_HARNESS_PREAMBLE + "\n" + _JS_CATEGORY_BODIES["state_management_degradation"] + "\n" + _JS_HARNESS_POSTAMBLE
+        assert "state_batch_" in harness
+        assert "closures_" in harness
+        assert "_store" in harness
+
+    def test_js_generic_body_has_iteration_loop(self):
+        harness = _JS_HARNESS_PREAMBLE + "\n" + _JS_BODY_GENERIC + "\n" + _JS_HARNESS_POSTAMBLE
+        assert "iteration_" in harness
+        assert "_callSafely" in harness
+
+    def test_js_preamble_has_module_loading(self):
+        assert "require(" in _JS_HARNESS_PREAMBLE
+        assert "target_modules" in _JS_HARNESS_PREAMBLE
+        assert "target_functions" in _JS_HARNESS_PREAMBLE
+        assert "_recordError" in _JS_HARNESS_PREAMBLE
+        assert "_measureStep" in _JS_HARNESS_PREAMBLE
+
+    def test_js_postamble_outputs_json(self):
+        assert "__MYCODE_RESULTS_START__" in _JS_HARNESS_POSTAMBLE
+        assert "__MYCODE_RESULTS_END__" in _JS_HARNESS_POSTAMBLE
+        assert "JSON.stringify" in _JS_HARNESS_POSTAMBLE
+
+    def test_js_category_bodies_mapping_complete(self):
+        expected = {"async_failures", "event_listener_accumulation", "state_management_degradation"}
+        assert set(_JS_CATEGORY_BODIES.keys()) == expected
+
+    def test_js_harness_uses_only_builtins(self):
+        """JS harness preamble static imports should only use Node.js built-ins."""
+        # Only check top-level require statements (before module import loop)
+        preamble_setup = _JS_HARNESS_PREAMBLE.split("// ── Module Import")[0]
+        for line in preamble_setup.split("\n"):
+            if "require(" in line and not line.strip().startswith("//"):
+                assert any(m in line for m in ("fs", "path", "events")), (
+                    f"JS preamble requires non-builtin: {line.strip()}"
+                )
