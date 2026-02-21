@@ -25,7 +25,12 @@ from mycode.report import (
     Finding,
     ReportError,
     ReportGenerator,
+    _describe_impact,
+    _describe_scenario,
+    _describe_step,
+    _extract_project_ref,
     _human_metric,
+    _human_time,
 )
 from mycode.scenario import LLMBackend, LLMConfig, LLMError, LLMResponse
 
@@ -1316,13 +1321,13 @@ class TestPlainSummary:
         gen = ReportGenerator(offline=True)
         report = gen.generate(failing_execution, simple_ingestion, profile_matches)
 
-        assert "issues" in report.plain_summary.lower()
+        assert "problems" in report.plain_summary.lower()
         assert "real-world conditions" in report.plain_summary.lower()
 
     def test_includes_operational_intent(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Intent text appears in the plain summary."""
+        """Project ref derived from intent appears in the summary."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
@@ -1334,27 +1339,29 @@ class TestPlainSummary:
     def test_degradation_translated(
         self, degrading_execution, simple_ingestion, profile_matches,
     ):
-        """Degradation points appear as plain-language bullets."""
+        """Degradation points appear as plain-language bullets with real impact."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(degrading_execution, simple_ingestion, profile_matches)
 
         assert "- " in report.plain_summary
-        # Should mention slowing or memory growth
         lower = report.plain_summary.lower()
-        assert "slower" in lower or "slows" in lower or "memory" in lower
+        # Should describe impact in real terms, not multipliers
+        assert "response time" in lower or "memory" in lower
+        # Should use "When" pattern for activity framing
+        assert "when " in lower
 
     def test_findings_translated(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Findings appear as plain-language bullets."""
+        """Findings appear as plain-language bullets with When pattern."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(failing_execution, simple_ingestion, profile_matches)
 
         assert "- " in report.plain_summary
+        assert "when " in report.plain_summary.lower()
 
     def test_max_five_items(self):
         """Only top 5 findings/degradation shown."""
-        # Create execution with many degradation points
         execution = ExecutionEngineResult(
             scenario_results=[
                 ScenarioResult(
@@ -1362,8 +1369,8 @@ class TestPlainSummary:
                     scenario_category="data_volume_scaling",
                     status="completed",
                     steps=[
-                        StepResult(step_name="small", execution_time_ms=10.0, memory_peak_mb=5.0),
-                        StepResult(step_name="large", execution_time_ms=500.0, memory_peak_mb=200.0),
+                        StepResult(step_name="data_size_100", execution_time_ms=10.0, memory_peak_mb=5.0),
+                        StepResult(step_name="data_size_100000", execution_time_ms=500.0, memory_peak_mb=200.0),
                     ],
                     total_errors=0,
                 )
@@ -1397,7 +1404,6 @@ class TestPlainSummary:
         report = gen.generate(failing_execution, simple_ingestion, profile_matches)
 
         text = report.as_text()
-        # plain_summary content should appear before the technical summary
         plain_pos = text.find("real-world conditions")
         summary_pos = text.find("critical issue")
         assert plain_pos != -1
@@ -1407,7 +1413,7 @@ class TestPlainSummary:
     def test_no_intent_still_works(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Works without operational_intent (generic framing)."""
+        """Works without operational_intent — uses 'your project'."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
@@ -1415,9 +1421,7 @@ class TestPlainSummary:
         )
 
         assert report.plain_summary
-        assert "real-world conditions" in report.plain_summary.lower()
-        # Should NOT contain "based on your description"
-        assert "based on your description" not in report.plain_summary.lower()
+        assert "your project" in report.plain_summary.lower()
 
     def test_empty_execution(self):
         """No scenarios → no plain summary generated."""
@@ -1429,3 +1433,113 @@ class TestPlainSummary:
         )
 
         assert report.plain_summary == ""
+
+    def test_impact_uses_real_time_not_multiplier(
+        self, degrading_execution, simple_ingestion, profile_matches,
+    ):
+        """Impact described in real terms, not multipliers."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(degrading_execution, simple_ingestion, profile_matches)
+
+        lower = report.plain_summary.lower()
+        # Should have real-terms time descriptions
+        assert any(
+            phrase in lower
+            for phrase in ("instant", "second", "minute")
+        )
+        # Should NOT have multiplier patterns like "80x" or "204x slower"
+        import re
+        assert not re.search(r"\d+x slower", lower)
+
+    def test_step_translated_to_user_terms(self):
+        """Step names translated to user-meaningful descriptions."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="flask_concurrent_request_load",
+                    scenario_category="concurrent_execution",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="concurrent_1", execution_time_ms=10.0, memory_peak_mb=5.0),
+                        StepResult(step_name="concurrent_50", execution_time_ms=5000.0, memory_peak_mb=50.0),
+                    ],
+                    total_errors=0,
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+
+        lower = report.plain_summary.lower()
+        assert "simultaneous users" in lower
+
+    def test_extract_project_ref(self):
+        """_extract_project_ref extracts short noun phrases."""
+        # Strips "An" article, splits on " that "
+        assert _extract_project_ref(
+            "An incident matching system that compares reports"
+        ) == "incident matching system"
+        # Strips "I built a" filler + "a" article
+        assert _extract_project_ref(
+            "I built a Flask app that shows charts"
+        ) == "Flask app"
+        # No filler to strip, keeps full clause
+        ref = _extract_project_ref("Personal budget tracker for daily use")
+        assert "budget tracker" in ref
+        # Strips "My" article
+        assert _extract_project_ref("My todo list app") == "todo list app"
+        # Fallback for too-short input
+        assert _extract_project_ref("") == "project"
+        assert _extract_project_ref("ab") == "project"
+
+
+class TestPlainSummaryHelpers:
+    """Tests for plain summary module-level helpers."""
+
+    def test_human_time(self):
+        assert _human_time(50) == "instant"
+        assert _human_time(500) == "under a second"
+        assert _human_time(2000) == "a few seconds"
+        assert "seconds" in _human_time(15000)
+        assert _human_time(45000) == "about 30 seconds"
+        assert _human_time(120000) == "over a minute"
+
+    def test_describe_scenario_template_match(self):
+        assert _describe_scenario("flask_concurrent_request_load") == \
+            "handling multiple users at once"
+        assert _describe_scenario("streamlit_cache_memory_growth") == \
+            "caching data over time"
+        assert _describe_scenario("requests_timeout_behavior") == \
+            "calling external APIs that respond slowly"
+
+    def test_describe_scenario_coupling_patterns(self):
+        assert "components" in _describe_scenario("coupling_api_fetch_data")
+        assert "calculations" in _describe_scenario("coupling_compute_transform")
+        assert "state" in _describe_scenario("coupling_state_setters_group_1")
+
+    def test_describe_scenario_unknown_returns_empty(self):
+        assert _describe_scenario("completely_unknown_thing") == ""
+
+    def test_describe_step_patterns(self):
+        assert _describe_step("data_size_10000") == "10,000 items"
+        assert _describe_step("concurrent_50") == "50 simultaneous users"
+        assert _describe_step("io_size_100000") == "100KB of data"
+        assert _describe_step("gil_threads_8") == "8 parallel threads"
+
+    def test_describe_step_unknown_returns_empty(self):
+        assert _describe_step("edge_none") == ""
+        assert _describe_step("iteration_5") == ""
+
+    def test_describe_impact_time(self):
+        result = _describe_impact("execution_time_ms", 10.0, 5000.0)
+        assert "instant" in result
+        assert "seconds" in result
+
+    def test_describe_impact_memory(self):
+        result = _describe_impact("memory_peak_mb", 5.0, 120.0)
+        assert "5MB" in result
+        assert "120MB" in result

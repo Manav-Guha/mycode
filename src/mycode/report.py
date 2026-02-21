@@ -660,58 +660,58 @@ class ReportGenerator:
 
         lines: list[str] = []
 
+        # ── Project reference from user's intent ──
+        project_ref = "your project"
+        if operational_intent:
+            ref = _extract_project_ref(operational_intent)
+            project_ref = f"your {ref}"
+
         # ── Overall assessment ──
         critical = [f for f in report.findings if f.severity == "critical"]
         warnings = [f for f in report.findings if f.severity == "warning"]
 
-        if operational_intent:
-            intent_snippet = operational_intent[:80]
-            if len(operational_intent) > 80:
-                intent_snippet += "..."
-            lines.append(
-                f"Based on your description ({intent_snippet}), "
-                f"here's what we found:"
-            )
-
         if critical:
-            if operational_intent:
-                lines.append(
-                    "We found issues that could affect your project "
-                    "under real-world conditions."
-                )
-            else:
-                lines.append(
-                    "We found issues that could affect your project "
-                    "under real-world conditions."
-                )
+            lines.append(
+                f"We found some problems that could affect "
+                f"{project_ref} under real-world conditions."
+            )
         elif warnings:
             lines.append(
-                "Your project mostly handles stress well, but there are "
-                "a few areas to watch."
+                f"{project_ref[0].upper()}{project_ref[1:]} mostly "
+                f"handles stress well, but there are a few areas to watch."
             )
         else:
             lines.append(
-                "Your project looks solid under the conditions we tested."
+                f"{project_ref[0].upper()}{project_ref[1:]} looks solid "
+                f"under the conditions we tested."
             )
 
-        # ── Top findings translation (up to 5 items) ──
+        # ── Top findings (up to 5, deduplicated) ──
         items: list[str] = []
 
-        # Translate degradation points
         for dp in report.degradation_points:
             if len(items) >= 5:
                 break
-            items.append(self._translate_degradation(dp))
+            items.append(self._translate_degradation(dp, operational_intent))
 
-        # Translate findings (skip info-level — version/unrecognized noise)
         for f in report.findings:
             if len(items) >= 5:
                 break
             if f.severity == "info":
                 continue
-            translated = self._translate_finding(f)
+            translated = self._translate_finding(f, operational_intent)
             if translated:
                 items.append(translated)
+
+        # Deduplicate by first 40 chars
+        seen: set[str] = set()
+        unique: list[str] = []
+        for item in items:
+            key = item[:40].lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(item)
+        items = unique[:5]
 
         if items:
             lines.append("")
@@ -727,106 +727,73 @@ class ReportGenerator:
 
         return "\n".join(lines)
 
-    def _translate_degradation(self, dp: DegradationPoint) -> str:
+    def _translate_degradation(
+        self, dp: DegradationPoint, operational_intent: str,
+    ) -> str:
         """Translate a degradation point into plain language."""
-        name_lower = dp.scenario_name.lower()
-        context = self._context_from_name(name_lower)
+        activity = _describe_scenario(dp.scenario_name, operational_intent)
 
-        if len(dp.steps) >= 2 and dp.steps[0][1] > 0.001:
-            ratio = dp.steps[-1][1] / dp.steps[0][1]
-        else:
-            ratio = 0.0
+        first_val = dp.steps[0][1] if dp.steps else 0.0
+        last_val = dp.steps[-1][1] if dp.steps else 0.0
+        impact = _describe_impact(dp.metric, first_val, last_val)
 
-        if dp.metric == "execution_time_ms":
-            if ratio > 10:
-                speed = "slows to a crawl"
-            elif ratio >= 2:
-                speed = "noticeably slower"
-            else:
-                speed = "slower"
+        # Translate breaking point step to user terms
+        scale = ""
+        if dp.breaking_point:
+            scale = _describe_step(dp.breaking_point)
+
+        if activity and scale:
             return (
-                f"Processing {context}slows dramatically with larger data"
-                f" — {ratio:.0f}x {speed} at the highest load tested"
-                if ratio > 10
-                else f"Processing {context}gets {speed} with larger data"
-                f" — {ratio:.0f}x at the highest load tested"
+                f"When {activity}, {impact} — starts breaking "
+                f"around {scale}."
             )
+        if activity:
+            return f"When {activity}, {impact}."
+        return f"{impact[0].upper()}{impact[1:]}."
 
-        if dp.metric == "memory_peak_mb":
-            peak = dp.steps[-1][1] if dp.steps else 0.0
-            if "memory" in name_lower or "leak" in name_lower:
-                return (
-                    "Memory keeps growing over repeated use — could "
-                    "eventually run out with long sessions"
-                )
-            if peak > 100:
-                return (
-                    f"Memory usage grows rapidly with data size — "
-                    f"reaches {peak:.0f}MB at peak"
-                )
-            return "Memory usage grows with data size"
-
-        if dp.metric == "error_count":
-            return "Errors accumulate under increasing load"
-
-        return dp.description
-
-    def _translate_finding(self, f: Finding) -> str:
+    def _translate_finding(
+        self, f: Finding, operational_intent: str,
+    ) -> str:
         """Translate a finding into plain language."""
-        cat = f.category
-        title_lower = f.title.lower()
+        # Extract scenario name from finding title
+        scenario_name = f.title.split(": ", 1)[-1] if ": " in f.title else ""
+        activity = _describe_scenario(scenario_name, operational_intent)
 
-        if cat == "concurrent_execution":
-            if "failed" in title_lower:
-                return (
-                    f"Under simultaneous use, things break — "
-                    f"{f.description}"
-                )
-            if "resource" in title_lower:
-                return (
-                    "Operations freeze under heavy load — hit time or "
-                    "resource limits"
-                )
-            return f"Concurrent use causes problems — {f.description}"
-
-        if cat == "edge_case_input":
-            error_type = ""
-            if f.details:
-                parts = f.details.split(":")
-                if parts:
-                    error_type = parts[0].strip()
-            if error_type:
-                return (
-                    f"Unexpected inputs cause crashes — {error_type} "
-                    f"errors when given unusual data"
-                )
-            return "Unexpected inputs cause crashes"
-
-        if cat == "data_volume_scaling":
-            if "resource" in title_lower:
-                return "Hit safety limits when processing large data"
-            if f._error_count > 0:
-                return f"Errors appear with larger data — {f._error_count} errors"
-            return f.description
-
-        if cat == "memory_profiling":
+        if f.category == "concurrent_execution":
+            ctx = activity or "handling multiple users at once"
+            if "failed" in f.title.lower():
+                return f"When {ctx}, the system fails."
             return (
-                "Memory keeps growing over repeated use — could "
-                "eventually run out with long sessions"
+                f"When {ctx}, things slow down or hit resource limits."
             )
 
-        return f.description
+        if f.category == "edge_case_input":
+            return (
+                "When given unexpected or unusual input, the code crashes "
+                "instead of handling it gracefully."
+            )
 
-    @staticmethod
-    def _context_from_name(name_lower: str) -> str:
-        """Extract a context phrase from a scenario name."""
-        if any(kw in name_lower for kw in ("request", "api", "http")):
-            return "for external API calls "
-        if any(kw in name_lower for kw in ("flask", "fastapi", "streamlit")):
-            return "for the web server "
-        if any(kw in name_lower for kw in ("coupling", "state")):
-            return "in data flow between components "
-        return ""
+        if f.category == "data_volume_scaling":
+            ctx = activity or "processing larger amounts of data"
+            if "resource" in f.title.lower():
+                return f"When {ctx}, the system hits safety limits."
+            if f._error_count > 0:
+                return (
+                    f"When {ctx}, errors start appearing — "
+                    f"{f._error_count} errors at the highest load."
+                )
+            return f"When {ctx}, performance degrades."
+
+        if f.category == "memory_profiling":
+            ctx = activity or "running over extended periods"
+            return (
+                f"During {ctx}, memory keeps growing and could "
+                f"eventually run out."
+            )
+
+        if activity:
+            return f"When {activity}, problems were detected."
+        return f.description
 
     def _generate_offline_summary(self, report: DiagnosticReport) -> str:
         """Generate a plain-text summary without LLM."""
@@ -1215,3 +1182,189 @@ def _human_metric(metric: str) -> str:
         "throughput": "Throughput",
         "latency_p99_ms": "P99 latency",
     }.get(metric, metric.replace("_", " ").title())
+
+
+# ── Plain Summary Helpers ──
+
+# Maps profile template names to user-meaningful activity descriptions.
+# Scenario names follow the pattern {dep}_{template_name}.
+_TEMPLATE_DESCRIPTIONS: dict[str, str] = {
+    "concurrent_request_load": "handling multiple users at once",
+    "concurrent_session_load": "handling multiple users at once",
+    "large_payload_response": "returning large results",
+    "file_upload_scaling": "handling file uploads",
+    "file_upload_memory_stress": "handling file uploads",
+    "blocking_io_under_load": "handling requests while waiting for data",
+    "repeated_request_memory_profile": "handling many requests over time",
+    "script_rerun_cost": "re-running with larger data",
+    "cache_memory_growth": "caching data over time",
+    "repeated_interaction_memory_profile": "extended user sessions",
+    "large_download_memory": "downloading large responses",
+    "timeout_behavior": "calling external APIs that respond slowly",
+    "error_handling_resilience": "dealing with unexpected API responses",
+    "session_vs_individual_performance": "making many API calls",
+    "data_volume_scaling": "processing larger amounts of data",
+    "merge_memory_stress": "combining large datasets",
+    "iterrows_vs_vectorized": "processing rows of data",
+    "memory_profiling_over_time": "repeated data operations over time",
+    "edge_case_dtypes": "handling unusual data formats",
+    "concurrent_dataframe_access": "accessing data from multiple places at once",
+    "session_write_concurrency": "multiple users writing at the same time",
+    "array_size_scaling": "working with larger arrays",
+    "matrix_operation_scaling": "heavy number crunching",
+    "concurrent_array_access": "accessing data from multiple threads",
+}
+
+
+def _human_time(ms: float) -> str:
+    """Convert milliseconds to natural language time description."""
+    if ms < 100:
+        return "instant"
+    if ms < 1000:
+        return "under a second"
+    if ms < 5000:
+        return "a few seconds"
+    if ms < 30000:
+        seconds = round(ms / 5000) * 5
+        return f"about {seconds} seconds"
+    if ms < 60000:
+        return "about 30 seconds"
+    return "over a minute"
+
+
+def _describe_scenario(scenario_name: str, operational_intent: str = "") -> str:
+    """Map a scenario name to a user-meaningful activity description.
+
+    Tries to match the template portion of the scenario name against
+    ``_TEMPLATE_DESCRIPTIONS``. Falls back to keyword-based patterns
+    for coupling scenarios and other conventions.
+    """
+    name = scenario_name.lower()
+
+    # Try progressively shorter prefixes to find the template portion.
+    # e.g. "flask_concurrent_request_load" → split into parts, try
+    # joining from index 1, 2, ... until a match is found.
+    parts = name.split("_")
+    for start in range(1, len(parts)):
+        template_key = "_".join(parts[start:])
+        if template_key in _TEMPLATE_DESCRIPTIONS:
+            return _TEMPLATE_DESCRIPTIONS[template_key]
+
+    # Coupling scenario patterns
+    if name.startswith("coupling_api_"):
+        return "connecting components together"
+    if name.startswith("coupling_compute_"):
+        return "running calculations across components"
+    if name.startswith("coupling_state_") or name.startswith("coupling_render_"):
+        return "updating shared state"
+    if name.startswith("coupling_errorhandler_"):
+        return "handling errors between components"
+
+    # Keyword fallbacks
+    if "memory" in name or "leak" in name:
+        return "managing memory over time"
+    if "concurrent" in name:
+        return "handling simultaneous operations"
+    if "scaling" in name or "volume" in name:
+        return "processing larger amounts of data"
+
+    return ""
+
+
+def _describe_step(step_name: str) -> str:
+    """Translate a step name into user terms.
+
+    Returns an empty string if the step name can't be meaningfully
+    translated (e.g. edge cases, generic iterations).
+    """
+    import re
+
+    m = re.match(r"data_size_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} items"
+
+    m = re.match(r"concurrent_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} simultaneous users"
+
+    m = re.match(r"batch_(\d+)", step_name)
+    if m:
+        return f"batch {int(m.group(1)):,}"
+
+    m = re.match(r"io_size_(\d+)", step_name)
+    if m:
+        size = int(m.group(1))
+        if size >= 1_000_000:
+            return f"{size / 1_000_000:.0f}MB of data"
+        if size >= 1000:
+            return f"{size / 1000:.0f}KB of data"
+        return f"{size:,} bytes of data"
+
+    m = re.match(r"gil_threads_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1))} parallel threads"
+
+    return ""
+
+
+def _describe_impact(metric: str, first_val: float, last_val: float) -> str:
+    """Describe the impact of a degradation in real terms."""
+    if metric == "execution_time_ms":
+        return (
+            f"response time goes from {_human_time(first_val)} "
+            f"to {_human_time(last_val)}"
+        )
+    if metric == "memory_peak_mb":
+        return (
+            f"memory usage grows from {first_val:.0f}MB to {last_val:.0f}MB"
+        )
+    if metric == "error_count":
+        return f"errors jump from {int(first_val)} to {int(last_val)}"
+    return f"{_human_metric(metric)} increases significantly"
+
+
+def _extract_project_ref(operational_intent: str) -> str:
+    """Extract a short noun phrase from the user's operational intent.
+
+    Used to reference the project naturally (e.g. "your budget tracker"
+    instead of "your project").
+    """
+    import re
+
+    text = operational_intent.strip()
+    if not text:
+        return "project"
+
+    # Take up to the first clause boundary
+    text = re.split(r"[.,;]| that | which ", text, maxsplit=1)[0].strip()
+
+    # Strip leading filler phrases
+    filler = [
+        r"^I(?:'m| am) building\s+",
+        r"^I(?:'ve| have) built\s+",
+        r"^I built\s+",
+        r"^I made\s+",
+        r"^I have\s+",
+        r"^It'?s\s+",
+        r"^This is\s+",
+        r"^We have\s+",
+        r"^We built\s+",
+    ]
+    for pattern in filler:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+
+    # Strip leading articles
+    text = re.sub(r"^(?:a|an|the|my|our)\s+", "", text, flags=re.IGNORECASE).strip()
+
+    # Cap at 50 chars, break at word boundary
+    if len(text) > 50:
+        cut = text[:50].rfind(" ")
+        if cut > 10:
+            text = text[:cut]
+        else:
+            text = text[:50]
+
+    if len(text) < 3:
+        return "project"
+
+    return text
