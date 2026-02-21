@@ -487,6 +487,30 @@ class TestVersionDiscrepancies:
         report = gen.generate(clean_execution, ingestion, matches)
         assert len(report.version_flags) == 0
 
+    def test_dev_deps_excluded_from_version_flags(self, clean_execution):
+        ingestion = IngestionResult(
+            project_path="/tmp/x",
+            files_analyzed=1,
+            dependencies=[
+                DependencyInfo(
+                    name="express", installed_version="4.18.0",
+                    latest_version="5.0.0", is_outdated=True,
+                ),
+                DependencyInfo(
+                    name="jest", installed_version="28.0.0",
+                    latest_version="29.0.0", is_outdated=True, is_dev=True,
+                ),
+                DependencyInfo(
+                    name="eslint", is_missing=True, is_dev=True,
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(clean_execution, ingestion, [])
+        assert any("express" in v for v in report.version_flags)
+        assert not any("jest" in v for v in report.version_flags)
+        assert not any("eslint" in v for v in report.version_flags)
+
 
 # ── Unrecognized Dependencies Tests ──
 

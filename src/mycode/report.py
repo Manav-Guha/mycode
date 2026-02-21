@@ -492,8 +492,10 @@ class ReportGenerator:
         report: DiagnosticReport,
     ) -> None:
         """Flag version discrepancies from ingester and profile matches."""
-        # From ingester dependency info
+        # From ingester dependency info (skip devDependencies)
         for dep in ingestion.dependencies:
+            if dep.is_dev:
+                continue
             if dep.is_outdated:
                 msg = f"{dep.name}: installed {dep.installed_version}"
                 if dep.latest_version:
