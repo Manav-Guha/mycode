@@ -1,0 +1,198 @@
+{
+  "identity": {
+    "name": "google_auth_library",
+    "npm_name": "google-auth-library",
+    "category": "authentication",
+    "description": "Google's official Node.js client library for OAuth 2.0, service account authentication, API key management, and Google Cloud credential handling",
+    "current_stable_version": "9.14.0",
+    "min_supported_version": "8.0.0",
+    "version_notes": {
+      "9.14.0": "Bug fixes, updated Google API endpoints, improved token refresh reliability",
+      "9.0.0": "ESM support, dropped Node.js 12, improved workload identity federation",
+      "8.0.0": "Node.js 12+ required, improved external account support (workload identity)"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "HTTP client for Google's OAuth/auth endpoints. Token acquisition and refresh are network-bound. Tokens are cached locally and refreshed on expiry. Service account auth uses JWT signing (CPU-bound). Designed for server-side use — not for browser.",
+    "concurrency_model": "async_http",
+    "bottlenecks": [
+      {
+        "name": "token_refresh_latency",
+        "description": "Access tokens expire (typically 1 hour). Token refresh requires a network call to Google's token endpoint. During refresh, concurrent requests may stall or fail.",
+        "impact": "Burst of 401 errors or stalled requests during token refresh window"
+      },
+      {
+        "name": "concurrent_token_refresh_storms",
+        "description": "Multiple concurrent requests discovering an expired token may each trigger an independent token refresh. No built-in request coalescing in all auth client types.",
+        "impact": "Multiple simultaneous token refresh calls to Google's endpoint, potential rate limiting"
+      },
+      {
+        "name": "jwt_signing_cpu_cost",
+        "description": "Service account auth signs JWT tokens using RSA. Key parsing and signing are CPU-bound operations that block the event loop briefly.",
+        "impact": "Event loop blocked during JWT signing, noticeable under high request rates"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "token_refresh_rate",
+        "typical_limit": "1-10 per minute",
+        "description": "Tokens last ~3600s. Frequent refresh attempts may hit Google rate limits."
+      },
+      {
+        "metric": "concurrent_auth_requests",
+        "typical_limit": "100-1000",
+        "description": "Token is reused across requests once acquired. Bottleneck is during initial acquisition or refresh."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 5,
+    "growth_pattern": "Lightweight. Memory from: cached credentials, JWT key material, HTTP connection pooling for token requests. Credential objects are long-lived singletons — no growth pattern expected.",
+    "known_leaks": [
+      {
+        "name": "multiple_auth_client_instances",
+        "description": "Creating new auth client instances per request instead of reusing a singleton. Each instance caches its own tokens and opens its own connections.",
+        "trigger": "new GoogleAuth() or new OAuth2Client() inside request handlers",
+        "versions_affected": "all"
+      },
+      {
+        "name": "unclosed_http_connections",
+        "description": "Auth client maintains HTTP connections for token endpoints. Not closing the client in serverless/short-lived contexts leaves connections open.",
+        "trigger": "Creating auth clients in serverless functions without cleanup",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Auth client holds references to key material and cached tokens. GC-eligible when client is unreferenced. Key material may persist in V8 heap until explicit GC."
+  },
+  "known_failure_modes": [
+    {
+      "name": "credentials_not_found",
+      "description": "Application Default Credentials (ADC) lookup fails. google-auth-library checks GOOGLE_APPLICATION_CREDENTIALS env var, then well-known paths, then metadata server. No credentials produces a confusing error.",
+      "trigger_conditions": "No GOOGLE_APPLICATION_CREDENTIALS set, no default credentials file, not running on GCP",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "No GOOGLE_APPLICATION_CREDENTIALS in .env, no credentials JSON file referenced in code"
+    },
+    {
+      "name": "service_account_key_in_repo",
+      "description": "Service account JSON key file committed to version control. Grants full service account permissions to anyone with repo access.",
+      "trigger_conditions": "*.json service account key file in project directory, not in .gitignore",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "JSON files with 'private_key' field in project directory, or GOOGLE_APPLICATION_CREDENTIALS pointing to a tracked file"
+    },
+    {
+      "name": "token_expiry_not_handled",
+      "description": "Using a cached access token without checking expiry. Token expires after ~3600s. Requests fail with 401 until token is manually refreshed.",
+      "trigger_conditions": "Manually caching and reusing access tokens without refresh logic",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "getAccessToken() called once and result cached manually, without using the library's built-in auto-refresh"
+    },
+    {
+      "name": "wrong_scopes",
+      "description": "OAuth client created with incorrect or insufficient scopes. API calls fail with permission errors after successful authentication.",
+      "trigger_conditions": "OAuth2Client or GoogleAuth initialized with scopes that don't cover the APIs being called",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Scopes don't include the API being called (e.g., missing 'spreadsheets' scope for Sheets API)"
+    },
+    {
+      "name": "callback_url_mismatch",
+      "description": "OAuth redirect URI in code doesn't match the one configured in Google Cloud Console. Auth flow fails with redirect_uri_mismatch error.",
+      "trigger_conditions": "Redirect URI in OAuth2Client constructor differs from Google Cloud Console configuration",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "redirect_uri parameter that doesn't match Google Cloud Console OAuth settings"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "network_interruption_during_refresh",
+      "description": "Network failure during token refresh leaves auth in an ambiguous state. Next request may retry refresh or fail.",
+      "test_approach": "Simulate network failure during token refresh, verify recovery behavior"
+    },
+    {
+      "name": "clock_skew",
+      "description": "JWT token signing and verification depend on system clock. Clock skew >5 minutes causes token rejection.",
+      "test_approach": "Test auth with simulated clock offsets"
+    },
+    {
+      "name": "concurrent_initialization",
+      "description": "Multiple async operations triggering GoogleAuth.getClient() simultaneously before any token is cached.",
+      "test_approach": "Fire multiple auth-dependent requests concurrently on cold start"
+    },
+    {
+      "name": "credential_file_permissions",
+      "description": "Service account key file with wrong permissions (world-readable). Security risk and some environments reject overly permissive key files.",
+      "test_approach": "Check file permissions on credential files referenced by the project"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["googleapis", "@google-cloud/storage", "@google-cloud/firestore", "express", "next"],
+    "known_conflicts": [],
+    "dependency_chain_risks": [
+      {
+        "chain": ["google-auth-library", "gaxios", "node-fetch"],
+        "risk": "google-auth-library uses gaxios (Google's HTTP client) which wraps node-fetch. Version conflicts with app-level node-fetch possible.",
+        "severity": "low"
+      },
+      {
+        "chain": ["google-auth-library", "googleapis"],
+        "risk": "googleapis bundles its own google-auth-library version. Mismatch between direct and transitive versions can cause auth inconsistencies.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "token_refresh_under_load",
+      "category": "concurrent_execution",
+      "description": "Simulate concurrent requests hitting token expiry to test refresh behavior",
+      "parameters": {
+        "concurrent_requests": [10, 50, 100, 500],
+        "token_ttl_seconds": 5,
+        "measure_refresh_count": true,
+        "measure_latency": true
+      },
+      "expected_behavior": "Token refresh should be coalesced. Concurrent requests should wait for single refresh, not each trigger their own.",
+      "failure_indicators": ["multiple_refresh_calls", "401_during_refresh", "request_timeout", "rate_limited_by_google"]
+    },
+    {
+      "name": "auth_client_lifecycle",
+      "category": "memory_profiling",
+      "description": "Create and discard auth client instances to detect resource leaks",
+      "parameters": {
+        "create_discard_cycles": [10, 50, 100],
+        "client_types": ["oauth2", "service_account", "application_default"],
+        "measure_memory": true,
+        "measure_connections": true
+      },
+      "expected_behavior": "Memory should stabilize. HTTP connections should be cleaned up.",
+      "failure_indicators": ["memory_growth_per_cycle", "connection_count_growing", "file_descriptor_leak"]
+    },
+    {
+      "name": "credential_error_handling",
+      "category": "edge_case_input",
+      "description": "Test auth behavior with missing, invalid, or expired credentials",
+      "parameters": {
+        "credential_states": ["missing_file", "invalid_json", "expired_refresh_token", "revoked_token", "wrong_scopes", "malformed_key"],
+        "recovery_expected": [false, false, true, false, false, false]
+      },
+      "expected_behavior": "Clear error messages for each failure mode. No hanging promises or silent failures.",
+      "failure_indicators": ["unhandled_rejection", "silent_failure", "hanging_request", "cryptic_error_message"]
+    },
+    {
+      "name": "network_resilience",
+      "category": "concurrent_execution",
+      "description": "Test auth behavior under degraded network conditions",
+      "parameters": {
+        "network_conditions": ["normal", "high_latency_500ms", "intermittent_failure_50pct", "timeout_10s", "dns_failure"],
+        "retry_enabled": true,
+        "measure_recovery_time": true
+      },
+      "expected_behavior": "Auth should retry on transient failures. Clear errors on permanent failures. No infinite retry loops.",
+      "failure_indicators": ["infinite_retry", "unhandled_network_error", "stale_token_used", "memory_growth_during_retry"]
+    }
+  ]
+}

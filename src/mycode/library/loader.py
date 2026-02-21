@@ -415,6 +415,17 @@ def _normalize_dep_name(name: str, language: str = "python") -> str:
         "socket_io": "socketio",
         "socket_io_client": "socketio",
         "socketio": "socketio",
+        "chart_js": "chartjs",
+        "chartjs": "chartjs",
+        "plotly_js": "plotlyjs",
+        "plotly_js_dist_min": "plotlyjs",
+        "plotly_js_basic_dist_min": "plotlyjs",
+        "plotly_js_dist": "plotlyjs",
+        "plotlyjs": "plotlyjs",
+        "react_chartjs_2": "react_chartjs_2",
+        "react_plotly_js": "react_plotlyjs",
+        "react_plotlyjs": "react_plotlyjs",
+        "google_auth_library": "google_auth_library",
     }
 
     aliases = _JAVASCRIPT_ALIASES if language == "javascript" else _PYTHON_ALIASES

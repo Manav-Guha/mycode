@@ -1,0 +1,192 @@
+{
+  "identity": {
+    "name": "chartjs",
+    "npm_name": "chart.js",
+    "category": "graphics",
+    "description": "Canvas-based charting library for rendering line, bar, pie, scatter, and other chart types in the browser",
+    "current_stable_version": "4.4.7",
+    "min_supported_version": "4.0.0",
+    "version_notes": {
+      "4.4.7": "Bug fixes, performance improvements, TypeScript 5 support",
+      "4.0.0": "Tree-shakeable ESM architecture, requires explicit registration of chart types and components"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Renders charts to HTML5 Canvas. Performance governed by number of data points drawn per frame. Animation triggers full canvas redraws. No virtualization — all data points rendered every frame.",
+    "concurrency_model": "single_threaded_event_loop",
+    "bottlenecks": [
+      {
+        "name": "large_dataset_rendering",
+        "description": "Every data point is drawn on each render cycle. Canvas draw calls scale linearly with data point count. No built-in decimation for scatter/line charts unless explicitly enabled.",
+        "impact": "Frame drops and UI jank beyond ~10K data points. Canvas becomes unresponsive beyond ~100K points."
+      },
+      {
+        "name": "animation_redraws",
+        "description": "Animations trigger full canvas redraws on every frame. Complex charts with many datasets redraw all datasets per frame, not just the changed one.",
+        "impact": "Animation stutters with many datasets or data points"
+      },
+      {
+        "name": "tooltip_hit_detection",
+        "description": "Tooltip hover detection iterates through all data points to find nearest. O(n) per mouse move event.",
+        "impact": "Mouse hover becomes laggy with large datasets"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "data_points_per_chart",
+        "typical_limit": "1000-50000",
+        "description": "Smooth rendering below ~5K points. Visible degradation 5K-50K. Unusable beyond ~100K without decimation plugin."
+      },
+      {
+        "metric": "simultaneous_charts",
+        "typical_limit": "5-20",
+        "description": "Each chart creates its own canvas and animation loop. Multiple charts compete for the main thread."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 2,
+    "growth_pattern": "Memory scales with data array size and number of chart instances. Each chart holds a reference to its full dataset. Canvas pixel buffer adds width*height*4 bytes per chart.",
+    "known_leaks": [
+      {
+        "name": "undestroyed_chart_instances",
+        "description": "Creating new Chart instances without calling .destroy() on previous ones. Common in React/Vue when re-rendering components that contain charts.",
+        "trigger": "Re-creating charts on data update without destroying previous instance",
+        "versions_affected": "all"
+      },
+      {
+        "name": "canvas_element_accumulation",
+        "description": "Dynamically creating canvas elements for charts without removing old ones from the DOM.",
+        "trigger": "SPA navigation creates new chart canvases without cleanup",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Chart instances hold references to canvas context, data arrays, and plugin state. GC-eligible only after .destroy() is called."
+  },
+  "known_failure_modes": [
+    {
+      "name": "chart_not_destroyed_before_recreate",
+      "description": "Creating a new Chart on a canvas that already has one without destroying the old instance. Causes 'Canvas is already in use' error or ghost charts rendering on top of each other.",
+      "trigger_conditions": "new Chart(ctx) called on a canvas that already has an active Chart instance",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "new Chart() without preceding chart.destroy(), especially inside useEffect or component re-renders"
+    },
+    {
+      "name": "missing_component_registration",
+      "description": "Chart.js v4 requires explicit registration of chart types, scales, and elements via Chart.register(). Forgetting to register produces blank charts with no error.",
+      "trigger_conditions": "Using chart types or scales without registering them first",
+      "severity": "high",
+      "versions_affected": ">=4.0.0",
+      "detection_hint": "import { Chart } from 'chart.js' without Chart.register() or import from 'chart.js/auto'"
+    },
+    {
+      "name": "responsive_resize_infinite_loop",
+      "description": "Chart with responsive:true in a container that changes size on chart resize. Chart resize triggers container resize triggers chart resize.",
+      "trigger_conditions": "responsive:true with a container whose layout depends on canvas dimensions",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "responsive:true without explicit container sizing via CSS"
+    },
+    {
+      "name": "data_mutation_without_update",
+      "description": "Mutating data arrays directly without calling chart.update(). Chart renders stale data. Common vibe-code mistake.",
+      "trigger_conditions": "chart.data.datasets[0].data.push(val) without chart.update()",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Direct mutation of chart.data without subsequent chart.update() call"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "null_and_nan_data_points",
+      "description": "Null values create gaps in line charts. NaN values cause rendering artifacts. Undefined values silently ignored.",
+      "test_approach": "Feed datasets with null, NaN, undefined, and Infinity values"
+    },
+    {
+      "name": "rapid_data_updates",
+      "description": "Calling chart.update() at high frequency (e.g., real-time data). Each call triggers full redraw and animation.",
+      "test_approach": "Update chart data at 10, 30, 60 Hz and measure frame drops"
+    },
+    {
+      "name": "empty_datasets",
+      "description": "Charts with zero data points or all-null datasets. Some chart types handle gracefully, others render blank canvas.",
+      "test_approach": "Render each chart type with empty data arrays and single-point arrays"
+    },
+    {
+      "name": "extreme_value_ranges",
+      "description": "Mixing very large and very small numbers. Axis auto-scaling may hide small values or produce unreadable labels.",
+      "test_approach": "Data with values spanning multiple orders of magnitude"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["react-chartjs-2", "vue-chartjs", "chartjs-plugin-datalabels", "chartjs-plugin-zoom"],
+    "known_conflicts": [
+      {
+        "dependency": "chart.js plugins",
+        "description": "Plugins must be compatible with the Chart.js major version. v3 plugins break on v4 due to changed registration API.",
+        "severity": "high"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["chart.js", "react-chartjs-2"],
+        "risk": "react-chartjs-2 pins Chart.js peer dependency version range. Major Chart.js upgrades require matching react-chartjs-2 upgrade.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "data_point_scaling",
+      "category": "data_volume_scaling",
+      "description": "Render charts with increasing data point counts to measure render time and responsiveness",
+      "parameters": {
+        "data_point_counts": [100, 1000, 5000, 10000, 50000, 100000],
+        "chart_types": ["line", "bar", "scatter"],
+        "animation_enabled": [true, false],
+        "measure_render_time": true,
+        "measure_fps": true
+      },
+      "expected_behavior": "Render time grows linearly with data points. Animation should be disabled for large datasets.",
+      "failure_indicators": ["render_time > 100ms", "fps < 30", "canvas_unresponsive", "browser_tab_crash"]
+    },
+    {
+      "name": "rapid_update_frequency",
+      "category": "concurrent_execution",
+      "description": "Update chart data at increasing frequencies to simulate real-time dashboards",
+      "parameters": {
+        "update_frequency_hz": [1, 10, 30, 60],
+        "data_points": 500,
+        "duration_seconds": 30,
+        "measure_dropped_frames": true
+      },
+      "expected_behavior": "Updates at display refresh rate should be smooth. Higher frequencies should coalesce.",
+      "failure_indicators": ["dropped_frames > 20%", "memory_growth", "event_loop_blocked"]
+    },
+    {
+      "name": "chart_instance_lifecycle",
+      "category": "memory_profiling",
+      "description": "Create and destroy chart instances to detect memory leaks from improper cleanup",
+      "parameters": {
+        "create_destroy_cycles": [10, 50, 100, 500],
+        "data_points_per_chart": 1000,
+        "measure_memory": true,
+        "measure_canvas_count": true
+      },
+      "expected_behavior": "Memory should return to baseline after destroy. No canvas elements should accumulate.",
+      "failure_indicators": ["memory_growth_per_cycle", "canvas_count_growing", "gc_unable_to_reclaim"]
+    },
+    {
+      "name": "edge_case_data_values",
+      "category": "edge_case_input",
+      "description": "Render charts with problematic data values",
+      "parameters": {
+        "data_patterns": ["all_nulls", "mixed_null_values", "nan_values", "infinity", "negative_values", "zero_length", "single_point"],
+        "chart_types": ["line", "bar", "pie", "scatter"]
+      },
+      "expected_behavior": "Charts should render without errors. Nulls create gaps. NaN/Infinity handled gracefully.",
+      "failure_indicators": ["render_error", "blank_chart", "infinite_loop", "axis_label_overflow"]
+    }
+  ]
+}

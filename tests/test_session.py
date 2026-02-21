@@ -320,7 +320,7 @@ class TestJsDependencyInstallation:
         sm.project_copy_dir = project
 
         with mock.patch("mycode.session.subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=0, stderr="")
+            mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
             sm._install_js_dependencies()
 
         mock_run.assert_called_once()
@@ -336,7 +336,7 @@ class TestJsDependencyInstallation:
         sm.project_copy_dir = project
 
         with mock.patch("mycode.session.subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=0, stderr="")
+            mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
             sm._install_js_dependencies()
 
         cmd = mock_run.call_args[0][0]
@@ -376,7 +376,7 @@ class TestJsDependencyInstallation:
         sm.project_copy_dir = project
 
         with mock.patch("mycode.session.subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=1, stderr="ERR!")
+            mock_run.return_value = mock.Mock(returncode=1, stdout="", stderr="ERR!")
             # Should not raise
             sm._install_js_dependencies()
 
@@ -401,7 +401,7 @@ class TestJsDependencyInstallation:
         sm.project_copy_dir = project
 
         with mock.patch("mycode.session.subprocess.run") as mock_run:
-            mock_run.return_value = mock.Mock(returncode=0, stderr="")
+            mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
             sm._install_js_dependencies()
 
         call_kwargs = mock_run.call_args

@@ -1,0 +1,194 @@
+{
+  "identity": {
+    "name": "plotlyjs",
+    "npm_name": "plotly.js-dist-min",
+    "category": "graphics",
+    "description": "Interactive scientific and statistical charting library built on D3.js and WebGL, supporting 40+ chart types including 3D, maps, and statistical plots",
+    "current_stable_version": "2.35.3",
+    "min_supported_version": "2.0.0",
+    "version_notes": {
+      "2.35.3": "Performance improvements, bug fixes, updated dependencies",
+      "2.0.0": "MathJax 3 support, improved bundle size options (dist-min, basic, strict)"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Renders via SVG (default for 2D) or WebGL (for scatter/3D). SVG mode creates a DOM element per data point. WebGL mode handles much larger datasets. Bundle size is very large (~3.5MB minified for full build, ~1MB for dist-min).",
+    "concurrency_model": "single_threaded_event_loop",
+    "bottlenecks": [
+      {
+        "name": "svg_dom_node_explosion",
+        "description": "Default 2D rendering creates SVG elements per data point. DOM node count grows linearly with data. Browser layout/paint slows dramatically.",
+        "impact": "Browser becomes unresponsive beyond ~5K SVG data points. DOM node count can reach hundreds of thousands."
+      },
+      {
+        "name": "bundle_size",
+        "description": "Full plotly.js is ~3.5MB minified (8MB unminified). Even dist-min is ~1MB. Dominates bundle for most apps.",
+        "impact": "Slow initial page load, especially on mobile. Blocks main thread during parsing."
+      },
+      {
+        "name": "relayout_and_restyle_cost",
+        "description": "Plotly.relayout and Plotly.restyle operations re-render affected traces. Complex layouts with many traces are expensive to update.",
+        "impact": "Sluggish interactivity with many traces or subplots"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "data_points_svg_mode",
+        "typical_limit": "1000-10000",
+        "description": "SVG rendering degrades visibly beyond ~5K points per trace."
+      },
+      {
+        "metric": "data_points_webgl_mode",
+        "typical_limit": "100000-1000000",
+        "description": "scattergl and scatter3d use WebGL, handling 100K-1M points depending on GPU."
+      },
+      {
+        "metric": "subplots",
+        "typical_limit": "10-50",
+        "description": "Each subplot is an independent SVG/WebGL context. Layout computation scales with subplot count."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 15,
+    "growth_pattern": "Large baseline from library itself. Memory grows with: data arrays held in each trace, SVG DOM nodes (4-10x data point count), WebGL texture buffers, and undo/redo history. Plotly retains full data copies internally.",
+    "known_leaks": [
+      {
+        "name": "undestroyed_plot_div",
+        "description": "Not calling Plotly.purge() before removing the plot container from the DOM. Internal event listeners and data references retained.",
+        "trigger": "SPA navigation or component unmount without Plotly.purge()",
+        "versions_affected": "all"
+      },
+      {
+        "name": "data_array_duplication",
+        "description": "Plotly makes internal copies of data arrays. Passing the same large array to multiple traces duplicates memory usage.",
+        "trigger": "Multiple traces sharing the same underlying data",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Internal references prevent GC until Plotly.purge() is called. WebGL contexts have GPU memory that is not tracked by V8 GC."
+  },
+  "known_failure_modes": [
+    {
+      "name": "plot_not_purged",
+      "description": "Removing a plot's DOM container without calling Plotly.purge() first. Memory leaks and orphaned event listeners accumulate.",
+      "trigger_conditions": "Component unmount or DOM removal without Plotly.purge(graphDiv)",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "No Plotly.purge() call in component cleanup/unmount lifecycle"
+    },
+    {
+      "name": "full_bundle_import",
+      "description": "Importing full plotly.js (~3.5MB) instead of dist-min or partial bundles. Vibe-coded apps often import the full bundle.",
+      "trigger_conditions": "import Plotly from 'plotly.js' instead of 'plotly.js-dist-min' or 'plotly.js-basic-dist-min'",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Import from 'plotly.js' rather than a dist-min variant"
+    },
+    {
+      "name": "svg_mode_with_large_data",
+      "description": "Using default SVG rendering mode with datasets that should use WebGL (scattergl). Browser freezes rendering thousands of SVG elements.",
+      "trigger_conditions": "type:'scatter' instead of type:'scattergl' with >5K data points",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Scatter/line traces with large data arrays not using gl variants"
+    },
+    {
+      "name": "newplot_vs_react",
+      "description": "Using Plotly.newPlot() for every data update instead of Plotly.react(). newPlot destroys and rebuilds the entire chart. react() does efficient diffing.",
+      "trigger_conditions": "Calling Plotly.newPlot() on data change instead of Plotly.react()",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Plotly.newPlot() inside update handlers or intervals"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "nan_and_null_in_traces",
+      "description": "NaN values create gaps in line traces. Null values handled differently between trace types. Some types render incorrectly with mixed null/NaN.",
+      "test_approach": "Feed traces with null, NaN, undefined, and Infinity values across chart types"
+    },
+    {
+      "name": "webgl_context_limit",
+      "description": "Browsers limit WebGL contexts (typically 8-16). Multiple scattergl plots on one page can exhaust contexts.",
+      "test_approach": "Create increasing numbers of WebGL-based plots until context limit is reached"
+    },
+    {
+      "name": "responsive_container_resize",
+      "description": "Plotly.Plots.resize() must be called when container changes size. Without it, chart overflows or is clipped.",
+      "test_approach": "Resize container programmatically and verify chart responds"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["react-plotly.js", "dash", "pandas"],
+    "known_conflicts": [
+      {
+        "dependency": "d3",
+        "description": "Plotly bundles its own D3 version. Importing a different D3 version alongside can cause conflicts in the global namespace.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["plotly.js", "d3", "regl"],
+        "risk": "Plotly bundles D3 and regl internally. Updates to these bundled dependencies can change rendering behavior without a Plotly version change.",
+        "severity": "low"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "data_point_scaling_svg_vs_webgl",
+      "category": "data_volume_scaling",
+      "description": "Compare SVG and WebGL rendering performance with increasing data volumes",
+      "parameters": {
+        "data_point_counts": [100, 1000, 5000, 10000, 50000],
+        "render_modes": ["svg_scatter", "scattergl"],
+        "measure_render_time": true,
+        "measure_dom_nodes": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "SVG degrades linearly with data points. WebGL remains performant to ~100K points.",
+      "failure_indicators": ["render_time > 2000ms", "dom_nodes > 50000", "browser_unresponsive", "webgl_context_lost"]
+    },
+    {
+      "name": "subplot_scaling",
+      "category": "data_volume_scaling",
+      "description": "Increase number of subplots to test layout computation and rendering overhead",
+      "parameters": {
+        "subplot_counts": [2, 5, 10, 20, 50],
+        "data_points_per_subplot": 500,
+        "measure_layout_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Layout time grows with subplot count. Memory proportional to total data.",
+      "failure_indicators": ["layout_time > 5000ms", "memory > 500mb", "blank_subplots"]
+    },
+    {
+      "name": "plot_lifecycle_memory",
+      "category": "memory_profiling",
+      "description": "Create and purge plots repeatedly to detect memory leaks",
+      "parameters": {
+        "create_purge_cycles": [10, 50, 100],
+        "data_points_per_plot": 5000,
+        "measure_memory": true,
+        "measure_dom_nodes": true
+      },
+      "expected_behavior": "Memory should return to baseline after Plotly.purge(). DOM node count should not accumulate.",
+      "failure_indicators": ["memory_growth_per_cycle", "dom_nodes_growing", "event_listener_leak"]
+    },
+    {
+      "name": "real_time_update_stress",
+      "category": "concurrent_execution",
+      "description": "Simulate real-time data streaming with increasing update rates",
+      "parameters": {
+        "update_frequency_hz": [1, 5, 10, 30],
+        "data_points": 1000,
+        "update_method": ["react", "restyle", "extendTraces"],
+        "duration_seconds": 30
+      },
+      "expected_behavior": "Plotly.react() and extendTraces should handle moderate update rates. restyle for targeted updates.",
+      "failure_indicators": ["frame_drops > 30%", "memory_growth", "update_queue_backlog"]
+    }
+  ]
+}

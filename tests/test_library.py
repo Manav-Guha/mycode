@@ -762,6 +762,7 @@ class TestRealJavaScriptProfiles:
             "ai_sdk", "ai_framework", "backend_service",
             "orm", "http_client", "database",
             "payment", "configuration", "validation", "realtime",
+            "authentication",
         }
         for name, profile in real_library.load_all("javascript").items():
             assert profile.category in valid_categories, (

@@ -1,0 +1,186 @@
+{
+  "identity": {
+    "name": "react_chartjs_2",
+    "npm_name": "react-chartjs-2",
+    "category": "graphics",
+    "description": "React wrapper for Chart.js providing declarative chart components with props-driven data binding and lifecycle management",
+    "current_stable_version": "5.3.0",
+    "min_supported_version": "5.0.0",
+    "version_notes": {
+      "5.3.0": "Bug fixes, improved TypeScript types, Chart.js 4 compatibility",
+      "5.0.0": "Chart.js 4 support, requires explicit Chart.js component registration, dropped Chart.js 3 support"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Thin React wrapper around Chart.js. Inherits all Chart.js performance characteristics. Adds overhead from React reconciliation on prop changes — each prop update triggers chart.update() or chart.destroy()/recreate. Performance governed by underlying Chart.js canvas rendering.",
+    "concurrency_model": "single_threaded_event_loop",
+    "bottlenecks": [
+      {
+        "name": "prop_change_full_update",
+        "description": "Any change to the data or options prop triggers chart.update(). React reference equality check determines whether to update — new object references on every render cause unnecessary chart redraws.",
+        "impact": "Chart redraws on every parent re-render if data/options objects are not memoized"
+      },
+      {
+        "name": "chart_recreation_on_type_change",
+        "description": "Changing the chart type prop destroys and recreates the entire Chart.js instance. Expensive operation that causes visible flash.",
+        "impact": "Full chart destruction and recreation, losing animation state and causing flicker"
+      },
+      {
+        "name": "inherited_chartjs_bottlenecks",
+        "description": "All Chart.js bottlenecks apply: large dataset canvas rendering, animation redraws, tooltip hit detection.",
+        "impact": "Same performance ceiling as raw Chart.js, plus React reconciliation overhead"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "data_points_per_chart",
+        "typical_limit": "1000-50000",
+        "description": "Same as Chart.js. React wrapper adds no meaningful overhead to rendering itself."
+      },
+      {
+        "metric": "chart_components_per_page",
+        "typical_limit": "5-20",
+        "description": "Each component creates a Chart.js instance. Multiple instances compete for main thread during updates."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 1,
+    "growth_pattern": "Minimal overhead beyond Chart.js. React component holds a ref to the Chart.js instance. Memory dominated by Chart.js canvas and data arrays. Wrapper adds React fiber node overhead per chart component.",
+    "known_leaks": [
+      {
+        "name": "missing_chart_cleanup_on_unmount",
+        "description": "The wrapper handles Chart.js destroy on unmount internally, but conditional rendering or error boundaries can prevent cleanup from running.",
+        "trigger": "Chart component unmounted via error boundary catch or conditional rendering that bypasses React lifecycle",
+        "versions_affected": "all"
+      },
+      {
+        "name": "stale_data_references",
+        "description": "Creating new data objects on every render without useMemo. React triggers chart update on each render, and old data objects may not be GC'd if Chart.js retains references.",
+        "trigger": "data={{labels: [...], datasets: [...]}} inline in JSX without memoization",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Wrapper calls chart.destroy() on unmount. GC depends on Chart.js cleanup behavior. Memoized data objects prevent unnecessary allocations."
+  },
+  "known_failure_modes": [
+    {
+      "name": "chartjs_not_registered",
+      "description": "react-chartjs-2 v5 requires Chart.js components to be registered manually (Chart.register(...)). Without registration, charts render as blank canvas with no error.",
+      "trigger_conditions": "Using named imports from chart.js without calling Chart.register(), or not importing from 'chart.js/auto'",
+      "severity": "high",
+      "versions_affected": ">=5.0.0",
+      "detection_hint": "Import from 'chart.js' without Chart.register() call, react-chartjs-2 components render blank"
+    },
+    {
+      "name": "data_object_reference_instability",
+      "description": "Passing new data object on every render causes chart to update continuously. Inline data={{...}} in JSX creates new reference each render.",
+      "trigger_conditions": "Data or options prop defined inline in JSX or component body without useMemo",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "data={{...}} or options={{...}} inline in JSX return statement"
+    },
+    {
+      "name": "version_mismatch_with_chartjs",
+      "description": "react-chartjs-2 v5 requires Chart.js v4. Using with Chart.js v3 causes runtime errors or missing features.",
+      "trigger_conditions": "react-chartjs-2@5.x with chart.js@3.x",
+      "severity": "critical",
+      "versions_affected": ">=5.0.0",
+      "detection_hint": "chart.js version <4 in package.json alongside react-chartjs-2 version >=5"
+    },
+    {
+      "name": "multiple_chart_instances_same_canvas",
+      "description": "React strict mode or fast remounting can create multiple Chart.js instances on the same canvas if cleanup is not properly sequenced.",
+      "trigger_conditions": "React.StrictMode with chart components, or rapid conditional rendering",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Chart components inside React.StrictMode, or toggling chart visibility rapidly"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_data_prop",
+      "description": "Passing empty datasets array or datasets with empty data arrays. Chart may render axes with no data or throw.",
+      "test_approach": "Render chart components with various empty data configurations"
+    },
+    {
+      "name": "rapid_prop_updates",
+      "description": "Updating data prop at high frequency (live dashboard). Each update triggers chart.update() with animation.",
+      "test_approach": "Update data prop at increasing frequencies, measure render performance"
+    },
+    {
+      "name": "conditional_rendering_lifecycle",
+      "description": "Mounting and unmounting chart components via conditional rendering. Cleanup must run correctly.",
+      "test_approach": "Toggle chart component visibility rapidly, monitor for memory leaks"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["chart.js", "react", "chartjs-plugin-datalabels", "chartjs-plugin-zoom"],
+    "known_conflicts": [
+      {
+        "dependency": "chart.js",
+        "description": "react-chartjs-2 v5 requires Chart.js v4. react-chartjs-2 v4 requires Chart.js v3. Version mismatch causes silent failures.",
+        "severity": "critical"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["react-chartjs-2", "chart.js", "react"],
+        "risk": "Three-way version dependency. react-chartjs-2 major versions pin both Chart.js and React peer dependency ranges.",
+        "severity": "high"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "prop_update_frequency",
+      "category": "concurrent_execution",
+      "description": "Update chart data prop at increasing frequencies to test React-Chart.js bridge performance",
+      "parameters": {
+        "update_frequency_hz": [1, 10, 30, 60],
+        "data_points": 500,
+        "memoized": [true, false],
+        "duration_seconds": 30
+      },
+      "expected_behavior": "Memoized data should prevent unnecessary updates. Unmemoized data updates chart every render.",
+      "failure_indicators": ["fps < 30", "chart_update_queue_backlog", "memory_growth", "react_render_loop"]
+    },
+    {
+      "name": "mount_unmount_cycles",
+      "category": "memory_profiling",
+      "description": "Mount and unmount chart components to test cleanup and memory behavior",
+      "parameters": {
+        "mount_unmount_cycles": [10, 50, 100, 500],
+        "data_points_per_chart": 1000,
+        "measure_memory": true,
+        "measure_canvas_count": true
+      },
+      "expected_behavior": "Memory should return to baseline after unmount. No canvas elements should accumulate.",
+      "failure_indicators": ["memory_growth_per_cycle", "canvas_count_growing", "chart_instance_leak"]
+    },
+    {
+      "name": "large_dataset_rendering",
+      "category": "data_volume_scaling",
+      "description": "Render chart components with increasing data volumes",
+      "parameters": {
+        "data_point_counts": [100, 1000, 5000, 10000, 50000],
+        "chart_types": ["Line", "Bar", "Scatter"],
+        "measure_render_time": true,
+        "measure_memory": true
+      },
+      "expected_behavior": "Performance matches raw Chart.js with small React overhead. Degradation above 10K points.",
+      "failure_indicators": ["render_time > 200ms", "react_commit_time > 50ms", "canvas_unresponsive"]
+    },
+    {
+      "name": "edge_case_data",
+      "category": "edge_case_input",
+      "description": "Render charts with problematic data values passed as React props",
+      "parameters": {
+        "data_patterns": ["empty_datasets", "null_values", "undefined_data_prop", "nan_values", "single_point"],
+        "chart_types": ["Line", "Bar", "Pie", "Doughnut"]
+      },
+      "expected_behavior": "Components should render without throwing. Error boundaries should catch rendering failures.",
+      "failure_indicators": ["react_error_boundary_triggered", "blank_chart_no_error", "unhandled_exception"]
+    }
+  ]
+}

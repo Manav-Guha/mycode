@@ -1,0 +1,187 @@
+{
+  "identity": {
+    "name": "react_plotlyjs",
+    "npm_name": "react-plotly.js",
+    "category": "graphics",
+    "description": "React wrapper for Plotly.js providing a declarative Plot component with props-driven data binding and Plotly lifecycle management",
+    "current_stable_version": "2.6.0",
+    "min_supported_version": "2.0.0",
+    "version_notes": {
+      "2.6.0": "TypeScript support improvements, Plotly.js compatibility updates",
+      "2.0.0": "React 16+ support, improved prop diffing for Plotly.react()"
+    }
+  },
+  "scaling_characteristics": {
+    "description": "Thin React wrapper that calls Plotly.react() on prop changes. Inherits all Plotly.js performance characteristics. Uses Plotly.react() for efficient updates (diffs data and layout). Bundle size dominated by Plotly.js dependency (~1-3.5MB depending on variant).",
+    "concurrency_model": "single_threaded_event_loop",
+    "bottlenecks": [
+      {
+        "name": "plotlyjs_bundle_size",
+        "description": "Plotly.js is a peer dependency. Without using a minimal dist variant, the full Plotly.js bundle (~3.5MB) is included. react-plotly.js itself is tiny (~5KB).",
+        "impact": "Massive bundle size dominated by Plotly.js. Slow initial load and main thread blocking during parse."
+      },
+      {
+        "name": "prop_diffing_overhead",
+        "description": "Component diffs data and layout props to decide whether to call Plotly.react(). Deep comparison of large data arrays is expensive.",
+        "impact": "Prop comparison time grows with data array size on each React render"
+      },
+      {
+        "name": "inherited_plotly_bottlenecks",
+        "description": "All Plotly.js bottlenecks apply: SVG DOM node explosion, WebGL context limits, relayout/restyle cost.",
+        "impact": "Same performance ceiling as raw Plotly.js, plus React prop diffing overhead"
+      }
+    ],
+    "scaling_limits": [
+      {
+        "metric": "data_points_svg_mode",
+        "typical_limit": "1000-10000",
+        "description": "Same as Plotly.js. SVG rendering degrades beyond ~5K points."
+      },
+      {
+        "metric": "plot_components_per_page",
+        "typical_limit": "3-10",
+        "description": "Each Plot component creates a Plotly.js instance. More constrained than Chart.js due to Plotly's heavier baseline."
+      }
+    ]
+  },
+  "memory_behavior": {
+    "baseline_footprint_mb": 15,
+    "growth_pattern": "Dominated by Plotly.js memory. Wrapper adds minimal overhead (React fiber node, prop copies for diffing). Memory grows with data array sizes across all traces. Plotly.js retains internal data copies.",
+    "known_leaks": [
+      {
+        "name": "missing_purge_on_unmount",
+        "description": "The wrapper calls Plotly.purge() on unmount, but error boundaries or suspended components may prevent cleanup.",
+        "trigger": "Plot component unmounted via error boundary or React Suspense fallback",
+        "versions_affected": "all"
+      },
+      {
+        "name": "data_prop_recreation",
+        "description": "Creating new data arrays on every render without useMemo. Old data retained by Plotly.js internal copies plus React's previous props.",
+        "trigger": "data={[{x: [...], y: [...]}]} inline in JSX without memoization",
+        "versions_affected": "all"
+      }
+    ],
+    "gc_behavior": "Wrapper calls Plotly.purge() on unmount. Plotly.js internal data copies and WebGL contexts freed on purge. GC depends on Plotly.js cleanup."
+  },
+  "known_failure_modes": [
+    {
+      "name": "wrong_plotly_bundle",
+      "description": "Using full plotly.js instead of a dist-min variant. react-plotly.js uses createPlotlyComponent(Plotly) factory, so the bundle variant is a separate import choice.",
+      "trigger_conditions": "import Plotly from 'plotly.js' instead of 'plotly.js-dist-min' or a partial bundle",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "Import from 'plotly.js' rather than a dist-min variant in createPlotlyComponent call"
+    },
+    {
+      "name": "data_prop_not_memoized",
+      "description": "Passing new data/layout objects on every render. Triggers Plotly.react() on each React render cycle even when data hasn't changed.",
+      "trigger_conditions": "data or layout prop defined inline in JSX or without useMemo",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "data={[...]} or layout={{...}} inline in JSX return statement"
+    },
+    {
+      "name": "revision_prop_misuse",
+      "description": "The revision prop forces chart recreation when incremented. Misusing it (incrementing on every render) causes expensive full redraws.",
+      "trigger_conditions": "revision prop tied to a rapidly-changing value",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "revision={counter} where counter changes frequently"
+    },
+    {
+      "name": "svg_mode_with_large_data",
+      "description": "Using default scatter type instead of scattergl with large datasets. SVG rendering creates DOM nodes per point.",
+      "trigger_conditions": "type:'scatter' instead of type:'scattergl' with >5K data points",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "Trace type 'scatter' or 'line' with data arrays >5K elements"
+    }
+  ],
+  "edge_case_sensitivities": [
+    {
+      "name": "empty_data_traces",
+      "description": "Passing traces with empty x/y arrays or no traces at all. Plotly may render empty axes or error.",
+      "test_approach": "Render Plot with empty data arrays, null traces, undefined data prop"
+    },
+    {
+      "name": "responsive_resize",
+      "description": "useResizeHandler prop must be true for responsive behavior. Without it, chart doesn't resize with container.",
+      "test_approach": "Resize container with and without useResizeHandler, verify chart responds"
+    },
+    {
+      "name": "rapid_data_updates",
+      "description": "Updating data prop at high frequency. Plotly.react() called per update, competing with React render cycle.",
+      "test_approach": "Update data at increasing frequencies, measure render lag"
+    }
+  ],
+  "interaction_patterns": {
+    "commonly_used_with": ["plotly.js-dist-min", "react", "plotly.js-basic-dist-min"],
+    "known_conflicts": [
+      {
+        "dependency": "plotly.js",
+        "description": "react-plotly.js requires Plotly.js as a peer dependency. The specific Plotly.js variant (full, dist-min, basic) is the user's choice but must be compatible.",
+        "severity": "medium"
+      }
+    ],
+    "dependency_chain_risks": [
+      {
+        "chain": ["react-plotly.js", "plotly.js", "react"],
+        "risk": "Three-way dependency. Plotly.js major updates may require react-plotly.js update. React version must satisfy peer dependency.",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stress_test_templates": [
+    {
+      "name": "data_scaling_with_react",
+      "category": "data_volume_scaling",
+      "description": "Render Plot components with increasing data volumes to measure combined React + Plotly overhead",
+      "parameters": {
+        "data_point_counts": [100, 1000, 5000, 10000, 50000],
+        "trace_types": ["scatter", "scattergl", "bar"],
+        "memoized": [true, false],
+        "measure_render_time": true,
+        "measure_dom_nodes": true
+      },
+      "expected_behavior": "Performance matches raw Plotly.js. Memoized data prevents redundant Plotly.react() calls.",
+      "failure_indicators": ["render_time > 3000ms", "dom_nodes > 50000", "react_reconciliation_slow"]
+    },
+    {
+      "name": "plot_lifecycle_memory",
+      "category": "memory_profiling",
+      "description": "Mount and unmount Plot components to detect memory leaks from improper Plotly cleanup",
+      "parameters": {
+        "mount_unmount_cycles": [10, 50, 100],
+        "data_points_per_plot": 2000,
+        "measure_memory": true,
+        "measure_dom_nodes": true
+      },
+      "expected_behavior": "Memory returns to baseline after unmount. Plotly.purge() called correctly on cleanup.",
+      "failure_indicators": ["memory_growth_per_cycle", "dom_nodes_growing", "webgl_context_leak"]
+    },
+    {
+      "name": "real_time_data_updates",
+      "category": "concurrent_execution",
+      "description": "Update Plot data prop at increasing frequencies to simulate live dashboards",
+      "parameters": {
+        "update_frequency_hz": [1, 5, 10, 30],
+        "data_points": 1000,
+        "memoized": true,
+        "duration_seconds": 30
+      },
+      "expected_behavior": "Plotly.react() handles updates efficiently. Frame rate should stay acceptable.",
+      "failure_indicators": ["fps < 15", "memory_growth", "plotly_react_backlog"]
+    },
+    {
+      "name": "edge_case_props",
+      "category": "edge_case_input",
+      "description": "Render Plot with edge case prop values",
+      "parameters": {
+        "data_patterns": ["empty_traces", "null_data", "single_point", "nan_values", "mismatched_xy_lengths"],
+        "layout_patterns": ["empty_layout", "null_layout", "deeply_nested_annotations"]
+      },
+      "expected_behavior": "Component should not throw. Plotly should handle gracefully or show empty chart.",
+      "failure_indicators": ["react_error", "plotly_error", "blank_div", "infinite_render"]
+    }
+  ]
+}
