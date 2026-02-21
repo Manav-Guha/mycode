@@ -31,6 +31,7 @@ from mycode.scenario import (
     JAVASCRIPT_CATEGORIES,
     PYTHON_CATEGORIES,
     SHARED_CATEGORIES,
+    CouplingBehaviorType,
     LLMBackend,
     LLMConfig,
     LLMError,
@@ -41,6 +42,7 @@ from mycode.scenario import (
     ScenarioGeneratorResult,
     StressTestScenario,
     _extract_json,
+    _file_path_to_module,
     _infer_measurements,
     _infer_priority_from_template,
     _safe_name,
@@ -48,6 +50,8 @@ from mycode.scenario import (
     _serialize_file_analyses,
     _serialize_function_flows,
     _serialize_profiles,
+    classify_coupling_point,
+    group_coupling_points_by_behavior,
 )
 
 
@@ -458,7 +462,7 @@ class TestOfflineGeneration:
         assert len(failure_scenarios) >= 2  # 1 high-severity mode per recognized dep
 
     def test_offline_generates_coupling_scenarios(self, sample_ingestion, sample_matches):
-        """Coupling points should produce scenarios."""
+        """Coupling points should produce behavior-classified scenarios."""
         gen = ScenarioGenerator(offline=True)
         result = gen.generate(sample_ingestion, sample_matches,
                               "A web app", "python")
@@ -880,6 +884,7 @@ class TestSerializationHelpers:
         assert "+45 more flows" in result
 
     def test_serialize_coupling_points(self):
+        """Backward-compatible: no file_analyses passed."""
         points = [
             CouplingPoint(source="mod.func", targets=["a", "b", "c"],
                          coupling_type="high_fan_in",
@@ -888,6 +893,22 @@ class TestSerializationHelpers:
         result = _serialize_coupling_points(points)
         assert "high_fan_in" in result
         assert "3 dependents" in result
+        assert "behavior:" not in result
+
+    def test_serialize_coupling_points_with_behavior(self):
+        """With file_analyses: includes behavior annotation."""
+        fa = FileAnalysis(
+            file_path="utils.py",
+            functions=[FunctionInfo(name="calc", file_path="utils.py", lineno=1)],
+            lines_of_code=10,
+        )
+        points = [
+            CouplingPoint(source="utils.calc", targets=["a", "b"],
+                         coupling_type="high_fan_in",
+                         description="Called by 2 functions"),
+        ]
+        result = _serialize_coupling_points(points, [fa], "python")
+        assert "behavior: pure_computation" in result
 
 
 # ── Tests: Utility Functions ──
@@ -936,6 +957,272 @@ class TestUtilityFunctions:
     def test_safe_name_truncates(self):
         long_name = "a" * 100
         assert len(_safe_name(long_name)) <= 60
+
+
+# ── Tests: Coupling Behavior Classification ──
+
+
+class TestCouplingBehaviorClassification:
+    """Test classification of coupling points by behavior type."""
+
+    def _make_fa(self, file_path, functions=None, imports=None, classes=None):
+        """Helper to create a FileAnalysis."""
+        return FileAnalysis(
+            file_path=file_path,
+            functions=functions or [],
+            classes=classes or [],
+            imports=imports or [],
+            lines_of_code=100,
+        )
+
+    def test_classify_error_handler_by_name(self):
+        """Function named 'handle_error' → ERROR_HANDLER."""
+        fa = self._make_fa("app.py", functions=[
+            FunctionInfo(name="handle_error", file_path="app.py", lineno=1),
+        ])
+        cp = CouplingPoint(source="app.handle_error", targets=["a", "b"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "python")
+        assert result == CouplingBehaviorType.ERROR_HANDLER
+
+    def test_classify_error_handler_by_decorator(self):
+        """Function with 'app.errorhandler' decorator → ERROR_HANDLER."""
+        fa = self._make_fa("app.py", functions=[
+            FunctionInfo(name="not_found", file_path="app.py", lineno=1,
+                        decorators=["app.errorhandler(404)"]),
+        ])
+        cp = CouplingPoint(source="app.not_found", targets=["a"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "python")
+        assert result == CouplingBehaviorType.ERROR_HANDLER
+
+    def test_classify_dom_render(self):
+        """File imports react + function calls useState → DOM_RENDER."""
+        fa = self._make_fa("component.js", functions=[
+            FunctionInfo(name="Dashboard", file_path="component.js", lineno=1,
+                        calls=["useState", "useEffect", "render"]),
+        ], imports=[
+            ImportInfo(module="react", names=["useState"], is_from_import=True, lineno=1),
+        ])
+        cp = CouplingPoint(source="component.Dashboard", targets=["a", "b"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "javascript")
+        assert result == CouplingBehaviorType.DOM_RENDER
+
+    def test_classify_api_caller(self):
+        """File imports requests + function calls get → API_CALLER."""
+        fa = self._make_fa("api.py", functions=[
+            FunctionInfo(name="fetch_data", file_path="api.py", lineno=1,
+                        calls=["get", "json"]),
+        ], imports=[
+            ImportInfo(module="requests", lineno=1),
+        ])
+        cp = CouplingPoint(source="api.fetch_data", targets=["a", "b"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "python")
+        assert result == CouplingBehaviorType.API_CALLER
+
+    def test_classify_state_setter_by_globals(self):
+        """Function with globals_accessed → STATE_SETTER."""
+        fa = self._make_fa("config.py", functions=[
+            FunctionInfo(name="set_config", file_path="config.py", lineno=1,
+                        globals_accessed=["CONFIG"]),
+        ])
+        cp = CouplingPoint(source="config.set_config", targets=["a"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "python")
+        assert result == CouplingBehaviorType.STATE_SETTER
+
+    def test_classify_state_setter_shared_state(self):
+        """CouplingPoint with coupling_type='shared_state' → STATE_SETTER."""
+        fa = self._make_fa("store.py", functions=[
+            FunctionInfo(name="update", file_path="store.py", lineno=1),
+        ])
+        cp = CouplingPoint(source="store.update", targets=["a"],
+                          coupling_type="shared_state", description="test")
+        result = classify_coupling_point(cp, [fa], "python")
+        assert result == CouplingBehaviorType.STATE_SETTER
+
+    def test_classify_pure_computation_fallback(self):
+        """Function with no special signals → PURE_COMPUTATION."""
+        fa = self._make_fa("utils.py", functions=[
+            FunctionInfo(name="calculate", file_path="utils.py", lineno=1,
+                        calls=["sum", "len"]),
+        ])
+        cp = CouplingPoint(source="utils.calculate", targets=["a", "b"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "python")
+        assert result == CouplingBehaviorType.PURE_COMPUTATION
+
+    def test_classify_unresolved_source(self):
+        """Source not found in file_analyses → PURE_COMPUTATION (fallback)."""
+        fa = self._make_fa("other.py", functions=[
+            FunctionInfo(name="other_func", file_path="other.py", lineno=1),
+        ])
+        cp = CouplingPoint(source="missing.module.func", targets=["a"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "python")
+        assert result == CouplingBehaviorType.PURE_COMPUTATION
+
+    def test_error_priority_over_api(self):
+        """Name 'handle_api_error' with API imports → ERROR_HANDLER (priority)."""
+        fa = self._make_fa("api.py", functions=[
+            FunctionInfo(name="handle_api_error", file_path="api.py", lineno=1,
+                        calls=["get", "post"]),
+        ], imports=[
+            ImportInfo(module="requests", lineno=1),
+        ])
+        cp = CouplingPoint(source="api.handle_api_error", targets=["a"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "python")
+        assert result == CouplingBehaviorType.ERROR_HANDLER
+
+
+class TestCouplingPointGrouping:
+    """Test grouping coupling points by behavior."""
+
+    def _make_cp(self, source, coupling_type="high_fan_in"):
+        return CouplingPoint(
+            source=source, targets=["a", "b"],
+            coupling_type=coupling_type, description="test",
+        )
+
+    def test_group_state_setters(self):
+        """5 state setters → one dict entry with 5 items."""
+        fas = [FileAnalysis(
+            file_path="config.py", functions=[
+                FunctionInfo(name=f"set_{i}", file_path="config.py", lineno=i,
+                            globals_accessed=["CONFIG"])
+                for i in range(5)
+            ], lines_of_code=10,
+        )]
+        cps = [self._make_cp(f"config.set_{i}") for i in range(5)]
+        groups = group_coupling_points_by_behavior(cps, fas, "python")
+        assert CouplingBehaviorType.STATE_SETTER in groups
+        assert len(groups[CouplingBehaviorType.STATE_SETTER]) == 5
+
+    def test_group_mixed_types(self):
+        """3 state setters + 2 API callers → correct bucketing."""
+        # Each module gets its own file path
+        state_fas = [
+            FileAnalysis(
+                file_path=f"config{i}.py", functions=[
+                    FunctionInfo(name="setter", file_path=f"config{i}.py", lineno=1,
+                                globals_accessed=["X"]),
+                ], lines_of_code=10,
+            ) for i in range(3)
+        ]
+        api_fas = [
+            FileAnalysis(
+                file_path=f"api{i}.py", functions=[
+                    FunctionInfo(name="fetch", file_path=f"api{i}.py", lineno=1,
+                                calls=["get"]),
+                ], imports=[
+                    ImportInfo(module="requests", lineno=1),
+                ], lines_of_code=10,
+            ) for i in range(2)
+        ]
+        cps = (
+            [self._make_cp(f"config{i}.setter") for i in range(3)]
+            + [self._make_cp(f"api{i}.fetch") for i in range(2)]
+        )
+        groups = group_coupling_points_by_behavior(cps, state_fas + api_fas, "python")
+        assert len(groups[CouplingBehaviorType.STATE_SETTER]) == 3
+        assert len(groups[CouplingBehaviorType.API_CALLER]) == 2
+
+    def test_group_empty(self):
+        """Empty list → empty dict."""
+        groups = group_coupling_points_by_behavior([], [], "python")
+        assert groups == {}
+
+
+class TestOfflineCouplingBehavior:
+    """Test that offline generation uses behavior-aware coupling scenarios."""
+
+    def test_offline_state_setters_collapsed(self):
+        """5 state setter CPs → 1 grouped scenario."""
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=100,
+            file_analyses=[FileAnalysis(
+                file_path="config.py",
+                functions=[
+                    FunctionInfo(name=f"set_{i}", file_path="config.py",
+                                lineno=i, globals_accessed=["CONFIG"])
+                    for i in range(5)
+                ],
+                lines_of_code=100,
+            )],
+            coupling_points=[
+                CouplingPoint(
+                    source=f"config.set_{i}", targets=["a", "b"],
+                    coupling_type="shared_state",
+                    description=f"State setter {i}",
+                )
+                for i in range(5)
+            ],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [], "A web app", "python")
+        coupling_scenarios = [s for s in result.scenarios if s.name.startswith("coupling_")]
+        # All 5 state setters should collapse into 1 scenario
+        assert len(coupling_scenarios) == 1
+        assert "state_setters_group" in coupling_scenarios[0].name
+
+    def test_offline_api_callers_individual(self):
+        """3 API caller CPs → 3 individual scenarios."""
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=100,
+            file_analyses=[FileAnalysis(
+                file_path="api.py",
+                functions=[
+                    FunctionInfo(name=f"fetch_{i}", file_path="api.py",
+                                lineno=i, calls=["get"])
+                    for i in range(3)
+                ],
+                imports=[ImportInfo(module="requests", lineno=1)],
+                lines_of_code=100,
+            )],
+            coupling_points=[
+                CouplingPoint(
+                    source=f"api.fetch_{i}", targets=["a", "b"],
+                    coupling_type="high_fan_in",
+                    description=f"API caller {i}",
+                )
+                for i in range(3)
+            ],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [], "A web app", "python")
+        coupling_scenarios = [s for s in result.scenarios if s.name.startswith("coupling_")]
+        assert len(coupling_scenarios) == 3
+        for s in coupling_scenarios:
+            assert "coupling_api_" in s.name
+
+
+class TestFilePathToModule:
+    """Test _file_path_to_module helper."""
+
+    def test_python_simple(self):
+        assert _file_path_to_module("app.py", "python") == "app"
+
+    def test_python_nested(self):
+        assert _file_path_to_module("mypackage/utils.py", "python") == "mypackage.utils"
+
+    def test_python_init(self):
+        assert _file_path_to_module("mypackage/__init__.py", "python") == "mypackage"
+
+    def test_js_simple(self):
+        assert _file_path_to_module("app.js", "javascript") == "app"
+
+    def test_js_index(self):
+        assert _file_path_to_module("components/index.js", "javascript") == "components"
+
+    def test_js_tsx(self):
+        assert _file_path_to_module("components/App.tsx", "javascript") == "components/App"
 
 
 # ── Tests: Integration with Real Profiles ──

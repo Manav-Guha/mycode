@@ -832,6 +832,273 @@ class TestExtractSummary:
         assert result == "Found issues"
 
 
+# ── Finding Grouping Tests ──
+
+
+class TestFindingGrouping:
+    """Tests for grouping similar findings."""
+
+    def test_group_identical_findings(self):
+        """3 findings with same category, pattern, and metrics → 1 with count=3."""
+        findings = [
+            Finding(
+                title=f"Resource limit hit: coupling_api_fetch_{i}",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=100.0,
+                _execution_time_ms=200.0,
+                _error_count=5,
+            )
+            for i in range(3)
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 1
+        assert result[0].group_count == 3
+        assert len(result[0].grouped_findings) == 2
+
+    def test_no_group_different_categories(self):
+        """Same pattern, different category → 2 separate findings."""
+        findings = [
+            Finding(
+                title="Resource limit hit: test_a",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=100.0,
+                _execution_time_ms=200.0,
+            ),
+            Finding(
+                title="Resource limit hit: test_b",
+                severity="critical",
+                category="data_volume_scaling",
+                _peak_memory_mb=100.0,
+                _execution_time_ms=200.0,
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 2
+        assert all(f.group_count == 1 for f in result)
+
+    def test_no_group_different_patterns(self):
+        """Same category, different pattern → 2 separate findings."""
+        findings = [
+            Finding(
+                title="Resource limit hit: test_a",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=100.0,
+            ),
+            Finding(
+                title="Scenario failed: test_b",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=100.0,
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 2
+
+    def test_no_group_divergent_metrics(self):
+        """>10% difference → 2 separate findings."""
+        findings = [
+            Finding(
+                title="Resource limit hit: test_a",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=100.0,
+                _execution_time_ms=200.0,
+            ),
+            Finding(
+                title="Resource limit hit: test_b",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=200.0,  # 100% different
+                _execution_time_ms=200.0,
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 2
+
+    def test_within_10pct_groups(self):
+        """Memory 100 vs 108 (8% diff) → grouped."""
+        findings = [
+            Finding(
+                title="Resource limit hit: test_a",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=100.0,
+                _execution_time_ms=200.0,
+                _error_count=5,
+            ),
+            Finding(
+                title="Resource limit hit: test_b",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=108.0,
+                _execution_time_ms=210.0,
+                _error_count=5,
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 1
+        assert result[0].group_count == 2
+
+    def test_above_10pct_not_grouped(self):
+        """Memory 100 vs 115 (15% diff) → not grouped."""
+        findings = [
+            Finding(
+                title="Resource limit hit: test_a",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=100.0,
+            ),
+            Finding(
+                title="Resource limit hit: test_b",
+                severity="critical",
+                category="concurrent_execution",
+                _peak_memory_mb=115.0,
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 2
+
+    def test_grouped_count_correct(self):
+        """4 findings → representative has count=4, grouped_findings has 3."""
+        findings = [
+            Finding(
+                title=f"Errors during: coupling_compute_{i}",
+                severity="warning",
+                category="data_volume_scaling",
+                _peak_memory_mb=50.0,
+                _execution_time_ms=100.0,
+                _error_count=3,
+            )
+            for i in range(4)
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 1
+        assert result[0].group_count == 4
+        assert len(result[0].grouped_findings) == 3
+
+    def test_both_zero_metrics_grouped(self):
+        """All-zero metrics → always similar, should group."""
+        findings = [
+            Finding(
+                title="Failure indicators triggered: test_a",
+                severity="warning",
+                category="edge_case_input",
+            ),
+            Finding(
+                title="Failure indicators triggered: test_b",
+                severity="warning",
+                category="edge_case_input",
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 1
+        assert result[0].group_count == 2
+
+    def test_grouped_rendering(self):
+        """as_text() includes '(and N similar)' and collapsed list."""
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="Resource limit hit: coupling_api_fetch_data",
+                    severity="critical",
+                    category="concurrent_execution",
+                    description="Resource cap exceeded.",
+                    grouped_findings=[
+                        Finding(
+                            title="Resource limit hit: coupling_api_send",
+                            severity="critical",
+                        ),
+                        Finding(
+                            title="Resource limit hit: coupling_api_post",
+                            severity="critical",
+                        ),
+                    ],
+                    group_count=3,
+                ),
+            ],
+        )
+        text = report.as_text()
+        assert "(and 2 similar)" in text
+        assert "Also: coupling_api_send, coupling_api_post" in text
+
+    def test_grouping_preserves_ungrouped(self):
+        """Version flag findings (unique titles) should not be grouped."""
+        findings = [
+            Finding(
+                title="Outdated dependency: flask",
+                severity="info",
+                category="",
+                description="Flask is outdated.",
+            ),
+            Finding(
+                title="Outdated dependency: requests",
+                severity="info",
+                category="",
+                description="Requests is outdated.",
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        # Different titles → different patterns → not grouped
+        assert len(result) == 2
+        assert all(f.group_count == 1 for f in result)
+
+
+class TestMetricsSimilar:
+    """Direct tests for _metrics_similar."""
+
+    def test_identical(self):
+        a = Finding(title="a", severity="critical", _peak_memory_mb=100, _execution_time_ms=200)
+        b = Finding(title="b", severity="critical", _peak_memory_mb=100, _execution_time_ms=200)
+        assert ReportGenerator._metrics_similar(a, b) is True
+
+    def test_within_tolerance(self):
+        a = Finding(title="a", severity="critical", _peak_memory_mb=100)
+        b = Finding(title="b", severity="critical", _peak_memory_mb=109)
+        assert ReportGenerator._metrics_similar(a, b) is True
+
+    def test_beyond_tolerance(self):
+        a = Finding(title="a", severity="critical", _peak_memory_mb=100)
+        b = Finding(title="b", severity="critical", _peak_memory_mb=112)
+        assert ReportGenerator._metrics_similar(a, b) is False
+
+    def test_both_zero(self):
+        a = Finding(title="a", severity="critical")
+        b = Finding(title="b", severity="critical")
+        assert ReportGenerator._metrics_similar(a, b) is True
+
+    def test_one_zero_one_nonzero(self):
+        a = Finding(title="a", severity="critical", _peak_memory_mb=0.0)
+        b = Finding(title="b", severity="critical", _peak_memory_mb=100.0)
+        assert ReportGenerator._metrics_similar(a, b) is False
+
+
+class TestFindingPattern:
+    """Direct tests for _finding_pattern."""
+
+    def test_scenario_failed(self):
+        f = Finding(title="Scenario failed: some_test", severity="critical")
+        assert ReportGenerator._finding_pattern(f) == "scenario_failed"
+
+    def test_resource_limit(self):
+        f = Finding(title="Resource limit hit: some_test", severity="critical")
+        assert ReportGenerator._finding_pattern(f) == "resource_limit_hit"
+
+    def test_errors_during(self):
+        f = Finding(title="Errors during: some_test", severity="warning")
+        assert ReportGenerator._finding_pattern(f) == "errors_during"
+
+    def test_failure_indicators(self):
+        f = Finding(title="Failure indicators triggered: some_test", severity="warning")
+        assert ReportGenerator._finding_pattern(f) == "failure_indicators"
+
+    def test_unique_title(self):
+        f = Finding(title="Outdated dependency: flask", severity="info")
+        assert ReportGenerator._finding_pattern(f) == "Outdated dependency: flask"
+
+
 # ── Edge Cases ──
 
 

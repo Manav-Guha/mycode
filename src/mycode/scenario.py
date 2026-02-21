@@ -22,6 +22,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional
 
 from mycode.ingester import CouplingPoint, FunctionFlow, IngestionResult
@@ -53,6 +54,16 @@ JAVASCRIPT_CATEGORIES = SHARED_CATEGORIES | frozenset({
 })
 
 ALL_CATEGORIES = PYTHON_CATEGORIES | JAVASCRIPT_CATEGORIES
+
+
+class CouplingBehaviorType(str, Enum):
+    """Classification of coupling point functions by behavior."""
+
+    STATE_SETTER = "state_setter"
+    API_CALLER = "api_caller"
+    PURE_COMPUTATION = "pure_computation"
+    DOM_RENDER = "dom_render"
+    ERROR_HANDLER = "error_handler"
 
 
 # ── Exceptions ──
@@ -255,6 +266,193 @@ class LLMBackend:
         if "request failed" in msg.lower():
             return True
         return False
+
+
+# ── Coupling Point Classification ──
+
+
+_ERROR_HANDLER_NAMES = frozenset({
+    "error", "handle_error", "catch", "fallback", "exception",
+    "on_error", "onerror",
+})
+
+_ERROR_HANDLER_DECORATORS = frozenset({
+    "errorhandler", "exception_handler",
+})
+
+_DOM_MODULES = frozenset({"react", "vue", "svelte", "preact"})
+_DOM_CALLS = frozenset({
+    "render", "createelement", "usestate", "useeffect",
+    "useref", "usememo", "usecallback",
+})
+
+_HTTP_MODULES = frozenset({
+    "requests", "httpx", "axios", "fetch", "openai", "anthropic",
+    "urllib", "aiohttp", "supabase", "googleapis",
+})
+_HTTP_CALLS = frozenset({
+    "get", "post", "put", "delete", "fetch", "request", "send",
+    "query", "execute",
+})
+
+_STATE_CALLS = frozenset({"setstate", "dispatch", "commit"})
+
+
+def _file_path_to_module(rel_path: str, language: str) -> str:
+    """Convert a relative file path to a module-style identifier.
+
+    Python: strip .py/__init__.py, join with '.'
+    JS: strip .js/index.js, join with '/'
+    """
+    if language.lower() == "javascript":
+        path = rel_path
+        if path.endswith("/index.js"):
+            path = path[: -len("/index.js")]
+        elif path.endswith(".js"):
+            path = path[: -len(".js")]
+        elif path.endswith(".ts"):
+            path = path[: -len(".ts")]
+        elif path.endswith(".tsx"):
+            path = path[: -len(".tsx")]
+        elif path.endswith(".jsx"):
+            path = path[: -len(".jsx")]
+        return path.replace("\\", "/")
+    else:
+        path = rel_path
+        if path.endswith("/__init__.py"):
+            path = path[: -len("/__init__.py")]
+        elif path.endswith(".py"):
+            path = path[: -len(".py")]
+        return path.replace("/", ".").replace("\\", ".")
+
+
+def classify_coupling_point(
+    cp: CouplingPoint,
+    file_analyses: list,
+    language: str,
+) -> CouplingBehaviorType:
+    """Classify a coupling point's behavior type.
+
+    Resolves cp.source to its FunctionInfo and FileAnalysis, then applies
+    classification rules in priority order (first match wins):
+    1. Error handler (name or decorator)
+    2. DOM/render (React/Vue/Svelte imports + render calls)
+    3. API/network caller (HTTP module imports + HTTP calls)
+    4. State setter (globals_accessed, shared_state type, or setState calls)
+    5. Pure computation (fallback)
+    """
+    # Build module->FileAnalysis lookup
+    module_to_analysis: dict[str, "FileAnalysis"] = {}
+    for fa in file_analyses:
+        mod = _file_path_to_module(fa.file_path, language)
+        module_to_analysis[mod] = fa
+        # Also index by file_path directly
+        module_to_analysis[fa.file_path] = fa
+
+    # Resolve source to FunctionInfo
+    func_info = None
+    file_analysis = None
+    source = cp.source  # e.g. "app.create_app" or "models.User.save"
+
+    # Try matching source prefix to a module
+    parts = source.rsplit(".", 1)
+    if len(parts) == 2:
+        module_prefix, func_name = parts
+    else:
+        module_prefix, func_name = "", source
+
+    # Look for the FileAnalysis
+    fa = module_to_analysis.get(module_prefix)
+    if fa is None:
+        # Try further splitting for class methods: "models.User.save" -> "models"
+        prefix_parts = module_prefix.rsplit(".", 1)
+        if len(prefix_parts) == 2:
+            fa = module_to_analysis.get(prefix_parts[0])
+
+    if fa is not None:
+        file_analysis = fa
+        # Find the FunctionInfo
+        for f in fa.functions:
+            if f.name == func_name:
+                func_info = f
+                break
+        if func_info is None:
+            # Check class methods
+            for cls in fa.classes:
+                for f_list_item in fa.functions:
+                    if f_list_item.name == func_name and f_list_item.is_method:
+                        func_info = f_list_item
+                        break
+
+    # Apply classification rules in priority order
+
+    # 1. Error handler — by name
+    source_lower = source.lower()
+    func_name_lower = func_name.lower()
+    for pattern in _ERROR_HANDLER_NAMES:
+        if pattern in func_name_lower:
+            return CouplingBehaviorType.ERROR_HANDLER
+
+    # 1b. Error handler — by decorator
+    if func_info and func_info.decorators:
+        for dec in func_info.decorators:
+            dec_lower = dec.lower()
+            for pattern in _ERROR_HANDLER_DECORATORS:
+                if pattern in dec_lower:
+                    return CouplingBehaviorType.ERROR_HANDLER
+
+    # 2. DOM/render — file imports react/vue/svelte AND calls contain render funcs
+    if file_analysis:
+        file_imports_lower = {
+            imp.module.lower().split(".")[0] for imp in file_analysis.imports
+        }
+        if file_imports_lower & _DOM_MODULES:
+            if func_info and func_info.calls:
+                calls_lower = {c.lower() for c in func_info.calls}
+                if calls_lower & _DOM_CALLS:
+                    return CouplingBehaviorType.DOM_RENDER
+
+    # 3. API/network caller
+    if file_analysis:
+        file_imports_lower = {
+            imp.module.lower().split(".")[0] for imp in file_analysis.imports
+        }
+        if file_imports_lower & _HTTP_MODULES:
+            if func_info and func_info.calls:
+                calls_lower = {c.lower() for c in func_info.calls}
+                if calls_lower & _HTTP_CALLS:
+                    return CouplingBehaviorType.API_CALLER
+        # Also: async + HTTP-like call names
+        if func_info and func_info.is_async and func_info.calls:
+            calls_lower = {c.lower() for c in func_info.calls}
+            if calls_lower & _HTTP_CALLS:
+                return CouplingBehaviorType.API_CALLER
+
+    # 4. State setter
+    if func_info and func_info.globals_accessed:
+        return CouplingBehaviorType.STATE_SETTER
+    if cp.coupling_type == "shared_state":
+        return CouplingBehaviorType.STATE_SETTER
+    if func_info and func_info.calls:
+        calls_lower = {c.lower() for c in func_info.calls}
+        if calls_lower & _STATE_CALLS:
+            return CouplingBehaviorType.STATE_SETTER
+
+    # 5. Pure computation (fallback)
+    return CouplingBehaviorType.PURE_COMPUTATION
+
+
+def group_coupling_points_by_behavior(
+    coupling_points: list[CouplingPoint],
+    file_analyses: list,
+    language: str,
+) -> dict[CouplingBehaviorType, list[CouplingPoint]]:
+    """Group coupling points by their classified behavior type."""
+    groups: dict[CouplingBehaviorType, list[CouplingPoint]] = {}
+    for cp in coupling_points:
+        behavior = classify_coupling_point(cp, file_analyses, language)
+        groups.setdefault(behavior, []).append(cp)
+    return groups
 
 
 # ── Scenario Generator ──
@@ -496,7 +694,9 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
 
         if ingestion.coupling_points:
             sections.append("\n## Coupling Points (failure cascade risks)")
-            sections.append(_serialize_coupling_points(ingestion.coupling_points))
+            sections.append(_serialize_coupling_points(
+                ingestion.coupling_points, ingestion.file_analyses, language,
+            ))
 
         return "\n".join(sections)
 
@@ -626,33 +826,187 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                     source="offline",
                 ))
 
-        # 3. Coupling point scenarios
-        for cp in ingestion.coupling_points:
-            cat = "concurrent_execution"
-            if cp.coupling_type == "high_fan_in":
-                cat = "data_volume_scaling"
-            if cat not in valid_categories:
-                continue
-            scenarios.append(StressTestScenario(
-                name=f"coupling_{cp.coupling_type}_{_safe_name(cp.source)}",
-                category=cat,
-                description=cp.description,
-                target_dependencies=[],
-                test_config={
-                    "coupling_source": cp.source,
-                    "coupling_targets": cp.targets,
-                    "coupling_type": cp.coupling_type,
-                    "measurements": _infer_measurements(cat),
-                    "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
-                },
-                expected_behavior=(
-                    f"Stressing '{cp.source}' should not cascade failures to "
-                    f"{len(cp.targets)} dependent components."
-                ),
-                failure_indicators=["cascade_failure", "error_propagation", "timeout"],
-                priority="medium",
-                source="offline",
-            ))
+        # 3. Coupling point scenarios — classified by behavior
+        if ingestion.coupling_points:
+            groups = group_coupling_points_by_behavior(
+                ingestion.coupling_points, ingestion.file_analyses, language,
+            )
+            group_counter = 0
+
+            for behavior, cps in groups.items():
+                if behavior == CouplingBehaviorType.STATE_SETTER:
+                    # Group ALL state setters into ONE scenario
+                    cat = "concurrent_execution"
+                    if cat not in valid_categories:
+                        continue
+                    group_counter += 1
+                    all_sources = [cp.source for cp in cps]
+                    all_targets = []
+                    for cp in cps:
+                        all_targets.extend(cp.targets)
+                    scenarios.append(StressTestScenario(
+                        name=f"coupling_state_setters_group_{group_counter}",
+                        category=cat,
+                        description=(
+                            f"Concurrent access test for {len(cps)} state-setting "
+                            f"functions: {', '.join(all_sources[:5])}"
+                            + (f" (+{len(all_sources) - 5} more)" if len(all_sources) > 5 else "")
+                        ),
+                        target_dependencies=[],
+                        test_config={
+                            "coupling_sources": all_sources,
+                            "coupling_targets": list(set(all_targets)),
+                            "coupling_type": "shared_state",
+                            "behavior": "state_setter",
+                            "measurements": _infer_measurements(cat),
+                            "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                        },
+                        expected_behavior=(
+                            f"Concurrent access to {len(cps)} state setters should "
+                            f"not cause race conditions or data corruption."
+                        ),
+                        failure_indicators=[
+                            "race_condition", "data_corruption", "cascade_failure",
+                        ],
+                        priority="medium",
+                        source="offline",
+                    ))
+
+                elif behavior == CouplingBehaviorType.API_CALLER:
+                    # One scenario per API caller — latency/timeout focus
+                    cat = "concurrent_execution"
+                    if cat not in valid_categories:
+                        continue
+                    for cp in cps:
+                        scenarios.append(StressTestScenario(
+                            name=f"coupling_api_{_safe_name(cp.source)}",
+                            category=cat,
+                            description=(
+                                f"Latency and timeout stress for API caller "
+                                f"'{cp.source}': {cp.description}"
+                            ),
+                            target_dependencies=[],
+                            test_config={
+                                "coupling_source": cp.source,
+                                "coupling_targets": cp.targets,
+                                "coupling_type": cp.coupling_type,
+                                "behavior": "api_caller",
+                                "measurements": _infer_measurements(cat),
+                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                            },
+                            expected_behavior=(
+                                f"API caller '{cp.source}' should handle latency "
+                                f"and timeouts without cascading failures to "
+                                f"{len(cp.targets)} dependents."
+                            ),
+                            failure_indicators=[
+                                "timeout", "cascade_failure", "connection_error",
+                            ],
+                            priority="medium",
+                            source="offline",
+                        ))
+
+                elif behavior == CouplingBehaviorType.PURE_COMPUTATION:
+                    # One scenario per function — data volume scaling
+                    cat = "data_volume_scaling"
+                    if cat not in valid_categories:
+                        continue
+                    for cp in cps:
+                        scenarios.append(StressTestScenario(
+                            name=f"coupling_compute_{_safe_name(cp.source)}",
+                            category=cat,
+                            description=(
+                                f"Scaling stress for computation '{cp.source}': "
+                                f"{cp.description}"
+                            ),
+                            target_dependencies=[],
+                            test_config={
+                                "coupling_source": cp.source,
+                                "coupling_targets": cp.targets,
+                                "coupling_type": cp.coupling_type,
+                                "behavior": "pure_computation",
+                                "measurements": _infer_measurements(cat),
+                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                            },
+                            expected_behavior=(
+                                f"Computation '{cp.source}' should scale without "
+                                f"cascading failures to {len(cp.targets)} dependents."
+                            ),
+                            failure_indicators=[
+                                "cascade_failure", "error_propagation", "timeout",
+                            ],
+                            priority="medium",
+                            source="offline",
+                        ))
+
+                elif behavior == CouplingBehaviorType.DOM_RENDER:
+                    # One scenario per function — state degradation (JS) or memory (Python)
+                    if language.lower() == "javascript":
+                        cat = "state_management_degradation"
+                    else:
+                        cat = "memory_profiling"
+                    if cat not in valid_categories:
+                        continue
+                    for cp in cps:
+                        scenarios.append(StressTestScenario(
+                            name=f"coupling_render_{_safe_name(cp.source)}",
+                            category=cat,
+                            description=(
+                                f"Render/UI stress for '{cp.source}': "
+                                f"{cp.description}"
+                            ),
+                            target_dependencies=[],
+                            test_config={
+                                "coupling_source": cp.source,
+                                "coupling_targets": cp.targets,
+                                "coupling_type": cp.coupling_type,
+                                "behavior": "dom_render",
+                                "measurements": _infer_measurements(cat),
+                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                            },
+                            expected_behavior=(
+                                f"Render function '{cp.source}' should not degrade "
+                                f"under repeated updates."
+                            ),
+                            failure_indicators=[
+                                "memory_growth_unbounded", "render_stall", "cascade_failure",
+                            ],
+                            priority="medium",
+                            source="offline",
+                        ))
+
+                elif behavior == CouplingBehaviorType.ERROR_HANDLER:
+                    # One scenario per function — error flood focus
+                    cat = "edge_case_input"
+                    if cat not in valid_categories:
+                        continue
+                    for cp in cps:
+                        scenarios.append(StressTestScenario(
+                            name=f"coupling_errorhandler_{_safe_name(cp.source)}",
+                            category=cat,
+                            description=(
+                                f"Error flood stress for handler '{cp.source}': "
+                                f"{cp.description}"
+                            ),
+                            target_dependencies=[],
+                            test_config={
+                                "coupling_source": cp.source,
+                                "coupling_targets": cp.targets,
+                                "coupling_type": cp.coupling_type,
+                                "behavior": "error_handler",
+                                "measurements": _infer_measurements(cat),
+                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                            },
+                            expected_behavior=(
+                                f"Error handler '{cp.source}' should remain stable "
+                                f"under a flood of errors."
+                            ),
+                            failure_indicators=[
+                                "handler_crash", "cascade_failure", "resource_exhaustion",
+                            ],
+                            priority="medium",
+                            source="offline",
+                        ))
 
         # 4. Version discrepancy scenarios
         for match in recognized:
@@ -841,13 +1195,25 @@ def _serialize_function_flows(flows: list[FunctionFlow], limit: int = 30) -> str
     return "\n".join(lines)
 
 
-def _serialize_coupling_points(coupling_points: list[CouplingPoint]) -> str:
-    """Serialize coupling points for the prompt."""
+def _serialize_coupling_points(
+    coupling_points: list[CouplingPoint],
+    file_analyses: Optional[list] = None,
+    language: Optional[str] = None,
+) -> str:
+    """Serialize coupling points for the prompt.
+
+    When file_analyses and language are provided, includes a [behavior: type]
+    annotation for LLM-path prompts.
+    """
     lines = []
     for cp in coupling_points:
+        annotation = ""
+        if file_analyses is not None and language is not None:
+            behavior = classify_coupling_point(cp, file_analyses, language)
+            annotation = f" [behavior: {behavior.value}]"
         lines.append(
             f"  [{cp.coupling_type}] {cp.source} -> "
-            f"{len(cp.targets)} dependents: {cp.description}"
+            f"{len(cp.targets)} dependents: {cp.description}{annotation}"
         )
     return "\n".join(lines)
 

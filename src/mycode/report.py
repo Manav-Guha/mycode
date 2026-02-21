@@ -50,6 +50,11 @@ class Finding:
         description: Plain-language explanation of what happened.
         details: Supporting data (measurements, error messages, etc.).
         affected_dependencies: Dependencies involved in this finding.
+        grouped_findings: Other findings collapsed into this representative.
+        group_count: Total number of findings in this group (1 = ungrouped).
+        _peak_memory_mb: Peak memory metric for grouping similarity.
+        _execution_time_ms: Execution time metric for grouping similarity.
+        _error_count: Error count metric for grouping similarity.
     """
 
     title: str
@@ -58,6 +63,11 @@ class Finding:
     description: str = ""
     details: str = ""
     affected_dependencies: list[str] = field(default_factory=list)
+    grouped_findings: list["Finding"] = field(default_factory=list)
+    group_count: int = 1
+    _peak_memory_mb: float = 0.0
+    _execution_time_ms: float = 0.0
+    _error_count: int = 0
 
 
 @dataclass
@@ -147,11 +157,26 @@ class DiagnosticReport:
                     "warning": "[! ]",
                     "info": "[  ]",
                 }.get(f.severity, "[  ]")
-                sections.append(f"\n{marker} {f.title}")
+                title = f.title
+                if f.group_count > 1:
+                    title += f" (and {f.group_count - 1} similar)"
+                sections.append(f"\n{marker} {title}")
                 if f.description:
                     sections.append(f"    {f.description}")
                 if f.details:
                     sections.append(f"    Details: {f.details}")
+                if f.grouped_findings:
+                    names = []
+                    for gf in f.grouped_findings:
+                        # Extract the scenario name from the grouped finding title
+                        parts = gf.title.split(": ", 1)
+                        names.append(parts[1] if len(parts) > 1 else gf.title)
+                    shown = names[:5]
+                    extra = len(names) - 5
+                    also_line = ", ".join(shown)
+                    if extra > 0:
+                        also_line += f" +{extra} more"
+                    sections.append(f"    Also: {also_line}")
 
         # Degradation
         if self.degradation_points:
@@ -269,6 +294,9 @@ class ReportGenerator:
         # 3. Flag unrecognized dependencies
         self._flag_unrecognized_deps(profile_matches, report)
 
+        # 3b. Group similar findings to reduce noise
+        report.findings = self._group_similar_findings(report.findings)
+
         # 4. Sort findings by severity
         severity_order = {"critical": 0, "warning": 1, "info": 2}
         report.findings.sort(key=lambda f: severity_order.get(f.severity, 9))
@@ -304,19 +332,31 @@ class ReportGenerator:
             else:
                 failed += 1
 
+            # Extract metrics for grouping
+            sr_peak_memory = max(
+                (s.memory_peak_mb for s in sr.steps), default=0.0,
+            )
+            sr_exec_time = max(
+                (s.execution_time_ms for s in sr.steps), default=0.0,
+            )
+
             # Check for failures
             if sr.status == "failed":
-                report.findings.append(Finding(
+                f = Finding(
                     title=f"Scenario failed: {sr.scenario_name}",
                     severity="critical",
                     category=sr.scenario_category,
                     description=sr.summary or "Scenario failed during execution.",
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
-                ))
+                )
+                f._peak_memory_mb = sr_peak_memory
+                f._execution_time_ms = sr_exec_time
+                f._error_count = sr.total_errors
+                report.findings.append(f)
 
             # Check resource cap hits
             if sr.resource_cap_hit:
-                report.findings.append(Finding(
+                f = Finding(
                     title=f"Resource limit hit: {sr.scenario_name}",
                     severity="critical",
                     category=sr.scenario_category,
@@ -327,11 +367,15 @@ class ReportGenerator:
                     ),
                     details=self._summarize_cap_hits(sr),
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
-                ))
+                )
+                f._peak_memory_mb = sr_peak_memory
+                f._execution_time_ms = sr_exec_time
+                f._error_count = sr.total_errors
+                report.findings.append(f)
 
             # Check for errors
             if sr.total_errors > 0 and sr.status != "failed":
-                report.findings.append(Finding(
+                f = Finding(
                     title=f"Errors during: {sr.scenario_name}",
                     severity="warning",
                     category=sr.scenario_category,
@@ -340,11 +384,15 @@ class ReportGenerator:
                     ),
                     details=self._summarize_errors(sr),
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
-                ))
+                )
+                f._peak_memory_mb = sr_peak_memory
+                f._execution_time_ms = sr_exec_time
+                f._error_count = sr.total_errors
+                report.findings.append(f)
 
             # Check failure indicators
             if sr.failure_indicators_triggered:
-                report.findings.append(Finding(
+                f = Finding(
                     title=f"Failure indicators triggered: {sr.scenario_name}",
                     severity="warning",
                     category=sr.scenario_category,
@@ -352,7 +400,11 @@ class ReportGenerator:
                         f"Triggered: {', '.join(sr.failure_indicators_triggered)}"
                     ),
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
-                ))
+                )
+                f._peak_memory_mb = sr_peak_memory
+                f._execution_time_ms = sr_exec_time
+                f._error_count = sr.total_errors
+                report.findings.append(f)
 
             # Detect degradation curves
             self._detect_degradation(sr, report)
@@ -781,6 +833,92 @@ class ReportGenerator:
             if step.resource_cap_hit:
                 caps.add(step.resource_cap_hit)
         return f"Caps hit: {', '.join(caps)}" if caps else "Resource cap hit"
+
+    @staticmethod
+    def _finding_pattern(finding: Finding) -> str:
+        """Extract a groupable pattern from a finding's title prefix."""
+        title = finding.title
+        if title.startswith("Scenario failed:"):
+            return "scenario_failed"
+        if title.startswith("Resource limit hit:"):
+            return "resource_limit_hit"
+        if title.startswith("Errors during:"):
+            return "errors_during"
+        if title.startswith("Failure indicators triggered:"):
+            return "failure_indicators"
+        return title
+
+    @staticmethod
+    def _metrics_similar(a: Finding, b: Finding, tolerance: float = 0.10) -> bool:
+        """Check if two findings have similar metrics (within ±tolerance).
+
+        Compares _peak_memory_mb, _execution_time_ms, _error_count.
+        All must be within tolerance. Zero pairs are always similar.
+        """
+        for va, vb in [
+            (a._peak_memory_mb, b._peak_memory_mb),
+            (a._execution_time_ms, b._execution_time_ms),
+            (float(a._error_count), float(b._error_count)),
+        ]:
+            if va == 0.0 and vb == 0.0:
+                continue
+            denominator = max(abs(va), abs(vb))
+            if denominator == 0:
+                continue
+            if abs(va - vb) / denominator > tolerance:
+                return False
+        return True
+
+    @staticmethod
+    def _group_similar_findings(findings: list[Finding]) -> list[Finding]:
+        """Group findings with the same category/pattern and similar metrics.
+
+        Uses anchor-based clustering: the first finding in each
+        (category, pattern) group becomes the anchor. Subsequent findings
+        that are metrically similar join the cluster. Non-matching ones
+        start new clusters.
+
+        Returns a flat list of representative findings (with grouped_findings
+        and group_count set) plus any singletons.
+        """
+        from collections import defaultdict
+
+        # Group by (category, pattern)
+        buckets: dict[tuple[str, str], list[Finding]] = defaultdict(list)
+        for f in findings:
+            pattern = ReportGenerator._finding_pattern(f)
+            key = (f.category, pattern)
+            buckets[key].append(f)
+
+        result: list[Finding] = []
+        for _key, bucket in buckets.items():
+            if len(bucket) == 1:
+                result.append(bucket[0])
+                continue
+
+            # Anchor-based clustering
+            clusters: list[list[Finding]] = []
+            for f in bucket:
+                placed = False
+                for cluster in clusters:
+                    anchor = cluster[0]
+                    if ReportGenerator._metrics_similar(anchor, f):
+                        cluster.append(f)
+                        placed = True
+                        break
+                if not placed:
+                    clusters.append([f])
+
+            for cluster in clusters:
+                if len(cluster) == 1:
+                    result.append(cluster[0])
+                else:
+                    representative = cluster[0]
+                    representative.grouped_findings = cluster[1:]
+                    representative.group_count = len(cluster)
+                    result.append(representative)
+
+        return result
 
 
 # ── Module Helpers ──
