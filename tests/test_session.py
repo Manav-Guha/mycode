@@ -304,6 +304,155 @@ class TestProjectCopy:
         assert (project_with_exclusions / "main.py").read_text() == original_content
 
 
+# ── Python Dependency Installation Tests ──
+
+
+class TestPyDependencyInstallation:
+    """Test _install_dependencies for Python projects."""
+
+    def _make_session(self, tmp_path, project):
+        """Create a SessionManager with mocked venv_python and environment_info."""
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+        sm.venv_python = Path("/fake/venv/bin/python")
+        sm.environment_info = EnvironmentInfo()
+        return sm
+
+    def test_requirement_singular_txt_installed(self, tmp_path):
+        project = tmp_path / "py_project"
+        project.mkdir()
+        (project / "requirement.txt").write_text("flask==3.0.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        with mock.patch.object(sm, "_pip_install") as mock_pip:
+            sm._install_dependencies()
+
+        mock_pip.assert_called_once_with(["-r", str(project / "requirement.txt")])
+
+    def test_requirements_txt_installed(self, tmp_path):
+        project = tmp_path / "py_project"
+        project.mkdir()
+        (project / "requirements.txt").write_text("flask==3.0.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        with mock.patch.object(sm, "_pip_install") as mock_pip:
+            sm._install_dependencies()
+
+        mock_pip.assert_called_once_with(["-r", str(project / "requirements.txt")])
+
+    def test_pip_failure_non_fatal(self, tmp_path):
+        """pip install failure for requirements.txt should not kill the session."""
+        project = tmp_path / "py_project"
+        project.mkdir()
+        (project / "requirements.txt").write_text("badpkg==0.0.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        call_count = 0
+
+        def mock_pip_install(args):
+            nonlocal call_count
+            call_count += 1
+            if args[0] == "-r":
+                raise DependencyInstallError("pip install failed")
+            # Individual install also fails
+            raise DependencyInstallError("pip install failed")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip_install):
+            # Should NOT raise
+            sm._install_dependencies()
+
+        # Bulk install was attempted, then individual fallback was attempted
+        assert call_count >= 2
+
+    def test_pip_uses_venv_python(self, tmp_path):
+        project = tmp_path / "py_project"
+        project.mkdir()
+        (project / "requirements.txt").write_text("flask==3.0.0\n")
+
+        sm = self._make_session(tmp_path, project)
+        sm.venv_python = Path("/test/venv/bin/python")
+
+        with mock.patch("mycode.session.subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            sm._install_dependencies()
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "/test/venv/bin/python"
+        assert cmd[1:4] == ["-m", "pip", "install"]
+
+    def test_no_dep_files_falls_back(self, tmp_path):
+        project = tmp_path / "py_project"
+        project.mkdir()
+        (project / "app.py").write_text("pass")
+
+        sm = self._make_session(tmp_path, project)
+        sm.environment_info = EnvironmentInfo(
+            installed_packages={"requests": "2.31.0"}
+        )
+
+        with mock.patch.object(sm, "_install_from_package_list") as mock_fallback:
+            sm._install_dependencies()
+
+        mock_fallback.assert_called_once_with({"requests": "2.31.0"})
+
+    def test_requirement_txt_in_find_dependency_files(self, tmp_path):
+        project = tmp_path / "py_project"
+        project.mkdir()
+        (project / "requirement.txt").write_text("flask==3.0.0\n")
+
+        sm = SessionManager(project)
+        info = sm.detect_environment()
+        assert "requirement.txt" in info.dependency_files
+
+    def test_individual_fallback_installs_each_package(self, tmp_path):
+        """When bulk install fails, each package is tried individually."""
+        project = tmp_path / "py_project"
+        project.mkdir()
+        (project / "requirements.txt").write_text("flask==3.0.0\nrequests==2.31.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        calls = []
+
+        def mock_pip_install(args):
+            calls.append(args)
+            if args[0] == "-r":
+                raise DependencyInstallError("bulk failed")
+            # Individual installs succeed
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip_install):
+            sm._install_dependencies()
+
+        # First call: bulk -r, then individual: flask, requests
+        assert calls[0][0] == "-r"
+        individual_args = [c[0] for c in calls[1:]]
+        assert "flask==3.0.0" in individual_args
+        assert "requests==2.31.0" in individual_args
+
+    def test_both_requirements_and_requirement_txt(self, tmp_path):
+        """Both requirements.txt and requirement.txt present — both installed."""
+        project = tmp_path / "py_project"
+        project.mkdir()
+        (project / "requirements.txt").write_text("flask==3.0.0\n")
+        (project / "requirement.txt").write_text("requests==2.31.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        calls = []
+
+        def mock_pip_install(args):
+            calls.append(args)
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip_install):
+            sm._install_dependencies()
+
+        req_files_installed = [c for c in calls if c[0] == "-r"]
+        assert len(req_files_installed) == 2
+
+
 # ── JS Dependency Installation Tests ──
 
 

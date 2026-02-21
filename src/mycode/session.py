@@ -251,6 +251,7 @@ class SessionManager:
         dep_files = {}
         candidates = [
             "requirements.txt",
+            "requirement.txt",
             "requirements-dev.txt",
             "requirements_dev.txt",
             "pyproject.toml",
@@ -293,7 +294,9 @@ class SessionManager:
 
     def _install_dependencies(self):
         """Install the user's dependencies into the venv from the project copy."""
+        logger.debug("[PY-DEPS] _install_dependencies called, project_copy_dir=%s", self.project_copy_dir)
         if not self.project_copy_dir:
+            logger.debug("[PY-DEPS] No project_copy_dir, skipping")
             return
 
         installed_any = False
@@ -301,32 +304,52 @@ class SessionManager:
         # Try requirements*.txt files (most common for vibe-coded projects)
         for req_file in [
             "requirements.txt",
+            "requirement.txt",
             "requirements-dev.txt",
             "requirements_dev.txt",
         ]:
             req_path = self.project_copy_dir / req_file
+            logger.debug("[PY-DEPS] Checking %s — exists=%s", req_file, req_path.is_file())
             if req_path.is_file():
-                self._pip_install(["-r", str(req_path)])
-                installed_any = True
+                try:
+                    logger.debug("[PY-DEPS] Installing from %s", req_file)
+                    self._pip_install(["-r", str(req_path)])
+                    installed_any = True
+                    logger.debug("[PY-DEPS] Successfully installed from %s", req_file)
+                except DependencyInstallError as e:
+                    logger.warning("[PY-DEPS] Failed to install from %s: %s", req_file, e)
+                    logger.debug("[PY-DEPS] Falling back to individual package install for %s", req_file)
+                    count = self._pip_install_individually(req_path)
+                    if count > 0:
+                        installed_any = True
+                    logger.debug("[PY-DEPS] Individual install from %s: %d packages succeeded", req_file, count)
 
         # Try pyproject.toml (install from copy dir so originals are untouched)
-        if (self.project_copy_dir / "pyproject.toml").is_file() and not installed_any:
+        pyproject = self.project_copy_dir / "pyproject.toml"
+        logger.debug("[PY-DEPS] Checking pyproject.toml — exists=%s", pyproject.is_file())
+        if pyproject.is_file() and not installed_any:
             try:
+                logger.debug("[PY-DEPS] Installing from pyproject.toml")
                 self._pip_install([str(self.project_copy_dir)])
                 installed_any = True
-            except DependencyInstallError:
+                logger.debug("[PY-DEPS] Successfully installed from pyproject.toml")
+            except DependencyInstallError as e:
                 logger.warning(
-                    "Failed to install from pyproject.toml, falling back to package list"
+                    "[PY-DEPS] Failed to install from pyproject.toml, falling back to package list: %s", e
                 )
 
         # Try setup.py
-        if (self.project_copy_dir / "setup.py").is_file() and not installed_any:
+        setup_py = self.project_copy_dir / "setup.py"
+        logger.debug("[PY-DEPS] Checking setup.py — exists=%s", setup_py.is_file())
+        if setup_py.is_file() and not installed_any:
             try:
+                logger.debug("[PY-DEPS] Installing from setup.py")
                 self._pip_install([str(self.project_copy_dir)])
                 installed_any = True
-            except DependencyInstallError:
+                logger.debug("[PY-DEPS] Successfully installed from setup.py")
+            except DependencyInstallError as e:
                 logger.warning(
-                    "Failed to install from setup.py, falling back to package list"
+                    "[PY-DEPS] Failed to install from setup.py, falling back to package list: %s", e
                 )
 
         # Fallback: install from detected environment package list
@@ -336,13 +359,16 @@ class SessionManager:
             and self.environment_info.installed_packages
         ):
             logger.info(
-                "No dependency files found, installing from detected environment"
+                "[PY-DEPS] No dependency files found, installing from detected environment"
             )
             self._install_from_package_list(self.environment_info.installed_packages)
+
+        logger.debug("[PY-DEPS] Installation complete: installed_any=%s", installed_any)
 
     def _pip_install(self, args: list[str]):
         """Run pip install with given arguments inside the venv."""
         cmd = [str(self.venv_python), "-m", "pip", "install", "--quiet"] + args
+        logger.debug("[PY-DEPS] Running: %s", cmd)
         try:
             result = subprocess.run(
                 cmd,
@@ -350,13 +376,42 @@ class SessionManager:
                 text=True,
                 timeout=120,
             )
+            logger.debug("[PY-DEPS] Exit code: %d", result.returncode)
+            logger.debug("[PY-DEPS] stdout:\n%s", result.stdout[:2000])
+            logger.debug("[PY-DEPS] stderr:\n%s", result.stderr[:2000])
             if result.returncode != 0:
                 raise DependencyInstallError(
                     f"pip install failed (exit {result.returncode}): "
                     f"{result.stderr[:500]}"
                 )
         except subprocess.TimeoutExpired as e:
+            logger.debug("[PY-DEPS] pip install timed out: %s", e)
             raise DependencyInstallError(f"pip install timed out: {e}") from e
+
+    def _pip_install_individually(self, req_path: Path) -> int:
+        """Parse a requirements file and install packages one at a time.
+
+        Returns the number of successfully installed packages.
+        """
+        successful = 0
+        try:
+            lines = req_path.read_text().splitlines()
+        except OSError as e:
+            logger.warning("[PY-DEPS] Could not read %s: %s", req_path, e)
+            return 0
+
+        for line in lines:
+            line = line.strip()
+            # Skip blanks, comments, and pip options (e.g. -i, --index-url, -f)
+            if not line or line.startswith("#") or line.startswith("-"):
+                continue
+            try:
+                logger.debug("[PY-DEPS] Installing individual package: %s", line)
+                self._pip_install([line])
+                successful += 1
+            except DependencyInstallError:
+                logger.warning("[PY-DEPS] Failed to install %s, skipping", line)
+        return successful
 
     def _install_from_package_list(self, packages: dict[str, str]):
         """Install specific package versions into the venv."""
