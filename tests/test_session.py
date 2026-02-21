@@ -304,6 +304,110 @@ class TestProjectCopy:
         assert (project_with_exclusions / "main.py").read_text() == original_content
 
 
+# ── JS Dependency Installation Tests ──
+
+
+class TestJsDependencyInstallation:
+    """Test _install_js_dependencies for Node.js projects."""
+
+    def test_npm_ci_when_lockfile_exists(self, tmp_path):
+        project = tmp_path / "js_project"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"test"}')
+        (project / "package-lock.json").write_text("{}")
+
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+
+        with mock.patch("mycode.session.subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stderr="")
+            sm._install_js_dependencies()
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert cmd[:3] == ["npm", "ci", "--ignore-scripts"]
+
+    def test_npm_install_when_no_lockfile(self, tmp_path):
+        project = tmp_path / "js_project"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"test"}')
+
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+
+        with mock.patch("mycode.session.subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stderr="")
+            sm._install_js_dependencies()
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[:3] == ["npm", "install", "--ignore-scripts"]
+
+    def test_skipped_when_no_package_json(self, tmp_path):
+        project = tmp_path / "python_project"
+        project.mkdir()
+        (project / "app.py").write_text("pass")
+
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+
+        with mock.patch("mycode.session.subprocess.run") as mock_run:
+            sm._install_js_dependencies()
+
+        mock_run.assert_not_called()
+
+    def test_npm_not_found_handled_gracefully(self, tmp_path):
+        project = tmp_path / "js_project"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"test"}')
+
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+
+        with mock.patch("mycode.session.subprocess.run", side_effect=FileNotFoundError("npm not found")):
+            # Should not raise
+            sm._install_js_dependencies()
+
+    def test_npm_failure_logged_not_raised(self, tmp_path):
+        project = tmp_path / "js_project"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"test"}')
+
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+
+        with mock.patch("mycode.session.subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=1, stderr="ERR!")
+            # Should not raise
+            sm._install_js_dependencies()
+
+    def test_npm_timeout_handled_gracefully(self, tmp_path):
+        project = tmp_path / "js_project"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"test"}')
+
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+
+        import subprocess as sp
+        with mock.patch("mycode.session.subprocess.run", side_effect=sp.TimeoutExpired("npm", 120)):
+            sm._install_js_dependencies()
+
+    def test_cwd_is_project_copy_dir(self, tmp_path):
+        project = tmp_path / "js_project"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"test"}')
+
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+
+        with mock.patch("mycode.session.subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stderr="")
+            sm._install_js_dependencies()
+
+        call_kwargs = mock_run.call_args
+        assert call_kwargs.kwargs.get("cwd") == str(project) or call_kwargs[1].get("cwd") == str(project)
+
+
 # ── Orphan Cleanup Tests ──
 
 

@@ -56,6 +56,9 @@ JS_DISCOVER_EXCLUDE_DIRS = {
     ".next",
     ".nuxt",
     ".svelte-kit",
+    ".netlify",
+    ".cache",
+    ".vite",
     "coverage",
     ".DS_Store",
 }
@@ -775,12 +778,13 @@ class JsProjectIngester:
 
         pkg_json = self._project_path / "package.json"
         if pkg_json.is_file():
-            for name, version_spec in self._parse_package_json(pkg_json):
+            for name, version_spec, is_dev in self._parse_package_json(pkg_json):
                 if name not in seen or (version_spec and not seen[name].required_version):
                     seen[name] = DependencyInfo(
                         name=name,
                         required_version=version_spec or None,
                         source_file="package.json",
+                        is_dev=is_dev,
                     )
 
         deps = list(seen.values())
@@ -806,9 +810,14 @@ class JsProjectIngester:
 
         return deps
 
-    def _parse_package_json(self, path: Path) -> list[tuple[str, str]]:
-        """Parse package.json for dependencies."""
-        deps: list[tuple[str, str]] = []
+    def _parse_package_json(self, path: Path) -> list[tuple[str, str, bool]]:
+        """Parse package.json for dependencies.
+
+        Returns:
+            List of (name, version_spec, is_dev) tuples.  ``is_dev`` is True
+            for packages listed under ``devDependencies``.
+        """
+        deps: list[tuple[str, str, bool]] = []
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
@@ -816,8 +825,9 @@ class JsProjectIngester:
             return deps
 
         for section in ("dependencies", "devDependencies", "peerDependencies"):
+            is_dev = section == "devDependencies"
             for name, version in data.get(section, {}).items():
-                deps.append((name, version if isinstance(version, str) else ""))
+                deps.append((name, version if isinstance(version, str) else "", is_dev))
 
         return deps
 

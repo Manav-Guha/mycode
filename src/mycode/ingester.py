@@ -141,6 +141,7 @@ class DependencyInfo:
     source_file: Optional[str] = None  # which dep file declared this
     is_outdated: Optional[bool] = None  # True if installed < latest
     is_missing: bool = False  # True if declared but not installed
+    is_dev: bool = False  # True if from devDependencies (JS only)
 
 
 @dataclass

@@ -15,6 +15,7 @@ from unittest.mock import patch
 import pytest
 
 from mycode.js_ingester import (
+    JS_DISCOVER_EXCLUDE_DIRS,
     JS_EXTENSIONS,
     JsProjectIngester,
     _JsFileAnalyzer,
@@ -604,6 +605,31 @@ class TestDiscoverJsFiles:
         files = ingester._discover_js_files()
         assert len(files) == 1
 
+    def test_excludes_netlify_dir(self, tmp_path):
+        (tmp_path / "app.js").write_text("pass")
+        netlify = tmp_path / ".netlify" / "functions"
+        netlify.mkdir(parents=True)
+        (netlify / "handler.js").write_text("pass")
+        ingester = JsProjectIngester(tmp_path, skip_npm_check=True)
+        files = ingester._discover_js_files()
+        assert len(files) == 1
+
+    def test_excludes_cache_and_vite_dirs(self, tmp_path):
+        (tmp_path / "app.js").write_text("pass")
+        for dirname in (".cache", ".vite"):
+            d = tmp_path / dirname
+            d.mkdir()
+            (d / "bundle.js").write_text("pass")
+        ingester = JsProjectIngester(tmp_path, skip_npm_check=True)
+        files = ingester._discover_js_files()
+        assert len(files) == 1
+        assert files[0].name == "app.js"
+
+    def test_exclude_dirs_constant_complete(self):
+        """All expected deployment/build dirs are in JS_DISCOVER_EXCLUDE_DIRS."""
+        for expected in (".netlify", ".cache", ".vite", ".next", "dist", "build", "node_modules"):
+            assert expected in JS_DISCOVER_EXCLUDE_DIRS
+
     def test_empty_project(self, empty_project):
         ingester = JsProjectIngester(empty_project, skip_npm_check=True)
         files = ingester._discover_js_files()
@@ -662,6 +688,22 @@ class TestPackageJsonParsing:
         deps = ingester._parse_package_json(simple_js_project / "package.json")
         express = next(d for d in deps if d[0] == "express")
         assert express[1] == "^4.18.0"
+
+    def test_is_dev_flag(self, simple_js_project):
+        ingester = JsProjectIngester(simple_js_project, skip_npm_check=True)
+        deps = ingester._parse_package_json(simple_js_project / "package.json")
+        express = next(d for d in deps if d[0] == "express")
+        jest = next(d for d in deps if d[0] == "jest")
+        assert express[2] is False  # runtime dependency
+        assert jest[2] is True  # devDependency
+
+    def test_peer_deps_not_dev(self, tmp_path):
+        f = tmp_path / "package.json"
+        f.write_text(json.dumps({"peerDependencies": {"react": "^18.0.0"}}))
+        ingester = JsProjectIngester(tmp_path, skip_npm_check=True)
+        deps = ingester._parse_package_json(f)
+        assert len(deps) == 1
+        assert deps[0][2] is False  # peerDependencies are not dev
 
     def test_no_dependencies(self, tmp_path):
         f = tmp_path / "package.json"
@@ -812,6 +854,26 @@ class TestDependencyExtraction:
         deps = ingester._extract_dependencies()
         for dep in deps:
             assert dep.is_missing is True
+
+    def test_is_dev_set_for_dev_dependencies(self, simple_js_project):
+        ingester = JsProjectIngester(
+            simple_js_project, installed_packages={}, skip_npm_check=True
+        )
+        deps = ingester._extract_dependencies()
+        express = next(d for d in deps if d.name == "express")
+        jest = next(d for d in deps if d.name == "jest")
+        assert express.is_dev is False
+        assert jest.is_dev is True
+
+    def test_runtime_and_dev_both_present(self, simple_js_project):
+        ingester = JsProjectIngester(
+            simple_js_project, installed_packages={}, skip_npm_check=True
+        )
+        deps = ingester._extract_dependencies()
+        runtime = [d for d in deps if not d.is_dev]
+        dev = [d for d in deps if d.is_dev]
+        assert len(runtime) == 2  # express, lodash
+        assert len(dev) == 1  # jest
 
     @patch("mycode.js_ingester.JsProjectIngester._fetch_npm_version")
     def test_outdated_detection(self, mock_fetch, project_with_node_modules):

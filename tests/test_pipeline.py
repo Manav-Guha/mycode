@@ -17,12 +17,14 @@ from unittest.mock import patch
 
 import pytest
 
+from mycode.ingester import DependencyInfo, IngestionResult
 from mycode.pipeline import (
     LanguageDetectionError,
     PipelineConfig,
     PipelineError,
     PipelineResult,
     StageResult,
+    _run_library_matching,
     detect_language,
     run_pipeline,
 )
@@ -495,6 +497,44 @@ class TestPipelineErrorHandling:
         result = run_pipeline(config)
         assert result.scenarios is not None
         assert len(result.scenarios.scenarios) > 0
+
+
+# ── Dev dependency filtering (unit-level) ──
+
+
+class TestDevDependencyFiltering:
+    """Verify that devDependencies are excluded from library matching."""
+
+    def test_dev_deps_excluded_from_matching(self):
+        """Dev dependencies should not be passed to ComponentLibrary."""
+        ingestion = IngestionResult(
+            project_path="/fake",
+            dependencies=[
+                DependencyInfo(name="express", installed_version="4.18.2"),
+                DependencyInfo(name="jest", installed_version="29.0.0", is_dev=True),
+                DependencyInfo(name="lodash", installed_version="4.17.21"),
+            ],
+        )
+        result = PipelineResult(language="javascript")
+        matches = _run_library_matching(ingestion, "javascript", result)
+        matched_names = [m.dependency_name for m in matches]
+        assert "express" in matched_names
+        assert "lodash" in matched_names
+        assert "jest" not in matched_names
+
+    def test_all_dev_deps_yields_empty(self):
+        """When all dependencies are dev-only, matching gets no deps."""
+        ingestion = IngestionResult(
+            project_path="/fake",
+            dependencies=[
+                DependencyInfo(name="jest", is_dev=True),
+                DependencyInfo(name="eslint", is_dev=True),
+            ],
+        )
+        result = PipelineResult(language="javascript")
+        matches = _run_library_matching(ingestion, "javascript", result)
+        assert matches == []
+        assert any("No declared dependencies" in w for w in result.warnings)
 
 
 # ── JavaScript detection (unit-level, no execution) ──

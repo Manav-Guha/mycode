@@ -489,6 +489,7 @@ def _run_library_matching(
         dep_dicts = [
             {"name": d.name, "installed_version": d.installed_version}
             for d in ingestion.dependencies
+            if not d.is_dev
         ]
 
         if not dep_dicts:

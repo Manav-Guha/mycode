@@ -182,6 +182,9 @@ class SessionManager:
             # 5. Install dependencies from the project copy
             self._install_dependencies()
 
+            # 6. Install JS dependencies if package.json exists
+            self._install_js_dependencies()
+
             self._setup_complete = True
             logger.info("Session ready: %s", self.workspace_dir)
 
@@ -378,6 +381,44 @@ class SessionManager:
                         self._pip_install([spec])
                     except DependencyInstallError:
                         logger.warning("Failed to install %s, skipping", spec)
+
+    # ── JS Dependency Installation ──
+
+    def _install_js_dependencies(self):
+        """Install Node.js dependencies in the project copy if package.json exists."""
+        if not self.project_copy_dir:
+            return
+
+        pkg_json = self.project_copy_dir / "package.json"
+        if not pkg_json.is_file():
+            return
+
+        lock_file = self.project_copy_dir / "package-lock.json"
+        if lock_file.is_file():
+            cmd = ["npm", "ci", "--ignore-scripts"]
+        else:
+            cmd = ["npm", "install", "--ignore-scripts"]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=str(self.project_copy_dir),
+            )
+            if result.returncode != 0:
+                logger.warning(
+                    "npm install failed (exit %d): %s",
+                    result.returncode,
+                    result.stderr[:500],
+                )
+            else:
+                logger.info("JS dependencies installed via %s", cmd[1])
+        except FileNotFoundError:
+            logger.warning("npm not found on PATH, skipping JS dependency installation")
+        except subprocess.TimeoutExpired:
+            logger.warning("npm install timed out after 120s")
 
     # ── Project Copy ──
 
