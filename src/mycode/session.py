@@ -535,6 +535,13 @@ class SessionManager:
         if resolved_command and resolved_command[0] == "python":
             resolved_command[0] = str(self.venv_python)
 
+        logger.info(
+            "run_in_session: %s (timeout=%ss)",
+            resolved_command[0].rsplit("/", 1)[-1] if resolved_command else "?",
+            timeout,
+        )
+        sys.stderr.flush()
+
         try:
             result = subprocess.run(
                 resolved_command,

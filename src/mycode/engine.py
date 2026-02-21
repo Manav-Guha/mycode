@@ -10,6 +10,7 @@ Pure Python. No LLM dependency.
 
 import json
 import logging
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -177,6 +178,7 @@ class ExecutionEngine:
             return ExecutionEngineResult(warnings=["No scenarios to execute."])
 
         logger.info("Starting execution of %d scenarios", len(scenarios))
+        sys.stderr.flush()
 
         results: list[ScenarioResult] = []
         warnings: list[str] = []
@@ -216,10 +218,6 @@ class ExecutionEngine:
 
     def _execute_scenario(self, scenario: StressTestScenario) -> ScenarioResult:
         """Execute a single stress test scenario."""
-        logger.info(
-            "Executing scenario: %s [%s]", scenario.name, scenario.category,
-        )
-
         config = scenario.test_config
         resource_limits = config.get("resource_limits", {})
         timeout = resource_limits.get(
@@ -227,6 +225,12 @@ class ExecutionEngine:
         )
         # Enforce hard cap — no single scenario may exceed _SCENARIO_TIMEOUT_CAP
         timeout = min(timeout, _SCENARIO_TIMEOUT_CAP)
+
+        logger.info(
+            "Executing scenario: %s [%s] (timeout=%ds)",
+            scenario.name, scenario.category, timeout,
+        )
+        sys.stderr.flush()
 
         start = time.perf_counter()
 
