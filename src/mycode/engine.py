@@ -176,6 +176,8 @@ class ExecutionEngine:
         if not scenarios:
             return ExecutionEngineResult(warnings=["No scenarios to execute."])
 
+        logger.info("Starting execution of %d scenarios", len(scenarios))
+
         results: list[ScenarioResult] = []
         warnings: list[str] = []
         start = time.perf_counter()

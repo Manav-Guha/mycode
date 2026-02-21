@@ -368,13 +368,13 @@ class SessionManager:
     def _pip_install(self, args: list[str]):
         """Run pip install with given arguments inside the venv."""
         cmd = [str(self.venv_python), "-m", "pip", "install", "--quiet"] + args
-        logger.debug("[PY-DEPS] Running: %s", cmd)
+        logger.info("[PY-DEPS] pip install: %s", " ".join(args)[:200])
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=60,
             )
             logger.debug("[PY-DEPS] Exit code: %d", result.returncode)
             logger.debug("[PY-DEPS] stdout:\n%s", result.stdout[:2000])
