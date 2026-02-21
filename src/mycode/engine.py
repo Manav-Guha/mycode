@@ -235,6 +235,7 @@ class ExecutionEngine:
             harness_content = self._build_js_harness(
                 scenario.category,
                 harness_body=harness_config.get("harness_body", ""),
+                behavior=harness_config.get("behavior", ""),
             )
             harness_path, config_path = self._write_harness(
                 harness_content, harness_config, scenario.name, ext=".cjs",
@@ -281,7 +282,12 @@ class ExecutionEngine:
     def _build_harness_config(self, scenario: StressTestScenario) -> dict:
         """Build the configuration dict passed to the harness script."""
         config = scenario.test_config
+        behavior = config.get("behavior", "")
         skip_imports = config.get("skip_imports", False)
+
+        # JS coupling scenarios are standalone — no user imports needed
+        if behavior and self.language == "javascript":
+            skip_imports = True
 
         if skip_imports:
             target_modules: list[str] = []
@@ -329,6 +335,16 @@ class ExecutionEngine:
         if harness_body:
             harness_config["harness_body"] = harness_body
 
+        # Pass coupling metadata for standalone coupling bodies
+        if behavior:
+            harness_config["behavior"] = behavior
+            if "coupling_source" in config:
+                harness_config["coupling_source"] = config["coupling_source"]
+            if "coupling_sources" in config:
+                harness_config["coupling_sources"] = config["coupling_sources"]
+            if "coupling_targets" in config:
+                harness_config["coupling_targets"] = config["coupling_targets"]
+
         return harness_config
 
     def _build_harness(self, category: str) -> str:
@@ -336,14 +352,22 @@ class ExecutionEngine:
         body = _CATEGORY_BODIES.get(category, _BODY_GENERIC)
         return _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
 
-    def _build_js_harness(self, category: str, harness_body: str = "") -> str:
+    def _build_js_harness(
+        self,
+        category: str,
+        harness_body: str = "",
+        behavior: str = "",
+    ) -> str:
         """Generate a self-contained JavaScript test harness script.
 
-        If harness_body is provided and exists in _JS_CATEGORY_BODIES, it
-        overrides the category-based body selection. Used for browser-only
-        deps that need Node.js-compatible test bodies.
+        Body selection priority:
+        1. behavior → _JS_COUPLING_BODIES (standalone coupling tests)
+        2. harness_body → _JS_CATEGORY_BODIES (browser-only node-safe tests)
+        3. category → _JS_CATEGORY_BODIES (standard category tests)
         """
-        if harness_body and harness_body in _JS_CATEGORY_BODIES:
+        if behavior and behavior in _JS_COUPLING_BODIES:
+            body = _JS_COUPLING_BODIES[behavior]
+        elif harness_body and harness_body in _JS_CATEGORY_BODIES:
             body = _JS_CATEGORY_BODIES[harness_body]
         else:
             body = _JS_CATEGORY_BODIES.get(category, _JS_BODY_GENERIC)
@@ -1519,4 +1543,380 @@ _JS_CATEGORY_BODIES: dict[str, str] = {
     "node_pubsub_reactivity": _JS_BODY_NODE_PUBSUB_REACTIVITY,
     "node_closure_memory": _JS_BODY_NODE_CLOSURE_MEMORY,
     "node_animation_loop": _JS_BODY_NODE_ANIMATION_LOOP,
+}
+
+# ── JS Coupling Test Bodies ──
+#
+# Standalone bodies for coupling scenarios.  They do NOT reference
+# _callables or _modules — all operations are synthetic, driven by
+# the coupling metadata in CONFIG (coupling_source, coupling_sources,
+# coupling_targets, behavior).
+
+_JS_COUPLING_BODY_PURE_COMPUTATION = '''\
+const _params = CONFIG.parameters || {};
+const _source = CONFIG.coupling_source || "";
+const _sizes = _params.data_sizes || [100, 1000, 10000, 100000];
+
+// Pick a workload based on the coupling_source function name
+function _workloadForSource(name) {
+    const _lower = name.toLowerCase();
+    if (_lower.includes("json") && _lower.includes("stringify")) {
+        return "json_stringify";
+    }
+    if (_lower.includes("json") && _lower.includes("parse")) {
+        return "json_parse";
+    }
+    if (_lower.includes("fetch")) {
+        return "fetch_like";
+    }
+    if (_lower.includes("keys") || _lower.includes("values") || _lower.includes("entries")) {
+        return "object_enum";
+    }
+    if (_lower.includes("sort")) {
+        return "sort";
+    }
+    if (_lower.includes("filter") || _lower.includes("map") || _lower.includes("reduce")) {
+        return "array_transform";
+    }
+    return "generic";
+}
+
+const _workload = _workloadForSource(_source);
+
+for (const _sz of _sizes) {
+    await _measureStep("compute_" + _sz, {data_size: _sz, workload: _workload, source: _source}, () => {
+        if (_workload === "json_stringify") {
+            const _obj = {};
+            for (let _i = 0; _i < _sz; _i++) {
+                _obj["key_" + _i] = {value: _i, label: "item_" + _i, nested: {a: _i}};
+            }
+            const _str = JSON.stringify(_obj);
+            void _str.length;
+        } else if (_workload === "json_parse") {
+            const _obj = {};
+            for (let _i = 0; _i < _sz; _i++) {
+                _obj["key_" + _i] = {value: _i, label: "item_" + _i};
+            }
+            const _str = JSON.stringify(_obj);
+            const _parsed = JSON.parse(_str);
+            void Object.keys(_parsed).length;
+        } else if (_workload === "fetch_like") {
+            // Simulate request/response data processing at scale
+            const _responses = [];
+            for (let _i = 0; _i < _sz; _i++) {
+                _responses.push({
+                    status: 200,
+                    headers: {"content-type": "application/json"},
+                    body: {id: _i, data: "x".repeat(100)},
+                });
+            }
+            // Process responses: extract, transform, aggregate
+            let _totalSize = 0;
+            for (const _r of _responses) {
+                _totalSize += JSON.stringify(_r.body).length;
+            }
+            void _totalSize;
+        } else if (_workload === "object_enum") {
+            const _obj = {};
+            for (let _i = 0; _i < _sz; _i++) {
+                _obj["prop_" + _i] = _i;
+            }
+            const _keys = Object.keys(_obj);
+            const _vals = Object.values(_obj);
+            let _sum = 0;
+            for (const _v of _vals) _sum += _v;
+            void _keys.length;
+        } else if (_workload === "sort") {
+            const _arr = [];
+            for (let _i = 0; _i < _sz; _i++) {
+                _arr.push({id: _i, value: Math.random()});
+            }
+            _arr.sort((a, b) => a.value - b.value);
+        } else if (_workload === "array_transform") {
+            const _arr = [];
+            for (let _i = 0; _i < _sz; _i++) _arr.push(_i);
+            const _mapped = _arr.map(x => x * 2 + 1);
+            const _filtered = _mapped.filter(x => x % 3 !== 0);
+            const _reduced = _filtered.reduce((acc, x) => acc + x, 0);
+            void _reduced;
+        } else {
+            // Generic computation
+            const _arr = [];
+            for (let _i = 0; _i < _sz; _i++) _arr.push({v: _i, s: String(_i)});
+            _arr.sort((a, b) => a.v - b.v);
+            let _sum = 0;
+            for (const _item of _arr) _sum += _item.v;
+            void _sum;
+        }
+    });
+}
+'''
+
+_JS_COUPLING_BODY_STATE_SETTER = '''\
+const _params = CONFIG.parameters || {};
+const _sources = CONFIG.coupling_sources || [CONFIG.coupling_source || "setState"];
+const _cycleCounts = _params.cycle_counts || [10, 100, 1000];
+
+for (const _cycles of _cycleCounts) {
+    await _measureStep("state_cycles_" + _cycles, {cycles: _cycles, setter_count: _sources.length}, () => {
+        // Shared state object — multiple "setters" mutate concurrently
+        const _state = {};
+        for (let _i = 0; _i < _sources.length; _i++) {
+            _state[_sources[_i]] = 0;
+        }
+
+        // Simulate rapid state mutations from multiple sources
+        for (let _c = 0; _c < _cycles; _c++) {
+            for (const _setter of _sources) {
+                // Each setter writes a new value
+                _state[_setter] = _c;
+                // Simulate derived state computation
+                const _derived = {};
+                for (const _k of Object.keys(_state)) {
+                    _derived[_k + "_derived"] = _state[_k] * 2;
+                }
+                // Simulate subscriber notification
+                const _snapshot = JSON.parse(JSON.stringify(_state));
+                void _snapshot;
+            }
+        }
+
+        // Verify final state consistency
+        for (const _setter of _sources) {
+            if (_state[_setter] !== _cycles - 1) {
+                _recordError(
+                    new Error("State inconsistency: " + _setter + " = " + _state[_setter]),
+                    "state_check"
+                );
+            }
+        }
+    });
+}
+'''
+
+_JS_COUPLING_BODY_API_CALLER = '''\
+const _params = CONFIG.parameters || {};
+const _source = CONFIG.coupling_source || "fetch";
+const _concurrencyLevels = _params.concurrency_levels || [1, 5, 10, 50];
+
+// Mock async API call with configurable latency
+function _mockApiCall(id, failRate) {
+    return new Promise((resolve, reject) => {
+        // Simulate processing work (not just setTimeout)
+        const _data = {};
+        for (let _i = 0; _i < 100; _i++) {
+            _data["field_" + _i] = "value_" + id + "_" + _i;
+        }
+        if (Math.random() < failRate) {
+            reject(new Error("API_ERROR_" + id));
+        } else {
+            resolve({status: 200, data: _data, id: id});
+        }
+    });
+}
+
+for (const _conc of _concurrencyLevels) {
+    await _measureStep("api_concurrency_" + _conc, {concurrency: _conc, source: _source}, async () => {
+        const _promises = [];
+        const _failRate = 0.05;  // 5% error rate
+        for (let _i = 0; _i < _conc; _i++) {
+            _promises.push(
+                _mockApiCall(_i, _failRate).catch(_e => ({status: "error", error: String(_e)}))
+            );
+        }
+        const _results = await Promise.all(_promises);
+
+        // Process results — simulate dependents consuming API responses
+        let _successCount = 0;
+        let _errorCount = 0;
+        for (const _r of _results) {
+            if (_r.status === "error") {
+                _errorCount++;
+            } else {
+                _successCount++;
+                // Simulate dependent processing
+                JSON.stringify(_r.data);
+            }
+        }
+        void _successCount;
+    });
+}
+
+// Timeout handling test
+await _measureStep("api_timeout_handling", {source: _source}, async () => {
+    const _timeoutMs = 100;
+    function _slowCall() {
+        return new Promise((resolve) => {
+            setTimeout(() => resolve({status: 200}), _timeoutMs + 50);
+        });
+    }
+    function _withTimeout(promise, ms) {
+        return Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error("TIMEOUT")), ms)),
+        ]);
+    }
+
+    const _results = [];
+    for (let _i = 0; _i < 10; _i++) {
+        try {
+            const _r = await _withTimeout(_slowCall(), _timeoutMs);
+            _results.push({status: "ok"});
+        } catch (_e) {
+            _results.push({status: "timeout"});
+        }
+    }
+    void _results.length;
+});
+'''
+
+_JS_COUPLING_BODY_DOM_RENDER = '''\
+const _params = CONFIG.parameters || {};
+const _source = CONFIG.coupling_source || "render";
+const _nodeCounts = _params.node_counts || [10, 100, 500, 1000];
+
+// Virtual DOM node factory — no real DOM
+function _createVNode(type, props, children) {
+    return {type, props: props || {}, children: children || [], _key: Math.random()};
+}
+
+function _buildTree(depth, breadth) {
+    if (depth <= 0) {
+        return _createVNode("span", {text: "leaf"}, []);
+    }
+    const _children = [];
+    for (let _i = 0; _i < breadth; _i++) {
+        _children.push(_buildTree(depth - 1, Math.max(1, breadth - 1)));
+    }
+    return _createVNode("div", {className: "node_" + depth}, _children);
+}
+
+function _countNodes(tree) {
+    let _count = 1;
+    for (const _child of tree.children) {
+        _count += _countNodes(_child);
+    }
+    return _count;
+}
+
+function _diffTrees(oldTree, newTree) {
+    let _patches = 0;
+    if (oldTree.type !== newTree.type) { _patches++; return _patches; }
+    const _oldKeys = Object.keys(oldTree.props);
+    const _newKeys = Object.keys(newTree.props);
+    for (const _k of _newKeys) {
+        if (oldTree.props[_k] !== newTree.props[_k]) _patches++;
+    }
+    const _maxChildren = Math.max(oldTree.children.length, newTree.children.length);
+    for (let _i = 0; _i < _maxChildren; _i++) {
+        if (!oldTree.children[_i] || !newTree.children[_i]) {
+            _patches++;
+        } else {
+            _patches += _diffTrees(oldTree.children[_i], newTree.children[_i]);
+        }
+    }
+    return _patches;
+}
+
+for (const _nodeCount of _nodeCounts) {
+    // Determine tree dimensions to approximate target node count
+    let _depth = 2, _breadth = 2;
+    while (_breadth ** _depth < _nodeCount && _depth < 8) {
+        _breadth++;
+        if (_breadth > 10) { _breadth = 3; _depth++; }
+    }
+
+    await _measureStep("render_nodes_" + _nodeCount, {target_nodes: _nodeCount, source: _source}, () => {
+        // Build initial tree
+        const _tree1 = _buildTree(_depth, _breadth);
+        const _actualNodes = _countNodes(_tree1);
+
+        // Build updated tree (simulates re-render with changed props)
+        const _tree2 = _buildTree(_depth, _breadth);
+
+        // Diff
+        const _patchCount = _diffTrees(_tree1, _tree2);
+        void _patchCount;
+    });
+}
+
+// Memory growth across repeated render cycles
+const _renderCycles = _params.render_cycles || 50;
+await _measureStep("render_memory_growth", {cycles: _renderCycles, source: _source}, () => {
+    const _retained = [];
+    for (let _c = 0; _c < _renderCycles; _c++) {
+        const _tree = _buildTree(3, 4);
+        _retained.push(_tree);
+        if (_retained.length > 20) {
+            _retained.shift();  // Simulate keeping last 20 renders
+        }
+    }
+    void _retained.length;
+});
+'''
+
+_JS_COUPLING_BODY_ERROR_HANDLER = '''\
+const _params = CONFIG.parameters || {};
+const _source = CONFIG.coupling_source || "handleError";
+const _batchSizes = _params.batch_sizes || [10, 100, 1000, 5000];
+
+// Error generator factory
+function _generateErrors(count) {
+    const _errors = [];
+    const _types = [
+        () => new TypeError("Cannot read properties of undefined"),
+        () => new RangeError("Maximum call stack size exceeded"),
+        () => new SyntaxError("Unexpected token"),
+        () => new ReferenceError("x is not defined"),
+        () => new Error("NETWORK_ERROR"),
+        () => new Error("TIMEOUT"),
+        () => { const e = new Error("nested"); e.cause = new Error("root"); return e; },
+        () => { try { null.x; } catch(e) { return e; } },
+        () => { try { undefined(); } catch(e) { return e; } },
+    ];
+    for (let _i = 0; _i < count; _i++) {
+        _errors.push(_types[_i % _types.length]());
+    }
+    return _errors;
+}
+
+// Simulate error handler: classify, log, decide action
+function _handleError(error) {
+    const _type = error.constructor.name;
+    const _msg = String(error).slice(0, 200);
+    const _hasCause = !!(error.cause);
+    // Classify
+    let _severity = "unknown";
+    if (_type === "TypeError" || _type === "ReferenceError") _severity = "bug";
+    else if (_type === "RangeError") _severity = "resource";
+    else if (_msg.includes("NETWORK") || _msg.includes("TIMEOUT")) _severity = "transient";
+    else _severity = "unknown";
+    // Decide action
+    const _action = _severity === "transient" ? "retry" : "report";
+    return {type: _type, severity: _severity, action: _action, hasCause: _hasCause};
+}
+
+for (const _batchSize of _batchSizes) {
+    await _measureStep("error_flood_" + _batchSize, {batch_size: _batchSize, source: _source}, () => {
+        const _errors = _generateErrors(_batchSize);
+        let _retryCount = 0;
+        let _reportCount = 0;
+        for (const _err of _errors) {
+            const _result = _handleError(_err);
+            if (_result.action === "retry") _retryCount++;
+            else _reportCount++;
+        }
+        void _retryCount;
+        void _reportCount;
+    });
+}
+'''
+
+# Coupling behavior -> body mapping (separate from category bodies)
+_JS_COUPLING_BODIES: dict[str, str] = {
+    "pure_computation": _JS_COUPLING_BODY_PURE_COMPUTATION,
+    "state_setter": _JS_COUPLING_BODY_STATE_SETTER,
+    "api_caller": _JS_COUPLING_BODY_API_CALLER,
+    "dom_render": _JS_COUPLING_BODY_DOM_RENDER,
+    "error_handler": _JS_COUPLING_BODY_ERROR_HANDLER,
 }

@@ -20,6 +20,7 @@ from mycode.engine import (
     _HARNESS_PREAMBLE,
     _HARNESS_POSTAMBLE,
     _JS_CATEGORY_BODIES,
+    _JS_COUPLING_BODIES,
     _JS_BODY_GENERIC,
     _JS_HARNESS_PREAMBLE,
     _JS_HARNESS_POSTAMBLE,
@@ -1319,6 +1320,135 @@ class TestSkipImports:
             assert "__MYCODE_RESULTS_START__" in script, f"'{name}' missing start marker"
             assert "__MYCODE_RESULTS_END__" in script, f"'{name}' missing end marker"
             assert "(async () => {" in script, f"'{name}' missing async IIFE"
+            opens = script.count("{")
+            closes = script.count("}")
+            assert opens == closes, (
+                f"'{name}' brace mismatch: {opens} opens vs {closes} closes"
+            )
+
+
+class TestJSCouplingBodies:
+    """Test standalone JS coupling body templates."""
+
+    def test_js_coupling_skips_imports(self, tmp_path):
+        """JS scenario with behavior key → empty target_modules/functions."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="javascript")
+
+        scenario = _make_scenario(
+            name="coupling_compute_fetch",
+            category="data_volume_scaling",
+            test_config={
+                "behavior": "pure_computation",
+                "coupling_source": "fetch",
+                "coupling_targets": ["processResponse"],
+                "coupling_type": "data_flow",
+                "measurements": ["memory_mb", "execution_time_ms"],
+                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+            },
+        )
+        config = engine._build_harness_config(scenario)
+
+        assert config["target_modules"] == []
+        assert config["target_functions"] == []
+
+    def test_js_coupling_passes_metadata(self, tmp_path):
+        """Coupling metadata passed through to harness_config."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="javascript")
+
+        scenario = _make_scenario(
+            name="coupling_compute_JSON_stringify",
+            category="data_volume_scaling",
+            test_config={
+                "behavior": "pure_computation",
+                "coupling_source": "JSON.stringify",
+                "coupling_targets": ["sendData", "logOutput"],
+                "coupling_type": "data_flow",
+                "measurements": ["memory_mb"],
+                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+            },
+        )
+        config = engine._build_harness_config(scenario)
+
+        assert config["behavior"] == "pure_computation"
+        assert config["coupling_source"] == "JSON.stringify"
+        assert config["coupling_targets"] == ["sendData", "logOutput"]
+
+    def test_js_coupling_passes_grouped_sources(self, tmp_path):
+        """State setter scenarios pass coupling_sources (plural)."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="javascript")
+
+        scenario = _make_scenario(
+            name="coupling_state_setters_group_1",
+            category="concurrent_execution",
+            test_config={
+                "behavior": "state_setter",
+                "coupling_sources": ["setCount", "setName", "setItems"],
+                "coupling_targets": ["Dashboard", "Sidebar"],
+                "coupling_type": "shared_state",
+                "measurements": ["memory_mb"],
+                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+            },
+        )
+        config = engine._build_harness_config(scenario)
+
+        assert config["coupling_sources"] == ["setCount", "setName", "setItems"]
+        assert config["target_modules"] == []
+
+    def test_python_coupling_unchanged(self, tmp_path):
+        """Python scenario with behavior key still imports user modules."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        scenario = _make_scenario(
+            name="coupling_compute_process",
+            category="data_volume_scaling",
+            test_config={
+                "behavior": "pure_computation",
+                "coupling_source": "process_data",
+                "coupling_targets": ["save_result"],
+                "coupling_type": "data_flow",
+                "measurements": ["memory_mb"],
+                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+            },
+        )
+        config = engine._build_harness_config(scenario)
+
+        # Python coupling still discovers user modules
+        assert config["target_modules"] != []
+
+    def test_js_coupling_body_routing(self, tmp_path):
+        """behavior parameter routes to _JS_COUPLING_BODIES."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="javascript")
+
+        harness = engine._build_js_harness(
+            "data_volume_scaling",
+            behavior="pure_computation",
+        )
+        # Should contain coupling body content, not generic body
+        assert "_workloadForSource" in harness
+        assert "json_stringify" in harness
+
+    def test_all_coupling_bodies_registered(self):
+        """All 5 behavior keys present in _JS_COUPLING_BODIES."""
+        expected = {
+            "pure_computation",
+            "state_setter",
+            "api_caller",
+            "dom_render",
+            "error_handler",
+        }
+        assert set(_JS_COUPLING_BODIES.keys()) == expected
+
+    def test_coupling_bodies_valid_structure(self):
+        """Every coupling body produces a complete harness with balanced braces."""
+        for name, body in _JS_COUPLING_BODIES.items():
+            script = _JS_HARNESS_PREAMBLE + "\n" + body + "\n" + _JS_HARNESS_POSTAMBLE
+            assert "__MYCODE_RESULTS_START__" in script, f"'{name}' missing start marker"
+            assert "__MYCODE_RESULTS_END__" in script, f"'{name}' missing end marker"
             opens = script.count("{")
             closes = script.count("}")
             assert opens == closes, (
