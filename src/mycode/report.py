@@ -114,6 +114,7 @@ class DiagnosticReport:
     """
 
     summary: str = ""
+    plain_summary: str = ""
     findings: list[Finding] = field(default_factory=list)
     degradation_points: list[DegradationPoint] = field(default_factory=list)
     version_flags: list[str] = field(default_factory=list)
@@ -136,6 +137,10 @@ class DiagnosticReport:
         sections.append("=" * 60)
         sections.append("  myCode Diagnostic Report")
         sections.append("=" * 60)
+
+        # Plain-language summary (for non-technical readers)
+        if self.plain_summary:
+            sections.append(f"\n{self.plain_summary}")
 
         # Summary
         if self.summary:
@@ -318,6 +323,11 @@ class ReportGenerator:
         # 4. Sort findings by severity
         severity_order = {"critical": 0, "warning": 1, "info": 2}
         report.findings.sort(key=lambda f: severity_order.get(f.severity, 9))
+
+        # 4b. Generate plain-language summary for non-technical readers
+        report.plain_summary = self._generate_plain_summary(
+            report, operational_intent,
+        )
 
         # 5. Generate narrative summary
         if self._offline:
@@ -634,6 +644,189 @@ class ReportGenerator:
             ))
 
     # ── Summary Generation ──
+
+    def _generate_plain_summary(
+        self,
+        report: DiagnosticReport,
+        operational_intent: str,
+    ) -> str:
+        """Generate a plain-language summary for non-technical readers.
+
+        Uses template-based pattern matching on findings, degradation points,
+        and the user's operational intent to produce a human-readable overview.
+        """
+        if not report.scenarios_run:
+            return ""
+
+        lines: list[str] = []
+
+        # ── Overall assessment ──
+        critical = [f for f in report.findings if f.severity == "critical"]
+        warnings = [f for f in report.findings if f.severity == "warning"]
+
+        if operational_intent:
+            intent_snippet = operational_intent[:80]
+            if len(operational_intent) > 80:
+                intent_snippet += "..."
+            lines.append(
+                f"Based on your description ({intent_snippet}), "
+                f"here's what we found:"
+            )
+
+        if critical:
+            if operational_intent:
+                lines.append(
+                    "We found issues that could affect your project "
+                    "under real-world conditions."
+                )
+            else:
+                lines.append(
+                    "We found issues that could affect your project "
+                    "under real-world conditions."
+                )
+        elif warnings:
+            lines.append(
+                "Your project mostly handles stress well, but there are "
+                "a few areas to watch."
+            )
+        else:
+            lines.append(
+                "Your project looks solid under the conditions we tested."
+            )
+
+        # ── Top findings translation (up to 5 items) ──
+        items: list[str] = []
+
+        # Translate degradation points
+        for dp in report.degradation_points:
+            if len(items) >= 5:
+                break
+            items.append(self._translate_degradation(dp))
+
+        # Translate findings (skip info-level — version/unrecognized noise)
+        for f in report.findings:
+            if len(items) >= 5:
+                break
+            if f.severity == "info":
+                continue
+            translated = self._translate_finding(f)
+            if translated:
+                items.append(translated)
+
+        if items:
+            lines.append("")
+            for item in items:
+                lines.append(f"- {item}")
+
+        # ── Closing line ──
+        lines.append("")
+        lines.append(
+            "See detailed technical findings below — you can paste these "
+            "into your coding tool for specific fixes."
+        )
+
+        return "\n".join(lines)
+
+    def _translate_degradation(self, dp: DegradationPoint) -> str:
+        """Translate a degradation point into plain language."""
+        name_lower = dp.scenario_name.lower()
+        context = self._context_from_name(name_lower)
+
+        if len(dp.steps) >= 2 and dp.steps[0][1] > 0.001:
+            ratio = dp.steps[-1][1] / dp.steps[0][1]
+        else:
+            ratio = 0.0
+
+        if dp.metric == "execution_time_ms":
+            if ratio > 10:
+                speed = "slows to a crawl"
+            elif ratio >= 2:
+                speed = "noticeably slower"
+            else:
+                speed = "slower"
+            return (
+                f"Processing {context}slows dramatically with larger data"
+                f" — {ratio:.0f}x {speed} at the highest load tested"
+                if ratio > 10
+                else f"Processing {context}gets {speed} with larger data"
+                f" — {ratio:.0f}x at the highest load tested"
+            )
+
+        if dp.metric == "memory_peak_mb":
+            peak = dp.steps[-1][1] if dp.steps else 0.0
+            if "memory" in name_lower or "leak" in name_lower:
+                return (
+                    "Memory keeps growing over repeated use — could "
+                    "eventually run out with long sessions"
+                )
+            if peak > 100:
+                return (
+                    f"Memory usage grows rapidly with data size — "
+                    f"reaches {peak:.0f}MB at peak"
+                )
+            return "Memory usage grows with data size"
+
+        if dp.metric == "error_count":
+            return "Errors accumulate under increasing load"
+
+        return dp.description
+
+    def _translate_finding(self, f: Finding) -> str:
+        """Translate a finding into plain language."""
+        cat = f.category
+        title_lower = f.title.lower()
+
+        if cat == "concurrent_execution":
+            if "failed" in title_lower:
+                return (
+                    f"Under simultaneous use, things break — "
+                    f"{f.description}"
+                )
+            if "resource" in title_lower:
+                return (
+                    "Operations freeze under heavy load — hit time or "
+                    "resource limits"
+                )
+            return f"Concurrent use causes problems — {f.description}"
+
+        if cat == "edge_case_input":
+            error_type = ""
+            if f.details:
+                parts = f.details.split(":")
+                if parts:
+                    error_type = parts[0].strip()
+            if error_type:
+                return (
+                    f"Unexpected inputs cause crashes — {error_type} "
+                    f"errors when given unusual data"
+                )
+            return "Unexpected inputs cause crashes"
+
+        if cat == "data_volume_scaling":
+            if "resource" in title_lower:
+                return "Hit safety limits when processing large data"
+            if f._error_count > 0:
+                return f"Errors appear with larger data — {f._error_count} errors"
+            return f.description
+
+        if cat == "memory_profiling":
+            return (
+                "Memory keeps growing over repeated use — could "
+                "eventually run out with long sessions"
+            )
+
+        return f.description
+
+    @staticmethod
+    def _context_from_name(name_lower: str) -> str:
+        """Extract a context phrase from a scenario name."""
+        if any(kw in name_lower for kw in ("request", "api", "http")):
+            return "for external API calls "
+        if any(kw in name_lower for kw in ("flask", "fastapi", "streamlit")):
+            return "for the web server "
+        if any(kw in name_lower for kw in ("coupling", "state")):
+            return "in data flow between components "
+        return ""
 
     def _generate_offline_summary(self, report: DiagnosticReport) -> str:
         """Generate a plain-text summary without LLM."""

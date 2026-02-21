@@ -1285,3 +1285,147 @@ class TestEdgeCases:
             operational_intent="Handles 500 users daily",
         )
         assert report.operational_context == "Handles 500 users daily"
+
+
+# ── Plain Summary Tests ──
+
+
+class TestPlainSummary:
+    """Tests for plain-language summary generation."""
+
+    def test_clean_run_positive_summary(self, clean_execution):
+        """No critical/warning findings → positive assessment."""
+        ingestion = IngestionResult(
+            project_path="/tmp/x", files_analyzed=1,
+            dependencies=[
+                DependencyInfo(name="flask", installed_version="3.1.0", is_outdated=False),
+            ],
+        )
+        matches = [
+            ProfileMatch(dependency_name="flask", profile=MagicMock(), version_match=True),
+        ]
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(clean_execution, ingestion, matches)
+
+        assert "looks solid" in report.plain_summary.lower()
+
+    def test_critical_findings_summary(
+        self, failing_execution, simple_ingestion, profile_matches,
+    ):
+        """Critical findings → warning-toned assessment."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(failing_execution, simple_ingestion, profile_matches)
+
+        assert "issues" in report.plain_summary.lower()
+        assert "real-world conditions" in report.plain_summary.lower()
+
+    def test_includes_operational_intent(
+        self, failing_execution, simple_ingestion, profile_matches,
+    ):
+        """Intent text appears in the plain summary."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            failing_execution, simple_ingestion, profile_matches,
+            operational_intent="Personal budget tracker for daily use",
+        )
+
+        assert "budget tracker" in report.plain_summary.lower()
+
+    def test_degradation_translated(
+        self, degrading_execution, simple_ingestion, profile_matches,
+    ):
+        """Degradation points appear as plain-language bullets."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(degrading_execution, simple_ingestion, profile_matches)
+
+        assert "- " in report.plain_summary
+        # Should mention slowing or memory growth
+        lower = report.plain_summary.lower()
+        assert "slower" in lower or "slows" in lower or "memory" in lower
+
+    def test_findings_translated(
+        self, failing_execution, simple_ingestion, profile_matches,
+    ):
+        """Findings appear as plain-language bullets."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(failing_execution, simple_ingestion, profile_matches)
+
+        assert "- " in report.plain_summary
+
+    def test_max_five_items(self):
+        """Only top 5 findings/degradation shown."""
+        # Create execution with many degradation points
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name=f"test_scenario_{i}",
+                    scenario_category="data_volume_scaling",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="small", execution_time_ms=10.0, memory_peak_mb=5.0),
+                        StepResult(step_name="large", execution_time_ms=500.0, memory_peak_mb=200.0),
+                    ],
+                    total_errors=0,
+                )
+                for i in range(10)
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+
+        bullet_count = report.plain_summary.count("\n- ")
+        assert bullet_count <= 5
+
+    def test_closing_line_present(
+        self, failing_execution, simple_ingestion, profile_matches,
+    ):
+        """Summary ends with the bridge line."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(failing_execution, simple_ingestion, profile_matches)
+
+        assert "paste these into your coding tool" in report.plain_summary.lower()
+
+    def test_plain_summary_in_as_text(
+        self, failing_execution, simple_ingestion, profile_matches,
+    ):
+        """as_text() renders plain_summary before the technical summary."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(failing_execution, simple_ingestion, profile_matches)
+
+        text = report.as_text()
+        # plain_summary content should appear before the technical summary
+        plain_pos = text.find("real-world conditions")
+        summary_pos = text.find("critical issue")
+        assert plain_pos != -1
+        assert summary_pos != -1
+        assert plain_pos < summary_pos
+
+    def test_no_intent_still_works(
+        self, failing_execution, simple_ingestion, profile_matches,
+    ):
+        """Works without operational_intent (generic framing)."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            failing_execution, simple_ingestion, profile_matches,
+            operational_intent="",
+        )
+
+        assert report.plain_summary
+        assert "real-world conditions" in report.plain_summary.lower()
+        # Should NOT contain "based on your description"
+        assert "based on your description" not in report.plain_summary.lower()
+
+    def test_empty_execution(self):
+        """No scenarios → no plain summary generated."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            ExecutionEngineResult(),
+            IngestionResult(project_path="/tmp/x"),
+            [],
+        )
+
+        assert report.plain_summary == ""
