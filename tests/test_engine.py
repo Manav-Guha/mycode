@@ -26,6 +26,7 @@ from mycode.engine import (
     _JS_HARNESS_POSTAMBLE,
     _PY_COUPLING_BODIES,
     _PY_LIB_BODIES,
+    _SCENARIO_TIMEOUT_CAP,
     _RESULTS_START,
     _RESULTS_END,
 )
@@ -825,7 +826,8 @@ class TestScenarioExecution:
         remaining = list(project_dir.glob("_mycode_*"))
         assert remaining == []
 
-    def test_passes_correct_timeout(self, tmp_path):
+    def test_timeout_capped_when_config_exceeds_cap(self, tmp_path):
+        """Config timeout of 42 exceeds the 30s cap → should be capped."""
         session = _make_session(tmp_path)
         harness_stdout = _make_harness_output(steps=[_make_step_data()])
         session.run_in_session.return_value = SessionResult(
@@ -839,11 +841,31 @@ class TestScenarioExecution:
         engine = ExecutionEngine(session, _make_ingestion())
         engine._execute_scenario(scenario)
 
-        # Check that run_in_session was called with timeout=42
         call_kwargs = session.run_in_session.call_args
-        assert call_kwargs.kwargs.get("timeout") == 42 or call_kwargs[1].get("timeout") == 42
+        actual = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
+        assert actual == _SCENARIO_TIMEOUT_CAP
 
-    def test_default_timeout_from_session(self, tmp_path):
+    def test_timeout_preserved_when_under_cap(self, tmp_path):
+        """Config timeout of 15 is under the 30s cap → should be preserved."""
+        session = _make_session(tmp_path)
+        harness_stdout = _make_harness_output(steps=[_make_step_data()])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout=harness_stdout, stderr="",
+        )
+
+        scenario = _make_scenario(test_config={
+            "parameters": {},
+            "resource_limits": {"timeout_seconds": 15},
+        })
+        engine = ExecutionEngine(session, _make_ingestion())
+        engine._execute_scenario(scenario)
+
+        call_kwargs = session.run_in_session.call_args
+        actual = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
+        assert actual == 15
+
+    def test_default_timeout_from_session_capped(self, tmp_path):
+        """Session default timeout of 120 exceeds cap → should be capped to 30."""
         session = _make_session(tmp_path)
         session.resource_caps = ResourceCaps(timeout_seconds=120)
         harness_stdout = _make_harness_output(steps=[_make_step_data()])
@@ -856,7 +878,12 @@ class TestScenarioExecution:
         engine._execute_scenario(scenario)
 
         call_kwargs = session.run_in_session.call_args
-        assert call_kwargs.kwargs.get("timeout") == 120 or call_kwargs[1].get("timeout") == 120
+        actual = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
+        assert actual == _SCENARIO_TIMEOUT_CAP
+
+    def test_scenario_timeout_cap_value(self):
+        """_SCENARIO_TIMEOUT_CAP should be 30 seconds."""
+        assert _SCENARIO_TIMEOUT_CAP == 30
 
     def test_js_category_executed_via_node(self, tmp_path):
         session = _make_session(tmp_path)

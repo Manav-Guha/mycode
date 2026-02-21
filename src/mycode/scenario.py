@@ -799,6 +799,22 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             if match.profile is not None and match.profile.server_framework:
                 server_framework_deps.append(match.dependency_name)
 
+        # Deduplication: when multiple packages share the same component library
+        # profile (e.g. langchain, langchain-core, langchain-community all map to
+        # "langchain"), generate one set of scenarios covering the family, not one
+        # per package.  We track which profile names have been seen, and collect
+        # all related dependency names into the first scenario's target_dependencies.
+        seen_profiles: set[str] = set()
+        # Map profile_name → list of dep names, for building target_dependencies
+        profile_dep_names: dict[str, list[str]] = {}
+        for match in recognized:
+            profile = match.profile
+            assert profile is not None
+            pname = profile.name
+            if pname not in profile_dep_names:
+                profile_dep_names[pname] = []
+            profile_dep_names[pname].append(match.dependency_name)
+
         # 1. Profile-based scenarios from stress_test_templates
         for match in recognized:
             profile = match.profile
@@ -808,6 +824,13 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             # Rendering stress tests require a browser environment.
             if profile.browser_only:
                 continue
+
+            # Deduplicate: only generate scenarios for the first match per profile
+            if profile.name in seen_profiles:
+                continue
+            seen_profiles.add(profile.name)
+
+            all_dep_names = profile_dep_names[profile.name]
 
             for template in profile.stress_test_templates:
                 cat = template.get("category", "")
@@ -825,7 +848,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                     name=f"{profile.name}_{template['name']}",
                     category=cat,
                     description=template.get("description", ""),
-                    target_dependencies=[match.dependency_name],
+                    target_dependencies=all_dep_names,
                     test_config=tc,
                     expected_behavior=template.get("expected_behavior", ""),
                     failure_indicators=template.get("failure_indicators", []),
@@ -834,6 +857,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 ))
 
         # 2. Failure-mode scenarios for critical/high severity issues
+        seen_fm_profiles: set[str] = set()
         for match in recognized:
             profile = match.profile
             assert profile is not None
@@ -847,6 +871,13 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             # nothing to call without importing user code)
             if profile.server_framework:
                 continue
+
+            # Deduplicate: only generate failure-mode scenarios once per profile
+            if profile.name in seen_fm_profiles:
+                continue
+            seen_fm_profiles.add(profile.name)
+
+            all_dep_names = profile_dep_names[profile.name]
 
             for mode in profile.known_failure_modes:
                 if mode.get("severity") not in ("critical", "high"):
@@ -865,7 +896,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                         f"Test for known failure mode: {mode.get('description', '')}. "
                         f"Trigger: {mode.get('trigger_conditions', 'N/A')}"
                     ),
-                    target_dependencies=[match.dependency_name],
+                    target_dependencies=all_dep_names,
                     test_config=fm_config,
                     expected_behavior="Known failure mode should be detected or mitigated.",
                     failure_indicators=[mode["name"]],
@@ -1125,6 +1156,21 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 f"Server framework deps ({dep_list}): library-specific tests "
                 f"use synthetic workloads instead of importing user code to "
                 f"avoid blocking on server startup."
+            )
+
+        # Add warning for deduplicated dependency families
+        deduped_families = {
+            pname: deps for pname, deps in profile_dep_names.items()
+            if len(deps) > 1
+        }
+        if deduped_families:
+            parts = [
+                f"{pname} ({', '.join(deps)})"
+                for pname, deps in sorted(deduped_families.items())
+            ]
+            warnings.append(
+                f"Related packages sharing a profile were deduplicated: "
+                f"{'; '.join(parts)}. One set of scenarios covers each family."
             )
 
         return ScenarioGeneratorResult(

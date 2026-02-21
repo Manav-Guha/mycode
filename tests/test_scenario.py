@@ -1883,3 +1883,131 @@ class TestServerFrameworkHandling:
         library = ComponentLibrary()
         pandas_profile = library.get_profile("python", "pandas")
         assert pandas_profile.server_framework is False
+
+
+class TestProfileDeduplication:
+    """Test that related packages sharing a profile produce one set of scenarios."""
+
+    def test_duplicate_profiles_deduplicated(self):
+        """langchain, langchain-core, langchain-community → one set of scenarios."""
+        profile = _make_profile("langchain", "ai_framework")
+        matches = [
+            ProfileMatch(dependency_name="langchain", profile=profile),
+            ProfileMatch(dependency_name="langchain-core", profile=profile),
+            ProfileMatch(dependency_name="langchain-community", profile=profile),
+        ]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An AI app", "python")
+
+        # Only one set of profile-based scenarios, not 3x
+        langchain_scenarios = [
+            s for s in result.scenarios if s.name.startswith("langchain_")
+        ]
+        # _make_profile has 2 stress_test_templates + 1 failure mode
+        template_scenarios = [
+            s for s in langchain_scenarios if not s.name.endswith("_check")
+        ]
+        failure_scenarios = [
+            s for s in langchain_scenarios if s.name.endswith("_check")
+        ]
+        assert len(template_scenarios) == 2, (
+            f"Expected 2 template scenarios, got {len(template_scenarios)}: "
+            f"{[s.name for s in template_scenarios]}"
+        )
+        assert len(failure_scenarios) == 1, (
+            f"Expected 1 failure scenario, got {len(failure_scenarios)}: "
+            f"{[s.name for s in failure_scenarios]}"
+        )
+
+    def test_deduplicated_scenarios_list_all_dep_names(self):
+        """Deduplicated scenarios should list all related dep names in target_dependencies."""
+        profile = _make_profile("langchain", "ai_framework")
+        matches = [
+            ProfileMatch(dependency_name="langchain", profile=profile),
+            ProfileMatch(dependency_name="langchain-core", profile=profile),
+            ProfileMatch(dependency_name="langchain-community", profile=profile),
+        ]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An AI app", "python")
+
+        langchain_scenarios = [
+            s for s in result.scenarios if s.name.startswith("langchain_")
+        ]
+        for s in langchain_scenarios:
+            assert set(s.target_dependencies) == {
+                "langchain", "langchain-core", "langchain-community"
+            }, f"Scenario '{s.name}' should list all 3 dep names"
+
+    def test_dedup_warning_emitted(self):
+        """When profiles are deduplicated, a warning should be emitted."""
+        profile = _make_profile("langchain", "ai_framework")
+        matches = [
+            ProfileMatch(dependency_name="langchain", profile=profile),
+            ProfileMatch(dependency_name="langchain-core", profile=profile),
+        ]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An AI app", "python")
+
+        dedup_warnings = [w for w in result.warnings if "deduplicated" in w]
+        assert len(dedup_warnings) == 1
+        assert "langchain" in dedup_warnings[0]
+
+    def test_no_dedup_warning_for_unique_profiles(self):
+        """No dedup warning when each dep has a unique profile."""
+        flask_profile = _make_profile("flask", "web_framework")
+        pandas_profile = _make_profile("pandas", "data_processing")
+        matches = [
+            ProfileMatch(dependency_name="flask", profile=flask_profile),
+            ProfileMatch(dependency_name="pandas", profile=pandas_profile),
+        ]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python")
+
+        dedup_warnings = [w for w in result.warnings if "deduplicated" in w]
+        assert len(dedup_warnings) == 0
+
+    def test_unique_profiles_not_affected(self):
+        """Unique profiles still generate their own scenarios normally."""
+        flask_profile = _make_profile("flask", "web_framework")
+        pandas_profile = _make_profile("pandas", "data_processing")
+        matches = [
+            ProfileMatch(dependency_name="flask", profile=flask_profile),
+            ProfileMatch(dependency_name="pandas", profile=pandas_profile),
+        ]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python")
+
+        flask_scenarios = [s for s in result.scenarios if s.name.startswith("flask_")]
+        pandas_scenarios = [s for s in result.scenarios if s.name.startswith("pandas_")]
+        assert len(flask_scenarios) >= 2
+        assert len(pandas_scenarios) >= 2

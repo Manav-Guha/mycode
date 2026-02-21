@@ -29,6 +29,10 @@ _RESULTS_END = "__MYCODE_RESULTS_END__"
 # Truncation limits
 _SNIPPET_MAX = 2000
 
+# Hard per-scenario timeout cap — prevents any single scenario from hanging
+# the entire run, regardless of what resource_limits say.
+_SCENARIO_TIMEOUT_CAP = 30
+
 # JavaScript-specific categories — executed via Node.js harness
 _JS_CATEGORIES = frozenset({
     "async_failures",
@@ -219,6 +223,8 @@ class ExecutionEngine:
         timeout = resource_limits.get(
             "timeout_seconds", self.session.resource_caps.timeout_seconds,
         )
+        # Enforce hard cap — no single scenario may exceed _SCENARIO_TIMEOUT_CAP
+        timeout = min(timeout, _SCENARIO_TIMEOUT_CAP)
 
         start = time.perf_counter()
 
