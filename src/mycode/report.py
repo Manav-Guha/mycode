@@ -686,34 +686,56 @@ class ReportGenerator:
                 f"under the conditions we tested."
             )
 
-        # ── Top findings (up to 3, one per scenario) ──
-        items: list[str] = []
-        seen_scenarios: set[str] = set()
+        # ── Top findings (up to 3, prioritized, one per scenario) ──
+        #
+        # Priority order: resource cap hits first, then memory degradation,
+        # then execution time degradation, then other findings.
+        # This ensures the most impactful items surface first.
 
-        # Degradation points first — pick the most impactful metric per scenario
-        for dp in report.degradation_points:
-            if len(items) >= 3:
-                break
-            if dp.scenario_name in seen_scenarios:
-                continue
-            seen_scenarios.add(dp.scenario_name)
-            items.append(self._translate_degradation(dp, operational_intent))
+        # Build a list of (priority, scenario_name, translated_text)
+        candidates: list[tuple[int, str, str]] = []
 
-        # Then findings — skip scenarios already covered by degradation
+        # Critical/warning findings (resource caps, failures)
         for f in report.findings:
-            if len(items) >= 3:
-                break
             if f.severity == "info":
                 continue
             scenario_name = (
                 f.title.split(": ", 1)[-1] if ": " in f.title else ""
             )
+            translated = self._translate_finding(f, project_ref)
+            if translated:
+                # Resource cap hits get priority 0, other criticals 1, warnings 2
+                if "resource" in f.title.lower() or f.category == "edge_case_input":
+                    prio = 0
+                elif f.severity == "critical":
+                    prio = 1
+                else:
+                    prio = 2
+                candidates.append((prio, scenario_name, translated))
+
+        # Degradation points
+        for dp in report.degradation_points:
+            translated = self._translate_degradation(dp, project_ref)
+            # Memory degradation at priority 1, execution time at 2
+            if dp.metric == "memory_peak_mb":
+                prio = 1
+            elif dp.metric == "error_count":
+                prio = 1
+            else:
+                prio = 2
+            candidates.append((prio, dp.scenario_name, translated))
+
+        # Sort by priority, then pick top 3 (one per scenario)
+        candidates.sort(key=lambda c: c[0])
+        items: list[str] = []
+        seen_scenarios: set[str] = set()
+        for _prio, scenario_name, translated in candidates:
+            if len(items) >= 3:
+                break
             if scenario_name in seen_scenarios:
                 continue
             seen_scenarios.add(scenario_name)
-            translated = self._translate_finding(f, operational_intent)
-            if translated:
-                items.append(translated)
+            items.append(translated)
 
         if items:
             lines.append("")
@@ -730,14 +752,18 @@ class ReportGenerator:
         return "\n".join(lines)
 
     def _translate_degradation(
-        self, dp: DegradationPoint, operational_intent: str,
+        self, dp: DegradationPoint, project_ref: str,
     ) -> str:
         """Translate a degradation point into plain language.
 
         Reads the actual curve data to describe what happens at the
         breaking point in user terms, not just name it.
+        ``project_ref`` is woven into the activity phrase (e.g.
+        "your incident matching system").
         """
-        activity = _describe_scenario(dp.scenario_name, operational_intent)
+        activity = _describe_scenario(dp.scenario_name)
+        if activity:
+            activity = f"{project_ref} is {activity}"
 
         first_val = dp.steps[0][1] if dp.steps else 0.0
         last_val = dp.steps[-1][1] if dp.steps else 0.0
@@ -780,15 +806,21 @@ class ReportGenerator:
         return f"{impact[0].upper()}{impact[1:]}."
 
     def _translate_finding(
-        self, f: Finding, operational_intent: str,
+        self, f: Finding, project_ref: str,
     ) -> str:
-        """Translate a finding into plain language."""
+        """Translate a finding into plain language.
+
+        ``project_ref`` is woven into the description (e.g.
+        "your incident matching system").
+        """
         # Extract scenario name from finding title
         scenario_name = f.title.split(": ", 1)[-1] if ": " in f.title else ""
-        activity = _describe_scenario(scenario_name, operational_intent)
+        activity = _describe_scenario(scenario_name)
+        if activity:
+            activity = f"{project_ref} is {activity}"
 
         if f.category == "concurrent_execution":
-            ctx = activity or "handling multiple users at once"
+            ctx = activity or f"{project_ref} is handling multiple users"
             if "failed" in f.title.lower():
                 return f"When {ctx}, the system fails."
             return (
@@ -797,12 +829,12 @@ class ReportGenerator:
 
         if f.category == "edge_case_input":
             return (
-                "When given unexpected or unusual input, the code crashes "
-                "instead of handling it gracefully."
+                f"When {project_ref} receives unexpected or unusual "
+                f"input, the code crashes instead of handling it gracefully."
             )
 
         if f.category == "data_volume_scaling":
-            ctx = activity or "processing larger amounts of data"
+            ctx = activity or f"{project_ref} is processing larger data"
             if "resource" in f.title.lower():
                 return f"When {ctx}, the system hits safety limits."
             if f._error_count > 0:
@@ -813,7 +845,7 @@ class ReportGenerator:
             return f"When {ctx}, performance degrades."
 
         if f.category == "memory_profiling":
-            ctx = activity or "running over extended periods"
+            ctx = activity or f"{project_ref} is running over time"
             return (
                 f"During {ctx}, memory keeps growing and could "
                 f"eventually run out."
@@ -1268,7 +1300,7 @@ def _human_time(ms: float) -> str:
     return "over a minute"
 
 
-def _describe_scenario(scenario_name: str, operational_intent: str = "") -> str:
+def _describe_scenario(scenario_name: str) -> str:
     """Map a scenario name to a user-meaningful activity description.
 
     Tries to match the template portion of the scenario name against

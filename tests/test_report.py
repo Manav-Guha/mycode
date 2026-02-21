@@ -1328,14 +1328,18 @@ class TestPlainSummary:
     def test_includes_operational_intent(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Project ref derived from intent appears in the summary."""
+        """Project ref derived from intent woven into activity phrases."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
             operational_intent="Personal budget tracker for daily use",
         )
 
-        assert "budget tracker" in report.plain_summary.lower()
+        lower = report.plain_summary.lower()
+        # Project ref should appear in the opener AND in bullet activities
+        assert "budget tracker" in lower
+        # Should be woven in, not just mentioned once in the opener
+        assert lower.count("budget tracker") >= 2
 
     def test_degradation_translated(
         self, degrading_execution, simple_ingestion, profile_matches,
@@ -1414,7 +1418,7 @@ class TestPlainSummary:
     def test_no_intent_still_works(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Works without operational_intent — uses 'your project'."""
+        """Works without operational_intent — uses 'your project' throughout."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
@@ -1423,6 +1427,8 @@ class TestPlainSummary:
 
         assert report.plain_summary
         assert "your project" in report.plain_summary.lower()
+        # "your project" should appear in bullets too
+        assert report.plain_summary.lower().count("your project") >= 2
 
     def test_empty_execution(self):
         """No scenarios → no plain summary generated."""
@@ -1435,7 +1441,7 @@ class TestPlainSummary:
 
         assert report.plain_summary == ""
 
-    def test_impact_uses_real_time_not_multiplier(
+    def test_impact_uses_real_terms_not_multiplier(
         self, degrading_execution, simple_ingestion, profile_matches,
     ):
         """Impact described in real terms, not multipliers."""
@@ -1443,11 +1449,11 @@ class TestPlainSummary:
         report = gen.generate(degrading_execution, simple_ingestion, profile_matches)
 
         lower = report.plain_summary.lower()
-        # Should have real-terms descriptions from the _human_time scale
+        # Should have real-terms descriptions (time bands or concrete values)
         assert any(
             phrase in lower
             for phrase in ("instant", "fast", "slow", "delay", "second",
-                           "minute", "ms", "MB")
+                           "minute", "ms", "mb")
         )
         # Should NOT have multiplier patterns like "80x" or "204x slower"
         import re
@@ -1531,9 +1537,10 @@ class TestPlainSummary:
         )
 
         lower = report.plain_summary.lower()
-        # Should describe what happens at the breaking point
+        # Should describe what happens at the breaking point in user terms
         assert "simultaneous users" in lower
-        assert "slowing down" in lower or "slow" in lower
+        # Memory is prioritized over time — should describe climbing or MB
+        assert "climbing" in lower or "mb" in lower
 
     def test_memory_projects_multi_user(self):
         """Memory findings project multi-user impact."""
@@ -1562,6 +1569,68 @@ class TestPlainSummary:
         assert "72mb" in lower
         assert "10 users" in lower
         assert "720mb" in lower
+
+    def test_priority_caps_before_memory_before_time(self):
+        """Resource caps appear first, then memory, then execution time."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                # Execution time degradation only (low priority)
+                # Memory stays flat so only time degrades
+                ScenarioResult(
+                    scenario_name="flask_large_payload_response",
+                    scenario_category="data_volume_scaling",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="data_size_1", execution_time_ms=0.13, memory_peak_mb=5.0),
+                        StepResult(step_name="data_size_10000", execution_time_ms=770.0, memory_peak_mb=5.5),
+                    ],
+                    total_errors=0,
+                ),
+                # Memory degradation (medium priority)
+                ScenarioResult(
+                    scenario_name="streamlit_cache_memory_growth",
+                    scenario_category="memory_profiling",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="batch_0", execution_time_ms=5.0, memory_peak_mb=0.08),
+                        StepResult(step_name="batch_50", execution_time_ms=5.0, memory_peak_mb=72.0),
+                    ],
+                    total_errors=0,
+                ),
+                # Resource cap hit (highest priority)
+                ScenarioResult(
+                    scenario_name="requests_timeout_behavior",
+                    scenario_category="edge_case_input",
+                    status="failed",
+                    summary="Connection timeout not handled",
+                    total_errors=3,
+                    resource_cap_hit=True,
+                    steps=[
+                        StepResult(step_name="edge_timeout", execution_time_ms=30000.0,
+                                   resource_cap_hit="timeout"),
+                    ],
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=5),
+            [],
+        )
+
+        # Extract the bullet lines
+        bullets = [
+            line for line in report.plain_summary.split("\n")
+            if line.startswith("- ")
+        ]
+        assert len(bullets) == 3
+        # First bullet should be about the resource cap / edge case crash
+        assert "crash" in bullets[0].lower() or "unusual" in bullets[0].lower()
+        # Second should be about memory
+        assert "memory" in bullets[1].lower()
+        # Third should be about response time
+        assert "response time" in bullets[2].lower()
 
     def test_extract_project_ref(self):
         """_extract_project_ref extracts short noun phrases."""
