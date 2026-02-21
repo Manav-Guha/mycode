@@ -320,23 +320,27 @@ class TestConversationalInterfaceOffline:
         io = MockIO(responses=[
             "It's a web app for tracking expenses",
             "I care most about handling lots of data",
+            "Expense Tracker",
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
-        # Two prompts should have been displayed
-        assert len(io.prompts) == 2
+        # Three prompts: turn 1, turn 2, project name
+        assert len(io.prompts) == 3
         # First prompt asks about the project
         assert "project" in io.prompts[0].lower() or "tell me" in io.prompts[0].lower()
         # Second prompt asks about stress priorities
         assert "stress" in io.prompts[1].lower() or "matters" in io.prompts[1].lower()
+        # Third prompt asks for a short project name
+        assert "call this project" in io.prompts[2].lower()
 
         # Intent should capture responses
         assert "expenses" in result.intent.project_description.lower()
         assert "data" in result.intent.stress_priorities.lower()
+        assert result.intent.project_name == "Expense Tracker"
 
     def test_offline_summary_displayed(self, simple_ingestion):
-        io = MockIO(responses=["app", "speed"])
+        io = MockIO(responses=["app", "speed", ""])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
 
@@ -345,7 +349,7 @@ class TestConversationalInterfaceOffline:
         assert result.project_summary
 
     def test_offline_no_llm_calls(self, simple_ingestion):
-        io = MockIO(responses=["my app", "speed"])
+        io = MockIO(responses=["my app", "speed", ""])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
 
@@ -354,7 +358,7 @@ class TestConversationalInterfaceOffline:
         assert result.token_usage["output_tokens"] == 0
 
     def test_offline_empty_responses(self, simple_ingestion):
-        io = MockIO(responses=["", ""])
+        io = MockIO(responses=["", "", ""])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
 
@@ -364,12 +368,24 @@ class TestConversationalInterfaceOffline:
         assert isinstance(result.intent, OperationalIntent)
 
     def test_offline_intent_raw_responses_stored(self, simple_ingestion):
-        io = MockIO(responses=["desc here", "priorities here"])
+        io = MockIO(responses=["desc here", "priorities here", ""])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
 
         assert result.intent.raw_responses["turn_1"] == "desc here"
         assert result.intent.raw_responses["turn_2"] == "priorities here"
+
+    def test_project_name_empty_fallback(self, simple_ingestion):
+        io = MockIO(responses=["desc", "priorities", ""])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion)
+        assert result.intent.project_name == ""
+
+    def test_project_name_capped_at_50_chars(self, simple_ingestion):
+        io = MockIO(responses=["desc", "priorities", "a" * 80])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion)
+        assert len(result.intent.project_name) <= 50
 
 
 # ── LLM-Backed Conversation Tests ──
@@ -404,7 +420,7 @@ class TestConversationalInterfaceLLM:
 
     def test_llm_generates_turn1_question(self, simple_ingestion):
         interface, io = self._make_interface_with_mock_backend(
-            responses=["It tracks expenses", "speed and reliability"],
+            responses=["It tracks expenses", "speed and reliability", "my app"],
             llm_responses=[
                 '{"question": "I see you built a Flask app! What does it do and who will use it?"}',
                 '{"question": "Got it — how many users do you expect, and what worries you most?"}',
@@ -423,7 +439,7 @@ class TestConversationalInterfaceLLM:
 
     def test_llm_token_usage_tracked(self, simple_ingestion):
         interface, _ = self._make_interface_with_mock_backend(
-            responses=["app desc", "priorities"],
+            responses=["app desc", "priorities", ""],
             llm_responses=[
                 '{"question": "What does your app do?"}',
                 '{"question": "What matters most?"}',
@@ -443,6 +459,7 @@ class TestConversationalInterfaceLLM:
             responses=[
                 "It's a budgeting app for freelancers",
                 "Handling large CSV imports is critical",
+                "Budget App",
             ],
             llm_responses=[
                 '{"question": "Tell me about your project"}',
@@ -463,7 +480,7 @@ class TestConversationalInterfaceLLM:
         assert "budget" in result.intent.summary.lower()
 
     def test_llm_failure_falls_back_to_offline(self, simple_ingestion):
-        io = MockIO(responses=["my app", "speed"])
+        io = MockIO(responses=["my app", "speed", ""])
         config = LLMConfig(api_key="test-key")
         interface = ConversationalInterface(
             llm_config=config, offline=False, io=io,
@@ -478,8 +495,8 @@ class TestConversationalInterfaceLLM:
 
         result = interface.run(simple_ingestion)
 
-        # Should still complete with offline questions
-        assert len(io.prompts) == 2
+        # Should still complete with offline questions + project name
+        assert len(io.prompts) == 3
         assert "project" in io.prompts[0].lower() or "tell me" in io.prompts[0].lower()
         # Warnings should mention LLM failure
         assert any("llm" in w.lower() or "unavailable" in w.lower()
@@ -489,7 +506,7 @@ class TestConversationalInterfaceLLM:
 
     def test_llm_bad_json_falls_back(self, simple_ingestion):
         interface, io = self._make_interface_with_mock_backend(
-            responses=["my app", "speed"],
+            responses=["my app", "speed", ""],
             llm_responses=[
                 "This is not JSON at all",
                 "Also not JSON",
@@ -499,7 +516,7 @@ class TestConversationalInterfaceLLM:
         result = interface.run(simple_ingestion)
 
         # Should fall back to offline questions and still work
-        assert len(io.prompts) == 2
+        assert len(io.prompts) == 3
         assert result.intent.project_description == "my app"
 
 
@@ -648,7 +665,7 @@ class TestInterfaceLLMInit:
     """Tests for LLM initialization edge cases."""
 
     def test_no_api_key_falls_back_to_offline(self):
-        io = MockIO(responses=["app", "speed"])
+        io = MockIO(responses=["app", "speed", ""])
         # No API key — should fall back to offline
         interface = ConversationalInterface(
             llm_config=LLMConfig(), offline=False, io=io,

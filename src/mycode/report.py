@@ -287,6 +287,7 @@ class ReportGenerator:
         ingestion: IngestionResult,
         profile_matches: list[ProfileMatch],
         operational_intent: str = "",
+        project_name: str = "",
     ) -> DiagnosticReport:
         """Generate a diagnostic report.
 
@@ -326,7 +327,7 @@ class ReportGenerator:
 
         # 4b. Generate plain-language summary for non-technical readers
         report.plain_summary = self._generate_plain_summary(
-            report, operational_intent,
+            report, operational_intent, project_name,
         )
 
         # 5. Generate narrative summary
@@ -649,6 +650,7 @@ class ReportGenerator:
         self,
         report: DiagnosticReport,
         operational_intent: str,
+        project_name: str = "",
     ) -> str:
         """Generate a plain-language summary for non-technical readers.
 
@@ -660,11 +662,14 @@ class ReportGenerator:
 
         lines: list[str] = []
 
-        # ── Project reference from user's intent ──
-        project_ref = "your project"
-        if operational_intent:
+        # ── Project reference ──
+        if project_name:
+            project_ref = f"your {project_name}"
+        elif operational_intent:
             ref = _extract_project_ref(operational_intent)
             project_ref = f"your {ref}"
+        else:
+            project_ref = "your project"
 
         # ── Overall assessment ──
         critical = [f for f in report.findings if f.severity == "critical"]

@@ -97,6 +97,7 @@ class OperationalIntent:
 
     summary: str = ""
     project_description: str = ""
+    project_name: str = ""
     audience: str = ""
     operating_conditions: str = ""
     stress_priorities: str = ""
@@ -342,10 +343,14 @@ class ConversationalInterface:
         # Turn 2: Confirm understanding and ask about stress priorities
         turn2_response = self._run_turn_2(summary, turn1_response, warnings)
 
+        # Ask for a short project name
+        project_name = self._ask_project_name()
+
         # Synthesize into structured intent
         intent = self._synthesize_intent(
             summary, turn1_response, turn2_response, warnings,
         )
+        intent.project_name = project_name
         result.intent = intent
         result.warnings = warnings
         result.token_usage = {
@@ -472,6 +477,21 @@ class ConversationalInterface:
             )
 
         return response
+
+    def _ask_project_name(self) -> str:
+        """Ask the user for a short project name."""
+        response = self._io.prompt(
+            "What do you call this project? "
+            "(a short name like 'my budget app' or 'incident tracker')"
+        )
+        name = response.strip()
+        if len(name) < 2:
+            return ""
+        # Cap at 50 chars, break at word boundary
+        if len(name) > 50:
+            cut = name[:50].rfind(" ")
+            name = name[:cut] if cut > 10 else name[:50]
+        return name
 
     # ── LLM-Powered Question Generation ──
 

@@ -570,6 +570,7 @@ class TestPipelineConversation:
         io = MockIO(responses=[
             "A simple data tracker app",
             "Speed and data handling",
+            "My App",  # project name
             "y",  # approve all scenarios
         ])
         config = PipelineConfig(
@@ -807,6 +808,7 @@ class TestPipelineFullFlow:
         io = MockIO(responses=[
             "It's a personal expense tracker web app",
             "I care about handling lots of entries and speed",
+            "Expense Tracker",  # project name
             "y",  # approve all scenarios
         ])
         data_dir = tmp_path / "recordings"

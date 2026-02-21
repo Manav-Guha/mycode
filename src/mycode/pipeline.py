@@ -351,7 +351,9 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             )
 
             # ── Stage 5: Conversational Interface ──
-            intent = _run_conversation(ingestion, config, language, result)
+            intent, project_name = _run_conversation(
+                ingestion, config, language, result,
+            )
 
             # Record conversation
             if result.interface_result:
@@ -387,7 +389,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             if result.execution is not None:
                 _run_report_generation(
                     result.execution, ingestion, matches, intent,
-                    config, result,
+                    project_name, config, result,
                 )
 
                 # Record report
@@ -549,11 +551,12 @@ def _run_conversation(
     config: PipelineConfig,
     language: str,
     result: PipelineResult,
-) -> str:
+) -> tuple[str, str]:
     """Stage 5: Run conversational interface to extract operational intent.
 
-    Returns the intent string for the Scenario Generator.  If
-    ``config.operational_intent`` is provided, the conversation is skipped.
+    Returns ``(intent_string, project_name)`` for downstream stages.
+    If ``config.operational_intent`` is provided, the conversation is
+    skipped and ``project_name`` is empty.
     """
     stage_start = time.monotonic()
 
@@ -564,7 +567,7 @@ def _run_conversation(
             duration_ms=_elapsed_ms(stage_start),
         ))
         logger.info("Conversation skipped — operational intent provided.")
-        return config.operational_intent
+        return config.operational_intent, ""
 
     try:
         io = config.io or TerminalIO()
@@ -580,6 +583,7 @@ def _run_conversation(
             result.warnings.extend(interface_result.warnings)
 
         intent_string = interface_result.intent.as_intent_string()
+        project_name = interface_result.intent.project_name
         if not intent_string:
             intent_string = _DEFAULT_INTENT
             result.warnings.append(
@@ -591,7 +595,7 @@ def _run_conversation(
             duration_ms=_elapsed_ms(stage_start),
         ))
         logger.info("Conversation complete, intent: %s", intent_string[:80])
-        return intent_string
+        return intent_string, project_name
 
     except Exception as exc:
         # Conversation failure is non-fatal — fall back to default intent
@@ -605,7 +609,7 @@ def _run_conversation(
             "Conversation failed. Using generic stress testing profile."
         )
         logger.exception("Conversation failed")
-        return _DEFAULT_INTENT
+        return _DEFAULT_INTENT, ""
 
 
 def _run_scenario_generation(
@@ -778,6 +782,7 @@ def _run_report_generation(
     ingestion: IngestionResult,
     matches: list[ProfileMatch],
     intent: str,
+    project_name: str,
     config: PipelineConfig,
     result: PipelineResult,
 ) -> None:
@@ -793,6 +798,7 @@ def _run_report_generation(
             ingestion=ingestion,
             profile_matches=matches,
             operational_intent=intent,
+            project_name=project_name,
         )
         result.report = report
 

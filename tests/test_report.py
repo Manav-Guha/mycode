@@ -1330,11 +1330,12 @@ class TestPlainSummary:
     def test_includes_operational_intent(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Project ref derived from intent woven into activity phrases."""
+        """Project ref derived from project_name woven into activity phrases."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
             operational_intent="Personal budget tracker for daily use",
+            project_name="budget tracker",
         )
 
         lower = report.plain_summary.lower()
@@ -1425,12 +1426,25 @@ class TestPlainSummary:
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
             operational_intent="",
+            project_name="",
         )
 
         assert report.plain_summary
         assert "your project" in report.plain_summary.lower()
         # "your project" should appear in bullets too
         assert report.plain_summary.lower().count("your project") >= 2
+
+    def test_project_name_used_over_extraction(
+        self, failing_execution, simple_ingestion, profile_matches,
+    ):
+        """When project_name is provided, it's used instead of extracting from intent."""
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            failing_execution, simple_ingestion, profile_matches,
+            operational_intent="A long complex description that would extract badly",
+            project_name="incident tracker",
+        )
+        assert "incident tracker" in report.plain_summary.lower()
 
     def test_empty_execution(self):
         """No scenarios → no plain summary generated."""
