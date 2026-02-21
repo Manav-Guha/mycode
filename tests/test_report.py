@@ -29,6 +29,7 @@ from mycode.report import (
     _describe_scenario,
     _describe_step,
     _extract_project_ref,
+    _format_ms,
     _human_metric,
     _human_time,
 )
@@ -1360,8 +1361,8 @@ class TestPlainSummary:
         assert "- " in report.plain_summary
         assert "when " in report.plain_summary.lower()
 
-    def test_max_five_items(self):
-        """Only top 5 findings/degradation shown."""
+    def test_max_three_items(self):
+        """Only top 3 findings/degradation shown."""
         execution = ExecutionEngineResult(
             scenario_results=[
                 ScenarioResult(
@@ -1385,7 +1386,7 @@ class TestPlainSummary:
         )
 
         bullet_count = report.plain_summary.count("\n- ")
-        assert bullet_count <= 5
+        assert bullet_count <= 3
 
     def test_closing_line_present(
         self, failing_execution, simple_ingestion, profile_matches,
@@ -1442,10 +1443,11 @@ class TestPlainSummary:
         report = gen.generate(degrading_execution, simple_ingestion, profile_matches)
 
         lower = report.plain_summary.lower()
-        # Should have real-terms time descriptions
+        # Should have real-terms descriptions from the _human_time scale
         assert any(
             phrase in lower
-            for phrase in ("instant", "second", "minute")
+            for phrase in ("instant", "fast", "slow", "delay", "second",
+                           "minute", "ms", "MB")
         )
         # Should NOT have multiplier patterns like "80x" or "204x slower"
         import re
@@ -1477,6 +1479,90 @@ class TestPlainSummary:
         lower = report.plain_summary.lower()
         assert "simultaneous users" in lower
 
+    def test_one_bullet_per_scenario(self):
+        """Same scenario with multiple degradation metrics → only one bullet."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="flask_concurrent_request_load",
+                    scenario_category="concurrent_execution",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="concurrent_1", execution_time_ms=10.0, memory_peak_mb=5.0),
+                        StepResult(step_name="concurrent_50", execution_time_ms=5000.0, memory_peak_mb=200.0),
+                    ],
+                    total_errors=0,
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+
+        # Two degradation points (time + memory) but same scenario → 1 bullet
+        bullet_count = report.plain_summary.count("\n- ")
+        assert bullet_count == 1
+
+    def test_breaking_point_describes_impact(self):
+        """Breaking point includes what happens there, not just the label."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="flask_concurrent_request_load",
+                    scenario_category="concurrent_execution",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="concurrent_1", execution_time_ms=0.5, memory_peak_mb=5.0),
+                        StepResult(step_name="concurrent_10", execution_time_ms=50.0, memory_peak_mb=15.0),
+                        StepResult(step_name="concurrent_50", execution_time_ms=3000.0, memory_peak_mb=80.0),
+                    ],
+                    total_errors=0,
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+
+        lower = report.plain_summary.lower()
+        # Should describe what happens at the breaking point
+        assert "simultaneous users" in lower
+        assert "slowing down" in lower or "slow" in lower
+
+    def test_memory_projects_multi_user(self):
+        """Memory findings project multi-user impact."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="streamlit_cache_memory_growth",
+                    scenario_category="memory_profiling",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="batch_0", execution_time_ms=5.0, memory_peak_mb=7.0),
+                        StepResult(step_name="batch_50", execution_time_ms=5.0, memory_peak_mb=72.0),
+                    ],
+                    total_errors=0,
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+
+        lower = report.plain_summary.lower()
+        assert "72mb" in lower
+        assert "10 users" in lower
+        assert "720mb" in lower
+
     def test_extract_project_ref(self):
         """_extract_project_ref extracts short noun phrases."""
         # Strips "An" article, splits on " that "
@@ -1501,9 +1587,11 @@ class TestPlainSummaryHelpers:
     """Tests for plain summary module-level helpers."""
 
     def test_human_time(self):
-        assert _human_time(50) == "instant"
-        assert _human_time(500) == "under a second"
-        assert _human_time(2000) == "a few seconds"
+        assert _human_time(0.5) == "instant"
+        assert _human_time(50) == "fast"
+        assert _human_time(200) == "noticeable delay"
+        assert _human_time(800) == "slow"
+        assert _human_time(5000) == "very slow"
         assert "seconds" in _human_time(15000)
         assert _human_time(45000) == "about 30 seconds"
         assert _human_time(120000) == "over a minute"
@@ -1534,12 +1622,34 @@ class TestPlainSummaryHelpers:
         assert _describe_step("edge_none") == ""
         assert _describe_step("iteration_5") == ""
 
-    def test_describe_impact_time(self):
-        result = _describe_impact("execution_time_ms", 10.0, 5000.0)
+    def test_describe_impact_time_different_bands(self):
+        result = _describe_impact("execution_time_ms", 0.5, 5000.0)
         assert "instant" in result
-        assert "seconds" in result
+        assert "very slow" in result
 
-    def test_describe_impact_memory(self):
+    def test_describe_impact_time_same_band_uses_concrete(self):
+        """When both values are in the same band, use concrete ms values."""
+        result = _describe_impact("execution_time_ms", 10.0, 80.0)
+        assert "10ms" in result
+        assert "80ms" in result
+
+    def test_describe_impact_memory_projects_multi_user(self):
+        """Memory ≥50MB projects 10-user impact."""
         result = _describe_impact("memory_peak_mb", 5.0, 120.0)
         assert "5MB" in result
         assert "120MB" in result
+        assert "10 users" in result
+        assert "1200MB" in result
+
+    def test_describe_impact_memory_small_no_projection(self):
+        """Memory <50MB doesn't project multi-user."""
+        result = _describe_impact("memory_peak_mb", 5.0, 30.0)
+        assert "30MB" in result
+        assert "10 users" not in result
+
+    def test_format_ms(self):
+        assert _format_ms(0.16) == "0.16ms"
+        assert _format_ms(78.0) == "78ms"
+        assert _format_ms(770.0) == "770ms"
+        assert _format_ms(5000.0) == "5.0s"
+        assert _format_ms(120000.0) == "2.0min"

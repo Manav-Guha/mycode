@@ -686,32 +686,34 @@ class ReportGenerator:
                 f"under the conditions we tested."
             )
 
-        # ── Top findings (up to 5, deduplicated) ──
+        # ── Top findings (up to 3, one per scenario) ──
         items: list[str] = []
+        seen_scenarios: set[str] = set()
 
+        # Degradation points first — pick the most impactful metric per scenario
         for dp in report.degradation_points:
-            if len(items) >= 5:
+            if len(items) >= 3:
                 break
+            if dp.scenario_name in seen_scenarios:
+                continue
+            seen_scenarios.add(dp.scenario_name)
             items.append(self._translate_degradation(dp, operational_intent))
 
+        # Then findings — skip scenarios already covered by degradation
         for f in report.findings:
-            if len(items) >= 5:
+            if len(items) >= 3:
                 break
             if f.severity == "info":
                 continue
+            scenario_name = (
+                f.title.split(": ", 1)[-1] if ": " in f.title else ""
+            )
+            if scenario_name in seen_scenarios:
+                continue
+            seen_scenarios.add(scenario_name)
             translated = self._translate_finding(f, operational_intent)
             if translated:
                 items.append(translated)
-
-        # Deduplicate by first 40 chars
-        seen: set[str] = set()
-        unique: list[str] = []
-        for item in items:
-            key = item[:40].lower()
-            if key not in seen:
-                seen.add(key)
-                unique.append(item)
-        items = unique[:5]
 
         if items:
             lines.append("")
@@ -730,25 +732,51 @@ class ReportGenerator:
     def _translate_degradation(
         self, dp: DegradationPoint, operational_intent: str,
     ) -> str:
-        """Translate a degradation point into plain language."""
+        """Translate a degradation point into plain language.
+
+        Reads the actual curve data to describe what happens at the
+        breaking point in user terms, not just name it.
+        """
         activity = _describe_scenario(dp.scenario_name, operational_intent)
 
         first_val = dp.steps[0][1] if dp.steps else 0.0
         last_val = dp.steps[-1][1] if dp.steps else 0.0
         impact = _describe_impact(dp.metric, first_val, last_val)
 
-        # Translate breaking point step to user terms
-        scale = ""
-        if dp.breaking_point:
-            scale = _describe_step(dp.breaking_point)
+        # Describe what happens at the breaking point
+        breaking_desc = ""
+        if dp.breaking_point and len(dp.steps) >= 2:
+            step_desc = _describe_step(dp.breaking_point)
+            # Find the value at the breaking point
+            bp_val = None
+            for label, val in dp.steps:
+                if label == dp.breaking_point:
+                    bp_val = val
+                    break
+            if step_desc and bp_val is not None:
+                if dp.metric == "execution_time_ms":
+                    breaking_desc = (
+                        f"starts slowing down noticeably around "
+                        f"{step_desc} ({_format_ms(bp_val)})"
+                    )
+                elif dp.metric == "memory_peak_mb":
+                    breaking_desc = (
+                        f"starts climbing around {step_desc} "
+                        f"({bp_val:.0f}MB)"
+                    )
+                else:
+                    breaking_desc = f"starts around {step_desc}"
+            elif step_desc:
+                breaking_desc = (
+                    f"starts around {step_desc}"
+                )
 
-        if activity and scale:
-            return (
-                f"When {activity}, {impact} — starts breaking "
-                f"around {scale}."
-            )
+        if activity and breaking_desc:
+            return f"When {activity}, {impact} — {breaking_desc}."
         if activity:
             return f"When {activity}, {impact}."
+        if breaking_desc:
+            return f"{impact[0].upper()}{impact[1:]} — {breaking_desc}."
         return f"{impact[0].upper()}{impact[1:]}."
 
     def _translate_finding(
@@ -1217,13 +1245,21 @@ _TEMPLATE_DESCRIPTIONS: dict[str, str] = {
 
 
 def _human_time(ms: float) -> str:
-    """Convert milliseconds to natural language time description."""
-    if ms < 100:
+    """Convert milliseconds to natural language time description.
+
+    Uses a fine-grained scale so that values like 0.16ms and 78ms
+    don't both collapse to "instant".
+    """
+    if ms < 1:
         return "instant"
-    if ms < 1000:
-        return "under a second"
-    if ms < 5000:
-        return "a few seconds"
+    if ms < 100:
+        return "fast"
+    if ms < 500:
+        return "noticeable delay"
+    if ms < 2000:
+        return "slow"
+    if ms < 10000:
+        return "very slow"
     if ms < 30000:
         seconds = round(ms / 5000) * 5
         return f"about {seconds} seconds"
@@ -1308,19 +1344,52 @@ def _describe_step(step_name: str) -> str:
 
 
 def _describe_impact(metric: str, first_val: float, last_val: float) -> str:
-    """Describe the impact of a degradation in real terms."""
+    """Describe the impact of a degradation in real terms.
+
+    For timing: uses _human_time to convert both endpoints to natural
+    language so users see "from fast to very slow" instead of "204x".
+
+    For memory: projects multi-user impact when peak is significant.
+    """
     if metric == "execution_time_ms":
+        first_desc = _human_time(first_val)
+        last_desc = _human_time(last_val)
+        if first_desc == last_desc:
+            # Same band — fall back to concrete values
+            return (
+                f"response time goes from {_format_ms(first_val)} "
+                f"to {_format_ms(last_val)}"
+            )
         return (
-            f"response time goes from {_human_time(first_val)} "
-            f"to {_human_time(last_val)}"
+            f"response time goes from {first_desc} "
+            f"to {last_desc}"
         )
     if metric == "memory_peak_mb":
-        return (
-            f"memory usage grows from {first_val:.0f}MB to {last_val:.0f}MB"
+        base = (
+            f"memory grows from {first_val:.0f}MB to {last_val:.0f}MB"
         )
+        # Project multi-user impact for significant memory
+        if last_val >= 50:
+            projected = last_val * 10
+            base += (
+                f" — if 10 users are active, "
+                f"that's {projected:.0f}MB on your server"
+            )
+        return base
     if metric == "error_count":
         return f"errors jump from {int(first_val)} to {int(last_val)}"
     return f"{_human_metric(metric)} increases significantly"
+
+
+def _format_ms(ms: float) -> str:
+    """Format a millisecond value as a concrete human-readable string."""
+    if ms < 1:
+        return f"{ms:.2f}ms"
+    if ms < 1000:
+        return f"{ms:.0f}ms"
+    if ms < 60000:
+        return f"{ms / 1000:.1f}s"
+    return f"{ms / 60000:.1f}min"
 
 
 def _extract_project_ref(operational_intent: str) -> str:
