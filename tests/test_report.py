@@ -28,6 +28,7 @@ from mycode.report import (
     _describe_impact,
     _describe_scenario,
     _describe_step,
+    _extract_cap_type,
     _extract_project_ref,
     _format_ms,
     _human_metric,
@@ -1625,8 +1626,10 @@ class TestPlainSummary:
             if line.startswith("- ")
         ]
         assert len(bullets) == 3
-        # First bullet should be about the resource cap / edge case crash
-        assert "crash" in bullets[0].lower() or "unusual" in bullets[0].lower()
+        # First bullet should be about the resource cap / edge case
+        assert ("timed out" in bullets[0].lower()
+                or "crash" in bullets[0].lower()
+                or "unusual" in bullets[0].lower())
         # Second should be about memory
         assert "memory" in bullets[1].lower()
         # Third should be about response time
@@ -1650,6 +1653,22 @@ class TestPlainSummary:
         # Fallback for too-short input
         assert _extract_project_ref("") == "project"
         assert _extract_project_ref("ab") == "project"
+        # Truncates at arrow and strips parenthetical framework ref
+        assert _extract_project_ref(
+            "Incident Solution (Flask) \u2192 Matches user issues to known bugs"
+        ) == "Incident Solution"
+        # Truncates at ASCII arrow
+        assert _extract_project_ref(
+            "Budget App -> tracks expenses daily"
+        ) == "Budget App"
+        # Truncates at newline
+        assert _extract_project_ref(
+            "Task Manager\nBuilt with React and Node"
+        ) == "Task Manager"
+        # Strips em-dash separated description
+        assert _extract_project_ref(
+            "Sales Dashboard \u2014 shows monthly revenue"
+        ) == "Sales Dashboard"
 
 
 class TestPlainSummaryHelpers:
@@ -1722,3 +1741,47 @@ class TestPlainSummaryHelpers:
         assert _format_ms(770.0) == "770ms"
         assert _format_ms(5000.0) == "5.0s"
         assert _format_ms(120000.0) == "2.0min"
+
+    def test_extract_cap_type_timeout(self):
+        f = Finding(title="Resource limit hit: test", severity="critical",
+                    details="Caps hit: timeout")
+        assert "timed out" in _extract_cap_type(f)
+
+    def test_extract_cap_type_memory(self):
+        f = Finding(title="Resource limit hit: test", severity="critical",
+                    details="Caps hit: memory_cap")
+        assert "memory" in _extract_cap_type(f)
+
+    def test_extract_cap_type_unknown(self):
+        f = Finding(title="Some finding", severity="warning", details="")
+        assert _extract_cap_type(f) == ""
+
+    def test_extract_project_ref_arrow(self):
+        """Truncates at unicode arrow and strips parentheticals."""
+        ref = _extract_project_ref(
+            "Incident Solution (Flask) \u2192 Matches user issues"
+        )
+        assert ref == "Incident Solution"
+
+    def test_extract_project_ref_newline(self):
+        ref = _extract_project_ref("Task Manager\nBuilt with React")
+        assert ref == "Task Manager"
+
+    def test_finding_uses_actual_metrics(self):
+        """_translate_finding includes actual metric values, not vague phrases."""
+        gen = ReportGenerator(offline=True)
+        f = Finding(
+            title="Errors during: flask_concurrent_request_load",
+            severity="warning",
+            category="concurrent_execution",
+        )
+        f._execution_time_ms = 5000.0
+        f._peak_memory_mb = 200.0
+        f._error_count = 3
+        result = gen._translate_finding(f, "your project")
+        lower = result.lower()
+        # Should include actual metric data
+        assert "5.0s" in lower or "200mb" in lower or "3 errors" in lower
+        # Should NOT contain vague phrases
+        assert "things slow down" not in lower
+        assert "problems were detected" not in lower

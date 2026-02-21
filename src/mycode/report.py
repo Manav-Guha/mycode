@@ -808,7 +808,7 @@ class ReportGenerator:
     def _translate_finding(
         self, f: Finding, project_ref: str,
     ) -> str:
-        """Translate a finding into plain language.
+        """Translate a finding into plain language using actual metric data.
 
         ``project_ref`` is woven into the description (e.g.
         "your incident matching system").
@@ -823,11 +823,28 @@ class ReportGenerator:
             ctx = activity or f"{project_ref} is handling multiple users"
             if "failed" in f.title.lower():
                 return f"When {ctx}, the system fails."
-            return (
-                f"When {ctx}, things slow down or hit resource limits."
-            )
+            # Use actual metrics instead of vague "things slow down"
+            parts = []
+            if f._execution_time_ms > 0:
+                parts.append(
+                    f"response time hit {_format_ms(f._execution_time_ms)}"
+                )
+            if f._peak_memory_mb > 0:
+                parts.append(f"memory reached {f._peak_memory_mb:.0f}MB")
+            if f._error_count > 0:
+                parts.append(f"{f._error_count} errors occurred")
+            if parts:
+                return f"When {ctx}, {' and '.join(parts)}."
+            return f"When {ctx}, the system struggled under load."
 
         if f.category == "edge_case_input":
+            # Identify what kind of cap/failure from details
+            cap_type = _extract_cap_type(f)
+            if cap_type:
+                return (
+                    f"When {project_ref} receives unexpected input, "
+                    f"{cap_type}."
+                )
             return (
                 f"When {project_ref} receives unexpected or unusual "
                 f"input, the code crashes instead of handling it gracefully."
@@ -836,23 +853,53 @@ class ReportGenerator:
         if f.category == "data_volume_scaling":
             ctx = activity or f"{project_ref} is processing larger data"
             if "resource" in f.title.lower():
+                cap_type = _extract_cap_type(f)
+                if cap_type:
+                    return f"When {ctx}, {cap_type}."
                 return f"When {ctx}, the system hits safety limits."
             if f._error_count > 0:
                 return (
                     f"When {ctx}, errors start appearing — "
                     f"{f._error_count} errors at the highest load."
                 )
-            return f"When {ctx}, performance degrades."
+            # Use actual metrics
+            parts = []
+            if f._execution_time_ms > 0:
+                parts.append(
+                    f"response time hit {_format_ms(f._execution_time_ms)}"
+                )
+            if f._peak_memory_mb > 0:
+                parts.append(f"memory reached {f._peak_memory_mb:.0f}MB")
+            if parts:
+                return f"When {ctx}, {' and '.join(parts)}."
+            return f"When {ctx}, performance degrades under load."
 
         if f.category == "memory_profiling":
             ctx = activity or f"{project_ref} is running over time"
+            if f._peak_memory_mb > 0:
+                return (
+                    f"During {ctx}, memory grows to "
+                    f"{f._peak_memory_mb:.0f}MB and keeps climbing."
+                )
             return (
                 f"During {ctx}, memory keeps growing and could "
                 f"eventually run out."
             )
 
+        # Default: use actual metrics if available
         if activity:
-            return f"When {activity}, problems were detected."
+            parts = []
+            if f._execution_time_ms > 0:
+                parts.append(
+                    f"response time hit {_format_ms(f._execution_time_ms)}"
+                )
+            if f._peak_memory_mb > 0:
+                parts.append(f"memory reached {f._peak_memory_mb:.0f}MB")
+            if f._error_count > 0:
+                parts.append(f"{f._error_count} errors occurred")
+            if parts:
+                return f"When {activity}, {' and '.join(parts)}."
+            return f"When {activity}, issues were found."
         return f.description
 
     def _generate_offline_summary(self, report: DiagnosticReport) -> str:
@@ -1424,11 +1471,34 @@ def _format_ms(ms: float) -> str:
     return f"{ms / 60000:.1f}min"
 
 
+def _extract_cap_type(f: "Finding") -> str:
+    """Extract which resource cap was hit from a finding's details.
+
+    Returns a plain-language fragment like "requests timed out" or
+    "memory hit the safety limit", or empty string if unknown.
+    """
+    details_lower = f.details.lower() if f.details else ""
+    title_lower = f.title.lower() if f.title else ""
+    combined = f"{details_lower} {title_lower}"
+
+    if "timeout" in combined:
+        return "requests timed out under load"
+    if "memory" in combined and ("cap" in combined or "limit" in combined or "oom" in combined):
+        return "memory hit the safety limit"
+    if "resource" in combined and "cap" in combined:
+        return "the system hit its resource limits"
+    return ""
+
+
 def _extract_project_ref(operational_intent: str) -> str:
     """Extract a short noun phrase from the user's operational intent.
 
     Used to reference the project naturally (e.g. "your budget tracker"
     instead of "your project").
+
+    Truncates at the first arrow, period, dash (surrounded by spaces),
+    newline, comma, or semicolon and strips parenthetical framework
+    references like "(Flask)".
     """
     import re
 
@@ -1436,8 +1506,15 @@ def _extract_project_ref(operational_intent: str) -> str:
     if not text:
         return "project"
 
-    # Take up to the first clause boundary
-    text = re.split(r"[.,;]| that | which ", text, maxsplit=1)[0].strip()
+    # Truncate at first arrow, newline, or clause boundary
+    text = re.split(
+        r"\u2192|->|\n|[.,;]| \u2014 | - | that | which ",
+        text,
+        maxsplit=1,
+    )[0].strip()
+
+    # Strip parenthetical framework/tech references e.g. "(Flask)"
+    text = re.sub(r"\s*\([^)]*\)", "", text).strip()
 
     # Strip leading filler phrases
     filler = [
