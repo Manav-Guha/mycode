@@ -542,6 +542,7 @@ class SessionManager:
         )
         sys.stderr.flush()
 
+        print(f"DEBUG TIMEOUT: {timeout}", flush=True)
         try:
             result = subprocess.run(
                 resolved_command,
