@@ -9,7 +9,8 @@
     "version_notes": {
       "2.6.0": "TypeScript support improvements, Plotly.js compatibility updates",
       "2.0.0": "React 16+ support, improved prop diffing for Plotly.react()"
-    }
+    },
+    "browser_only": true
   },
   "scaling_characteristics": {
     "description": "Thin React wrapper that calls Plotly.react() on prop changes. Inherits all Plotly.js performance characteristics. Uses Plotly.react() for efficient updates (diffs data and layout). Bundle size dominated by Plotly.js dependency (~1-3.5MB depending on variant).",
@@ -182,6 +183,44 @@
       },
       "expected_behavior": "Component should not throw. Plotly should handle gracefully or show empty chart.",
       "failure_indicators": ["react_error", "plotly_error", "blank_div", "infinite_render"]
+    }
+  ],
+  "node_stress_test_templates": [
+    {
+      "name": "trace_prop_throughput",
+      "category": "data_volume_scaling",
+      "description": "Process trace data prop arrays at increasing sizes — simulating data prop updates",
+      "harness_body": "node_data_processing",
+      "parameters": {"data_sizes": [1000, 10000, 100000]},
+      "expected_behavior": "Trace prop processing should scale sub-quadratically",
+      "failure_indicators": ["timeout", "memory_growth_unbounded"]
+    },
+    {
+      "name": "plot_prop_lifecycle",
+      "category": "memory_profiling",
+      "description": "Create and discard plot prop objects simulating React component mount/unmount cycles",
+      "harness_body": "node_object_lifecycle",
+      "parameters": {"iterations": 50, "cycle_count": 100},
+      "expected_behavior": "Memory should recover between prop lifecycle cycles",
+      "failure_indicators": ["memory_growth_unbounded", "gc_pressure"]
+    },
+    {
+      "name": "realtime_data_streaming",
+      "category": "state_management_degradation",
+      "description": "Simulate real-time trace data streaming with rapid prop updates",
+      "harness_body": "node_rapid_updates",
+      "parameters": {"update_hz": [10, 30, 60], "duration_ms": 2000},
+      "expected_behavior": "Streaming updates should not create backlog",
+      "failure_indicators": ["update_backlog", "memory_growth_unbounded"]
+    },
+    {
+      "name": "edge_case_trace_props",
+      "category": "edge_case_input",
+      "description": "Feed edge case trace props (null data, empty traces, NaN coordinates, mixed types)",
+      "harness_body": "node_edge_case_data",
+      "parameters": {},
+      "expected_behavior": "Edge case trace props should be handled without crashes",
+      "failure_indicators": ["crash", "infinite_loop", "unhandled_exception"]
     }
   ]
 }

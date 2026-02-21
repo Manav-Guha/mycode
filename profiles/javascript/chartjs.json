@@ -9,7 +9,8 @@
     "version_notes": {
       "4.4.7": "Bug fixes, performance improvements, TypeScript 5 support",
       "4.0.0": "Tree-shakeable ESM architecture, requires explicit registration of chart types and components"
-    }
+    },
+    "browser_only": true
   },
   "scaling_characteristics": {
     "description": "Renders charts to HTML5 Canvas. Performance governed by number of data points drawn per frame. Animation triggers full canvas redraws. No virtualization — all data points rendered every frame.",
@@ -187,6 +188,44 @@
       },
       "expected_behavior": "Charts should render without errors. Nulls create gaps. NaN/Infinity handled gracefully.",
       "failure_indicators": ["render_error", "blank_chart", "infinite_loop", "axis_label_overflow"]
+    }
+  ],
+  "node_stress_test_templates": [
+    {
+      "name": "data_array_throughput",
+      "category": "data_volume_scaling",
+      "description": "Process chart data arrays at increasing sizes — transform, sort, filter, aggregate operations",
+      "harness_body": "node_data_processing",
+      "parameters": {"data_sizes": [1000, 10000, 100000]},
+      "expected_behavior": "Data processing time should scale sub-quadratically with array size",
+      "failure_indicators": ["timeout", "memory_growth_unbounded"]
+    },
+    {
+      "name": "config_lifecycle",
+      "category": "memory_profiling",
+      "description": "Create and discard chart configuration objects with datasets, options, and plugin configs",
+      "harness_body": "node_object_lifecycle",
+      "parameters": {"iterations": 50, "cycle_count": 100},
+      "expected_behavior": "Memory should recover between create/destroy cycles",
+      "failure_indicators": ["memory_growth_unbounded", "gc_pressure"]
+    },
+    {
+      "name": "rapid_data_updates",
+      "category": "state_management_degradation",
+      "description": "Simulate rapid chart data updates at configurable frequency",
+      "harness_body": "node_rapid_updates",
+      "parameters": {"update_hz": [30, 60, 120], "duration_ms": 2000},
+      "expected_behavior": "Update throughput should remain stable without backlog",
+      "failure_indicators": ["update_backlog", "memory_growth_unbounded"]
+    },
+    {
+      "name": "edge_case_chart_data",
+      "category": "edge_case_input",
+      "description": "Feed edge case values (null, NaN, Infinity, empty arrays, mixed types) through data processing",
+      "harness_body": "node_edge_case_data",
+      "parameters": {},
+      "expected_behavior": "Edge cases should be handled without crashes",
+      "failure_indicators": ["crash", "infinite_loop", "unhandled_exception"]
     }
   ]
 }

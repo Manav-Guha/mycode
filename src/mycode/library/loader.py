@@ -60,11 +60,17 @@ class DependencyProfile:
     interaction_patterns: dict
     stress_test_templates: list
     raw: dict = field(repr=False)
+    node_stress_test_templates: list = field(default_factory=list)
 
     @property
     def name(self) -> str:
         """Canonical lowercase name (e.g. 'flask', 'numpy')."""
         return self.identity["name"]
+
+    @property
+    def browser_only(self) -> bool:
+        """Whether this dependency requires a browser environment (DOM/canvas/WebGL)."""
+        return self.identity.get("browser_only", False)
 
     @property
     def pypi_name(self) -> Optional[str]:
@@ -319,6 +325,7 @@ class ComponentLibrary:
             edge_case_sensitivities=raw["edge_case_sensitivities"],
             interaction_patterns=raw["interaction_patterns"],
             stress_test_templates=raw["stress_test_templates"],
+            node_stress_test_templates=raw.get("node_stress_test_templates", []),
             raw=raw,
         )
 

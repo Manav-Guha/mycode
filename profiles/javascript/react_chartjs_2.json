@@ -9,7 +9,8 @@
     "version_notes": {
       "5.3.0": "Bug fixes, improved TypeScript types, Chart.js 4 compatibility",
       "5.0.0": "Chart.js 4 support, requires explicit Chart.js component registration, dropped Chart.js 3 support"
-    }
+    },
+    "browser_only": true
   },
   "scaling_characteristics": {
     "description": "Thin React wrapper around Chart.js. Inherits all Chart.js performance characteristics. Adds overhead from React reconciliation on prop changes — each prop update triggers chart.update() or chart.destroy()/recreate. Performance governed by underlying Chart.js canvas rendering.",
@@ -181,6 +182,44 @@
       },
       "expected_behavior": "Components should render without throwing. Error boundaries should catch rendering failures.",
       "failure_indicators": ["react_error_boundary_triggered", "blank_chart_no_error", "unhandled_exception"]
+    }
+  ],
+  "node_stress_test_templates": [
+    {
+      "name": "data_prop_throughput",
+      "category": "data_volume_scaling",
+      "description": "Process chart data prop arrays at increasing sizes — simulating prop updates",
+      "harness_body": "node_data_processing",
+      "parameters": {"data_sizes": [1000, 10000, 100000]},
+      "expected_behavior": "Data prop processing should scale sub-quadratically",
+      "failure_indicators": ["timeout", "memory_growth_unbounded"]
+    },
+    {
+      "name": "chart_prop_lifecycle",
+      "category": "memory_profiling",
+      "description": "Create and discard chart prop objects simulating React component mount/unmount cycles",
+      "harness_body": "node_object_lifecycle",
+      "parameters": {"iterations": 50, "cycle_count": 100},
+      "expected_behavior": "Memory should recover between prop lifecycle cycles",
+      "failure_indicators": ["memory_growth_unbounded", "gc_pressure"]
+    },
+    {
+      "name": "rapid_prop_updates",
+      "category": "state_management_degradation",
+      "description": "Simulate rapid chart prop updates as from parent re-renders",
+      "harness_body": "node_rapid_updates",
+      "parameters": {"update_hz": [30, 60, 120], "duration_ms": 2000},
+      "expected_behavior": "Prop update throughput should remain stable",
+      "failure_indicators": ["update_backlog", "memory_growth_unbounded"]
+    },
+    {
+      "name": "edge_case_chart_data",
+      "category": "edge_case_input",
+      "description": "Feed edge case chart data props (null datasets, NaN values, empty labels, mixed types)",
+      "harness_body": "node_edge_case_data",
+      "parameters": {},
+      "expected_behavior": "Edge case props should be handled without crashes",
+      "failure_indicators": ["crash", "infinite_loop", "unhandled_exception"]
     }
   ]
 }

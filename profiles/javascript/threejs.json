@@ -10,7 +10,8 @@
       "0.171.0": "WebGPU renderer improvements, new material system features, performance optimizations",
       "0.160.0": "WebGPU renderer stable, TSL (Three Shading Language), improved tree shaking",
       "0.150.0": "Color management improvements, new lighting model"
-    }
+    },
+    "browser_only": true
   },
   "scaling_characteristics": {
     "description": "GPU-accelerated 3D rendering. Performance depends on GPU capabilities, draw call count, polygon count, texture memory, and shader complexity. CPU-side scene management runs on main thread.",
@@ -199,6 +200,44 @@
       },
       "expected_behavior": "With dispose: memory returns to baseline. Without: memory grows.",
       "failure_indicators": ["memory_growth_with_dispose", "context_lost", "gpu_objects_accumulating"]
+    }
+  ],
+  "node_stress_test_templates": [
+    {
+      "name": "vector_matrix_math",
+      "category": "data_volume_scaling",
+      "description": "Pure JS 4x4 matrix multiply, vec3 transform/dot/cross at increasing operation counts",
+      "harness_body": "node_math_computation",
+      "parameters": {"op_counts": [1000, 10000, 100000]},
+      "expected_behavior": "Math operation time should scale linearly with count",
+      "failure_indicators": ["timeout", "precision_error"]
+    },
+    {
+      "name": "scene_graph_lifecycle",
+      "category": "memory_profiling",
+      "description": "Create and discard scene graph objects with geometry, materials, and children",
+      "harness_body": "node_object_lifecycle",
+      "parameters": {"iterations": 50, "cycle_count": 100},
+      "expected_behavior": "Memory should recover between create/dispose cycles",
+      "failure_indicators": ["memory_growth_unbounded", "gc_pressure"]
+    },
+    {
+      "name": "per_frame_allocations",
+      "category": "memory_profiling",
+      "description": "Simulate render loop with per-frame allocations vs object reuse patterns",
+      "harness_body": "node_animation_loop",
+      "parameters": {"frame_count": 1000, "allocations_per_frame": 10},
+      "expected_behavior": "Object reuse pattern should show stable memory; allocation pattern shows growth",
+      "failure_indicators": ["memory_growth_unbounded", "gc_pause"]
+    },
+    {
+      "name": "typed_array_buffers",
+      "category": "data_volume_scaling",
+      "description": "Process typed array buffers (Float32Array) at increasing sizes for vertex/geometry data",
+      "harness_body": "node_data_processing",
+      "parameters": {"data_sizes": [10000, 100000, 1000000]},
+      "expected_behavior": "Buffer processing should scale linearly",
+      "failure_indicators": ["timeout", "memory_growth_unbounded"]
     }
   ]
 }

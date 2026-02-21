@@ -9,7 +9,8 @@
     "version_notes": {
       "2.35.3": "Performance improvements, bug fixes, updated dependencies",
       "2.0.0": "MathJax 3 support, improved bundle size options (dist-min, basic, strict)"
-    }
+    },
+    "browser_only": true
   },
   "scaling_characteristics": {
     "description": "Renders via SVG (default for 2D) or WebGL (for scatter/3D). SVG mode creates a DOM element per data point. WebGL mode handles much larger datasets. Bundle size is very large (~3.5MB minified for full build, ~1MB for dist-min).",
@@ -189,6 +190,44 @@
       },
       "expected_behavior": "Plotly.react() and extendTraces should handle moderate update rates. restyle for targeted updates.",
       "failure_indicators": ["frame_drops > 30%", "memory_growth", "update_queue_backlog"]
+    }
+  ],
+  "node_stress_test_templates": [
+    {
+      "name": "trace_data_processing",
+      "category": "data_volume_scaling",
+      "description": "Process trace data arrays at increasing sizes — transform, aggregate, filter operations",
+      "harness_body": "node_data_processing",
+      "parameters": {"data_sizes": [1000, 10000, 100000]},
+      "expected_behavior": "Data processing time should scale sub-quadratically",
+      "failure_indicators": ["timeout", "memory_growth_unbounded"]
+    },
+    {
+      "name": "layout_complexity_scaling",
+      "category": "data_volume_scaling",
+      "description": "Build nested layout/subplot structures of increasing complexity",
+      "harness_body": "node_tree_scaling",
+      "parameters": {"tree_sizes": [10, 50, 200], "depth": 3, "child_count": 4},
+      "expected_behavior": "Layout creation time should scale reasonably with subplot count",
+      "failure_indicators": ["timeout", "memory_growth_unbounded"]
+    },
+    {
+      "name": "plot_data_lifecycle",
+      "category": "memory_profiling",
+      "description": "Create and discard plot data objects with traces, layouts, and config",
+      "harness_body": "node_object_lifecycle",
+      "parameters": {"iterations": 50, "cycle_count": 100},
+      "expected_behavior": "Memory should recover between create/destroy cycles",
+      "failure_indicators": ["memory_growth_unbounded", "gc_pressure"]
+    },
+    {
+      "name": "trace_edge_cases",
+      "category": "edge_case_input",
+      "description": "Feed edge case trace data (null, NaN, Infinity, empty, mixed types)",
+      "harness_body": "node_edge_case_data",
+      "parameters": {},
+      "expected_behavior": "Edge case trace data should be handled gracefully",
+      "failure_indicators": ["crash", "infinite_loop", "unhandled_exception"]
     }
   ]
 }

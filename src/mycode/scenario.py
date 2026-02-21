@@ -790,25 +790,53 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
         for match in recognized:
             profile = match.profile
             assert profile is not None
-            for template in profile.stress_test_templates:
-                cat = template.get("category", "")
-                if cat not in valid_categories:
-                    continue
-                scenarios.append(StressTestScenario(
-                    name=f"{profile.name}_{template['name']}",
-                    category=cat,
-                    description=template.get("description", ""),
-                    target_dependencies=[match.dependency_name],
-                    test_config={
+
+            # Browser-only deps: prefer node_stress_test_templates
+            if profile.browser_only and profile.node_stress_test_templates:
+                for template in profile.node_stress_test_templates:
+                    cat = template.get("category", "")
+                    if cat not in valid_categories:
+                        continue
+                    test_cfg: dict = {
                         "parameters": template.get("parameters", {}),
                         "measurements": _infer_measurements(cat),
                         "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
-                    },
-                    expected_behavior=template.get("expected_behavior", ""),
-                    failure_indicators=template.get("failure_indicators", []),
-                    priority=_infer_priority_from_template(template),
-                    source="offline",
-                ))
+                        "skip_imports": True,
+                    }
+                    harness_body = template.get("harness_body", "")
+                    if harness_body:
+                        test_cfg["harness_body"] = harness_body
+                    scenarios.append(StressTestScenario(
+                        name=f"{profile.name}_{template['name']}",
+                        category=cat,
+                        description=template.get("description", ""),
+                        target_dependencies=[match.dependency_name],
+                        test_config=test_cfg,
+                        expected_behavior=template.get("expected_behavior", ""),
+                        failure_indicators=template.get("failure_indicators", []),
+                        priority=_infer_priority_from_template(template),
+                        source="offline",
+                    ))
+            else:
+                for template in profile.stress_test_templates:
+                    cat = template.get("category", "")
+                    if cat not in valid_categories:
+                        continue
+                    scenarios.append(StressTestScenario(
+                        name=f"{profile.name}_{template['name']}",
+                        category=cat,
+                        description=template.get("description", ""),
+                        target_dependencies=[match.dependency_name],
+                        test_config={
+                            "parameters": template.get("parameters", {}),
+                            "measurements": _infer_measurements(cat),
+                            "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                        },
+                        expected_behavior=template.get("expected_behavior", ""),
+                        failure_indicators=template.get("failure_indicators", []),
+                        priority=_infer_priority_from_template(template),
+                        source="offline",
+                    ))
 
         # 2. Failure-mode scenarios for critical/high severity issues
         for match in recognized:
@@ -817,6 +845,15 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             for mode in profile.known_failure_modes:
                 if mode.get("severity") not in ("critical", "high"):
                     continue
+                fm_config: dict = {
+                    "detection_hint": mode.get("detection_hint", ""),
+                    "severity": mode.get("severity", ""),
+                    "versions_affected": mode.get("versions_affected", ""),
+                    "measurements": ["error_count", "error_type"],
+                    "resource_limits": {"memory_mb": 512, "timeout_seconds": 30},
+                }
+                if profile.browser_only:
+                    fm_config["skip_imports"] = True
                 scenarios.append(StressTestScenario(
                     name=f"{profile.name}_{mode['name']}_check",
                     category="edge_case_input",
@@ -825,13 +862,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                         f"Trigger: {mode.get('trigger_conditions', 'N/A')}"
                     ),
                     target_dependencies=[match.dependency_name],
-                    test_config={
-                        "detection_hint": mode.get("detection_hint", ""),
-                        "severity": mode.get("severity", ""),
-                        "versions_affected": mode.get("versions_affected", ""),
-                        "measurements": ["error_count", "error_type"],
-                        "resource_limits": {"memory_mb": 512, "timeout_seconds": 30},
-                    },
+                    test_config=fm_config,
                     expected_behavior="Known failure mode should be detected or mitigated.",
                     failure_indicators=[mode["name"]],
                     priority="high" if mode.get("severity") == "critical" else "medium",
@@ -960,6 +991,16 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                     if cat not in valid_categories:
                         continue
                     for cp in cps:
+                        dom_config: dict = {
+                            "coupling_source": cp.source,
+                            "coupling_targets": cp.targets,
+                            "coupling_type": cp.coupling_type,
+                            "behavior": "dom_render",
+                            "measurements": _infer_measurements(cat),
+                            "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                        }
+                        if language.lower() == "javascript":
+                            dom_config["skip_imports"] = True
                         scenarios.append(StressTestScenario(
                             name=f"coupling_render_{_safe_name(cp.source)}",
                             category=cat,
@@ -968,14 +1009,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                                 f"{cp.description}"
                             ),
                             target_dependencies=[],
-                            test_config={
-                                "coupling_source": cp.source,
-                                "coupling_targets": cp.targets,
-                                "coupling_type": cp.coupling_type,
-                                "behavior": "dom_render",
-                                "measurements": _infer_measurements(cat),
-                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
-                            },
+                            test_config=dom_config,
                             expected_behavior=(
                                 f"Render function '{cp.source}' should not degrade "
                                 f"under repeated updates."

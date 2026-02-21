@@ -10,7 +10,8 @@
       "4.0.0": "New engine: no config file needed, CSS-first configuration, automatic content detection, Oxide engine (Rust-based)",
       "3.4.0": "Dynamic viewport units, :has() support, improved arbitrary values",
       "3.0.0": "JIT engine default, arbitrary values, play CDN"
-    }
+    },
+    "browser_only": true
   },
   "scaling_characteristics": {
     "description": "Build-time CSS generation. Scans source files for class names, generates only the CSS that's used. Output size depends on unique utility combinations used, not total template count. Runtime impact is purely CSS — no JavaScript overhead.",
@@ -181,6 +182,35 @@
       },
       "expected_behavior": "Rendering time grows with DOM size. Style recalculation proportional to element count.",
       "failure_indicators": ["first_paint > 1s", "style_recalc > 16ms", "layout_thrashing"]
+    }
+  ],
+  "node_stress_test_templates": [
+    {
+      "name": "class_string_processing",
+      "category": "data_volume_scaling",
+      "description": "Process utility class strings at increasing scale — concatenation, deduplication, parsing",
+      "harness_body": "node_data_processing",
+      "parameters": {"data_sizes": [100, 1000, 10000]},
+      "expected_behavior": "Class string processing should scale linearly",
+      "failure_indicators": ["timeout", "memory_growth_unbounded"]
+    },
+    {
+      "name": "dynamic_class_edge_cases",
+      "category": "edge_case_input",
+      "description": "Edge case class name inputs (empty, null, very long strings, special characters, duplicates)",
+      "harness_body": "node_edge_case_data",
+      "parameters": {},
+      "expected_behavior": "Class processing should handle edge cases gracefully",
+      "failure_indicators": ["crash", "unhandled_exception"]
+    },
+    {
+      "name": "config_object_scaling",
+      "category": "memory_profiling",
+      "description": "Create and discard Tailwind-like config objects at increasing complexity",
+      "harness_body": "node_object_lifecycle",
+      "parameters": {"iterations": 50, "cycle_count": 100},
+      "expected_behavior": "Memory should recover between config create/destroy cycles",
+      "failure_indicators": ["memory_growth_unbounded", "gc_pressure"]
     }
   ]
 }

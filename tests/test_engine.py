@@ -1217,8 +1217,13 @@ class TestJSHarnessTemplates:
         assert "JSON.stringify" in _JS_HARNESS_POSTAMBLE
 
     def test_js_category_bodies_mapping_complete(self):
-        expected = {"async_failures", "event_listener_accumulation", "state_management_degradation"}
-        assert set(_JS_CATEGORY_BODIES.keys()) == expected
+        expected_categories = {"async_failures", "event_listener_accumulation", "state_management_degradation"}
+        expected_node = {
+            "node_data_processing", "node_object_lifecycle", "node_rapid_updates",
+            "node_edge_case_data", "node_tree_scaling", "node_math_computation",
+            "node_pubsub_reactivity", "node_closure_memory", "node_animation_loop",
+        }
+        assert set(_JS_CATEGORY_BODIES.keys()) == expected_categories | expected_node
 
     def test_js_harness_uses_only_builtins(self):
         """JS harness preamble static imports should only use Node.js built-ins."""
@@ -1229,3 +1234,76 @@ class TestJSHarnessTemplates:
                 assert any(m in line for m in ("fs", "path", "events")), (
                     f"JS preamble requires non-builtin: {line.strip()}"
                 )
+
+
+# ── Browser-Only / skip_imports Tests ──
+
+
+class TestSkipImports:
+    """Test skip_imports and harness_body override for browser-only deps."""
+
+    def test_skip_imports_empty_modules(self, tmp_path):
+        """skip_imports → empty target_modules and target_functions."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion())
+
+        scenario = _make_scenario(test_config={
+            "skip_imports": True,
+            "parameters": {"data_sizes": [100]},
+            "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+        })
+        config = engine._build_harness_config(scenario)
+
+        assert config["target_modules"] == []
+        assert config["target_functions"] == []
+
+    def test_harness_body_override(self, tmp_path):
+        """harness_body overrides category-based body selection."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="javascript")
+
+        # Build with category "data_volume_scaling" but harness_body "node_data_processing"
+        harness_default = engine._build_js_harness("data_volume_scaling")
+        harness_override = engine._build_js_harness(
+            "data_volume_scaling", harness_body="node_data_processing",
+        )
+
+        # Default should use the generic body (data_volume_scaling isn't in JS bodies)
+        assert "iteration_" in harness_default  # generic body
+        # Override should use node_data_processing body
+        assert "Float64Array" in harness_override
+        assert "data_size_" in harness_override
+
+    def test_all_node_bodies_registered(self):
+        """All 9 node_* keys should be in _JS_CATEGORY_BODIES."""
+        expected_node_keys = {
+            "node_data_processing",
+            "node_object_lifecycle",
+            "node_rapid_updates",
+            "node_edge_case_data",
+            "node_tree_scaling",
+            "node_math_computation",
+            "node_pubsub_reactivity",
+            "node_closure_memory",
+            "node_animation_loop",
+        }
+        actual_node_keys = {
+            k for k in _JS_CATEGORY_BODIES if k.startswith("node_")
+        }
+        assert actual_node_keys == expected_node_keys
+
+    def test_node_harness_produces_valid_structure(self):
+        """Every node_* body produces a complete harness with markers and balanced braces."""
+        node_bodies = {
+            k: v for k, v in _JS_CATEGORY_BODIES.items() if k.startswith("node_")
+        }
+        for name, body in node_bodies.items():
+            script = _JS_HARNESS_PREAMBLE + "\n" + body + "\n" + _JS_HARNESS_POSTAMBLE
+            assert "__MYCODE_RESULTS_START__" in script, f"'{name}' missing start marker"
+            assert "__MYCODE_RESULTS_END__" in script, f"'{name}' missing end marker"
+            assert "(async () => {" in script, f"'{name}' missing async IIFE"
+            opens = script.count("{")
+            closes = script.count("}")
+            assert opens == closes, (
+                f"'{name}' brace mismatch: {opens} opens vs {closes} closes"
+            )

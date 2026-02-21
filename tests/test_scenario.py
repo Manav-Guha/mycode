@@ -123,6 +123,85 @@ def _make_profile(name: str, category: str = "web_framework") -> DependencyProfi
     )
 
 
+def _make_browser_only_profile(
+    name: str, category: str = "graphics",
+) -> DependencyProfile:
+    """Create a browser-only DependencyProfile with node_stress_test_templates."""
+    raw = {
+        "identity": {
+            "name": name,
+            "npm_name": name,
+            "category": category,
+            "description": f"Browser-only test profile for {name}",
+            "current_stable_version": "1.0.0",
+            "min_supported_version": "1.0.0",
+            "version_notes": {},
+            "browser_only": True,
+        },
+        "scaling_characteristics": {"description": "test", "concurrency_model": "test",
+                                    "bottlenecks": [], "scaling_limits": []},
+        "memory_behavior": {"baseline_footprint_mb": 10, "growth_pattern": "test",
+                           "known_leaks": [], "gc_behavior": "test"},
+        "known_failure_modes": [
+            {
+                "name": "render_crash",
+                "description": "Crash during rendering",
+                "trigger_conditions": "Large dataset",
+                "severity": "high",
+                "versions_affected": "all",
+                "detection_hint": "Look for crash",
+            },
+        ],
+        "edge_case_sensitivities": [],
+        "interaction_patterns": {
+            "commonly_used_with": [],
+            "known_conflicts": [],
+            "dependency_chain_risks": [],
+        },
+        "stress_test_templates": [
+            {
+                "name": "canvas_render",
+                "category": "data_volume_scaling",
+                "description": "Canvas rendering test (browser-only)",
+                "parameters": {"data_sizes": [100, 1000]},
+                "expected_behavior": "Renders without errors",
+                "failure_indicators": ["render_error"],
+            },
+        ],
+        "node_stress_test_templates": [
+            {
+                "name": "data_throughput",
+                "category": "data_volume_scaling",
+                "description": "Data array throughput",
+                "harness_body": "node_data_processing",
+                "parameters": {"data_sizes": [1000, 10000]},
+                "expected_behavior": "Scales linearly",
+                "failure_indicators": ["timeout"],
+            },
+            {
+                "name": "lifecycle_test",
+                "category": "memory_profiling",
+                "description": "Object lifecycle memory",
+                "harness_body": "node_object_lifecycle",
+                "parameters": {"iterations": 50},
+                "expected_behavior": "Memory recovers",
+                "failure_indicators": ["memory_growth_unbounded"],
+            },
+        ],
+    }
+    return DependencyProfile(
+        identity=raw["identity"],
+        scaling_characteristics=raw["scaling_characteristics"],
+        memory_behavior=raw["memory_behavior"],
+        known_failure_modes=raw["known_failure_modes"],
+        edge_case_sensitivities=raw["edge_case_sensitivities"],
+        interaction_patterns=raw["interaction_patterns"],
+        stress_test_templates=raw["stress_test_templates"],
+        node_stress_test_templates=raw["node_stress_test_templates"],
+        raw=raw,
+    )
+
+
 @pytest.fixture
 def sample_ingestion() -> IngestionResult:
     """Create a realistic IngestionResult for testing."""
@@ -1432,3 +1511,154 @@ class TestRealProfileIntegration:
         assert isinstance(result, ScenarioGeneratorResult)
         # myCode has coupling points, so should generate some scenarios
         assert len(result.scenarios) >= 1
+
+
+# ── Tests: Browser-Only Dependency Handling ──
+
+
+class TestBrowserOnlyHandling:
+    """Test browser-only deps route to node-safe templates with skip_imports."""
+
+    def test_browser_only_uses_node_templates(self):
+        """Browser-only profile with node templates → uses node templates, has skip_imports and harness_body."""
+        profile = _make_browser_only_profile("chartjs")
+        match = ProfileMatch(
+            dependency_name="chart.js",
+            profile=profile,
+            installed_version="4.4.7",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A charting app", "javascript")
+
+        template_scenarios = [s for s in result.scenarios if s.name.startswith("chartjs_")]
+        # Should use node_stress_test_templates (2), not stress_test_templates (1)
+        # (failure mode scenarios also start with chartjs_ so filter those out)
+        node_template_scenarios = [
+            s for s in template_scenarios
+            if s.test_config.get("skip_imports") is True
+            and "harness_body" in s.test_config
+        ]
+        assert len(node_template_scenarios) == 2
+        # Each should have harness_body
+        for s in node_template_scenarios:
+            assert s.test_config["harness_body"].startswith("node_")
+
+    def test_non_browser_ignores_node_templates(self):
+        """Non-browser profile → uses regular stress_test_templates, no skip_imports."""
+        profile = _make_profile("express", "web_framework")
+        match = ProfileMatch(
+            dependency_name="express",
+            profile=profile,
+            installed_version="4.21.0",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A web server", "javascript")
+
+        template_scenarios = [s for s in result.scenarios if s.name.startswith("express_")]
+        for s in template_scenarios:
+            assert s.test_config.get("skip_imports") is not True
+            assert "harness_body" not in s.test_config
+
+    def test_browser_only_without_node_templates_falls_back(self):
+        """browser_only=True but empty node_stress_test_templates → uses regular templates."""
+        profile = _make_browser_only_profile("testlib")
+        # Clear node_stress_test_templates
+        profile.node_stress_test_templates.clear()
+        match = ProfileMatch(
+            dependency_name="testlib",
+            profile=profile,
+            installed_version="1.0.0",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A test app", "javascript")
+
+        template_scenarios = [s for s in result.scenarios if s.name.startswith("testlib_")]
+        # Should fall back to regular stress_test_templates
+        assert len(template_scenarios) >= 1
+        # Regular templates don't have skip_imports
+        for s in template_scenarios:
+            if not s.name.endswith("_check"):
+                assert s.test_config.get("skip_imports") is not True
+
+    def test_browser_only_failure_modes_skip_imports(self):
+        """Failure mode scenarios for browser-only dep should have skip_imports."""
+        profile = _make_browser_only_profile("chartjs")
+        match = ProfileMatch(
+            dependency_name="chart.js",
+            profile=profile,
+            installed_version="4.4.7",
+            version_match=True,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match], "A charting app", "javascript")
+
+        failure_scenarios = [s for s in result.scenarios if s.name.endswith("_check")]
+        assert len(failure_scenarios) >= 1
+        for s in failure_scenarios:
+            assert s.test_config.get("skip_imports") is True
+
+    def test_dom_render_coupling_js_skip_imports(self):
+        """DOM_RENDER coupling points in JS should get skip_imports."""
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=100,
+            file_analyses=[FileAnalysis(
+                file_path="components/App.jsx",
+                functions=[
+                    FunctionInfo(
+                        name="Dashboard", file_path="components/App.jsx",
+                        lineno=1, calls=["useState", "render"],
+                    ),
+                ],
+                imports=[
+                    ImportInfo(module="react", names=["useState"],
+                             is_from_import=True, lineno=1),
+                ],
+                lines_of_code=100,
+            )],
+            coupling_points=[
+                CouplingPoint(
+                    source="components/App.Dashboard",
+                    targets=["a", "b"],
+                    coupling_type="high_fan_in",
+                    description="Render component",
+                ),
+            ],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [], "A React dashboard", "javascript")
+
+        render_scenarios = [
+            s for s in result.scenarios if s.name.startswith("coupling_render_")
+        ]
+        assert len(render_scenarios) >= 1
+        for s in render_scenarios:
+            assert s.test_config.get("skip_imports") is True

@@ -232,7 +232,10 @@ class ExecutionEngine:
         harness_config = self._build_harness_config(scenario)
 
         if is_js:
-            harness_content = self._build_js_harness(scenario.category)
+            harness_content = self._build_js_harness(
+                scenario.category,
+                harness_body=harness_config.get("harness_body", ""),
+            )
             harness_path, config_path = self._write_harness(
                 harness_content, harness_config, scenario.name, ext=".js",
             )
@@ -278,9 +281,14 @@ class ExecutionEngine:
     def _build_harness_config(self, scenario: StressTestScenario) -> dict:
         """Build the configuration dict passed to the harness script."""
         config = scenario.test_config
-        target_modules = self._get_target_modules(scenario)
+        skip_imports = config.get("skip_imports", False)
 
-        harness_config = {
+        if skip_imports:
+            target_modules: list[str] = []
+        else:
+            target_modules = self._get_target_modules(scenario)
+
+        harness_config: dict = {
             "category": scenario.category,
             "parameters": config.get("parameters", {}),
             "resource_limits": config.get("resource_limits", {}),
@@ -290,28 +298,36 @@ class ExecutionEngine:
             "scenario_name": scenario.name,
         }
 
-        # Add function info from ingestion
-        target_funcs = []
-        for analysis in self.ingestion.file_analyses:
-            if self.language == "javascript":
-                mod = analysis.file_path
-            else:
-                mod = (
-                    analysis.file_path
-                    .replace(".py", "")
-                    .replace("/", ".")
-                    .replace("\\", ".")
-                )
-            if mod in target_modules or not target_modules:
-                for func in analysis.functions:
-                    if not func.is_method and not func.name.startswith("_"):
-                        target_funcs.append({
-                            "module": mod,
-                            "name": func.name,
-                            "args": func.args,
-                            "is_async": func.is_async,
-                        })
-        harness_config["target_functions"] = target_funcs[:50]
+        if skip_imports:
+            harness_config["target_functions"] = []
+        else:
+            # Add function info from ingestion
+            target_funcs = []
+            for analysis in self.ingestion.file_analyses:
+                if self.language == "javascript":
+                    mod = analysis.file_path
+                else:
+                    mod = (
+                        analysis.file_path
+                        .replace(".py", "")
+                        .replace("/", ".")
+                        .replace("\\", ".")
+                    )
+                if mod in target_modules or not target_modules:
+                    for func in analysis.functions:
+                        if not func.is_method and not func.name.startswith("_"):
+                            target_funcs.append({
+                                "module": mod,
+                                "name": func.name,
+                                "args": func.args,
+                                "is_async": func.is_async,
+                            })
+            harness_config["target_functions"] = target_funcs[:50]
+
+        # Pass harness_body override if present
+        harness_body = config.get("harness_body", "")
+        if harness_body:
+            harness_config["harness_body"] = harness_body
 
         return harness_config
 
@@ -320,9 +336,17 @@ class ExecutionEngine:
         body = _CATEGORY_BODIES.get(category, _BODY_GENERIC)
         return _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
 
-    def _build_js_harness(self, category: str) -> str:
-        """Generate a self-contained JavaScript test harness script."""
-        body = _JS_CATEGORY_BODIES.get(category, _JS_BODY_GENERIC)
+    def _build_js_harness(self, category: str, harness_body: str = "") -> str:
+        """Generate a self-contained JavaScript test harness script.
+
+        If harness_body is provided and exists in _JS_CATEGORY_BODIES, it
+        overrides the category-based body selection. Used for browser-only
+        deps that need Node.js-compatible test bodies.
+        """
+        if harness_body and harness_body in _JS_CATEGORY_BODIES:
+            body = _JS_CATEGORY_BODIES[harness_body]
+        else:
+            body = _JS_CATEGORY_BODIES.get(category, _JS_BODY_GENERIC)
         return _JS_HARNESS_PREAMBLE + "\n" + body + "\n" + _JS_HARNESS_POSTAMBLE
 
     def _write_harness(
@@ -1142,9 +1166,353 @@ for (let _i = 0; _i < _iterations; _i++) {
 }
 '''
 
+# ── Node.js-Compatible Test Bodies (browser-only deps) ──
+#
+# These bodies use ONLY Node.js built-ins (no DOM, no canvas, no window).
+# They stress-test the computational/data patterns that browser-only
+# libraries rely on, without importing the libraries themselves.
+
+_JS_BODY_NODE_DATA_PROCESSING = '''\
+const _params = CONFIG.parameters || {};
+const _sizes = _params.data_sizes || [1000, 10000, 100000];
+for (const _sz of _sizes) {
+    await _measureStep("data_size_" + _sz, {data_size: _sz}, () => {
+        // Create {x,y} data arrays
+        const _data = [];
+        for (let _i = 0; _i < _sz; _i++) {
+            _data.push({x: _i, y: Math.sin(_i * 0.01) * 100 + Math.random() * 10});
+        }
+        // Transform
+        const _transformed = _data.map(d => ({x: d.x * 2, y: d.y + 10}));
+        // Sort by y
+        _transformed.sort((a, b) => a.y - b.y);
+        // Filter
+        const _filtered = _transformed.filter(d => d.y > 0);
+        // Aggregate
+        let _sum = 0;
+        for (const d of _filtered) _sum += d.y;
+        // Deep compare (subset)
+        const _subset = _data.slice(0, Math.min(100, _data.length));
+        JSON.stringify(_subset);
+        // Typed array ops
+        const _buf = new Float64Array(_sz);
+        for (let _i = 0; _i < _sz; _i++) _buf[_i] = _data[_i].y;
+    });
+}
+'''
+
+_JS_BODY_NODE_OBJECT_LIFECYCLE = '''\
+const _params = CONFIG.parameters || {};
+const _cycles = _params.cycle_count || 100;
+const _iterations = _params.iterations || 50;
+const _batch = Math.max(1, Math.floor(_iterations / 10));
+for (let _b = 0; _b < _iterations; _b += _batch) {
+    const _count = Math.min(_batch, _iterations - _b);
+    await _measureStep("lifecycle_batch_" + _b, {batch_start: _b, batch_count: _count}, () => {
+        for (let _i = 0; _i < _count; _i++) {
+            const _objects = [];
+            for (let _j = 0; _j < _cycles; _j++) {
+                const _obj = {
+                    id: _j,
+                    data: new Array(100).fill(0).map((_, k) => ({value: k, label: "item_" + k})),
+                    metadata: {created: Date.now(), tags: ["a", "b", "c"]},
+                    subscriptions: [() => {}, () => {}, () => {}],
+                    cleanup: () => { _obj.data = null; _obj.subscriptions = null; },
+                };
+                _objects.push(_obj);
+            }
+            // Discard — trigger cleanup callbacks
+            for (const _o of _objects) {
+                if (_o.cleanup) _o.cleanup();
+            }
+            _objects.length = 0;
+        }
+    });
+}
+'''
+
+_JS_BODY_NODE_RAPID_UPDATES = '''\
+const _params = CONFIG.parameters || {};
+const _hzLevels = _params.update_hz || [30, 60, 120];
+const _duration = _params.duration_ms || 2000;
+for (const _hz of _hzLevels) {
+    await _measureStep("updates_" + _hz + "hz", {update_hz: _hz, duration_ms: _duration}, () => {
+        return new Promise((resolve) => {
+            const _interval = Math.max(1, Math.floor(1000 / _hz));
+            let _count = 0;
+            let _backlog = 0;
+            let _lastTime = performance.now();
+            const _state = {value: 0, history: []};
+            const _maxUpdates = Math.ceil(_hz * _duration / 1000);
+            const _timer = setInterval(() => {
+                const _now = performance.now();
+                const _elapsed = _now - _lastTime;
+                if (_elapsed > _interval * 2) _backlog++;
+                _lastTime = _now;
+                _state.value++;
+                _state.history.push({v: _state.value, t: _now});
+                if (_state.history.length > 1000) _state.history = _state.history.slice(-500);
+                _count++;
+                if (_count >= _maxUpdates) {
+                    clearInterval(_timer);
+                    if (_backlog > _maxUpdates * 0.1) {
+                        _recordError(new Error("Update backlog: " + _backlog + "/" + _count), "rapid_updates");
+                    }
+                    resolve();
+                }
+            }, _interval);
+            // Safety timeout
+            setTimeout(() => { clearInterval(_timer); resolve(); }, _duration + 1000);
+        });
+    });
+}
+'''
+
+_JS_BODY_NODE_EDGE_CASE_DATA = '''\
+const _edgeCases = [
+    {name: "null", value: null},
+    {name: "undefined", value: undefined},
+    {name: "NaN", value: NaN},
+    {name: "Infinity", value: Infinity},
+    {name: "neg_Infinity", value: -Infinity},
+    {name: "empty_string", value: ""},
+    {name: "empty_array", value: []},
+    {name: "empty_object", value: {}},
+    {name: "zero", value: 0},
+    {name: "negative_zero", value: -0},
+    {name: "false", value: false},
+    {name: "very_long_string", value: "x".repeat(100000)},
+    {name: "deeply_nested", value: (function() {
+        let o = {v: 1}; for (let i = 0; i < 50; i++) o = {child: o}; return o;
+    })()},
+    {name: "wide_object", value: Object.fromEntries(
+        Array.from({length: 1000}, (_, i) => ["key_" + i, i])
+    )},
+    {name: "mixed_array", value: [1, "two", null, undefined, true, {a: 1}, [1,2]]},
+    {name: "negative", value: -1},
+    {name: "float_precision", value: 0.1 + 0.2},
+    {name: "max_safe_int", value: Number.MAX_SAFE_INTEGER},
+    {name: "min_safe_int", value: Number.MIN_SAFE_INTEGER},
+    {name: "sparse_array", value: (function() { const a = []; a[100] = 1; return a; })()},
+];
+for (const _ec of _edgeCases) {
+    await _measureStep("edge_" + _ec.name, {edge_case: _ec.name}, () => {
+        const _v = _ec.value;
+        // Serialization
+        try { JSON.stringify(_v); } catch(_e) { _recordError(_e, "stringify_" + _ec.name); }
+        // Iteration
+        try {
+            if (_v && typeof _v === "object") {
+                if (Array.isArray(_v)) { for (const _item of _v) { void _item; } }
+                else { for (const _k in _v) { void _v[_k]; } }
+            }
+        } catch(_e) { _recordError(_e, "iterate_" + _ec.name); }
+        // Property access
+        try {
+            if (_v != null) { void _v.toString(); void _v.valueOf(); }
+        } catch(_e) { _recordError(_e, "access_" + _ec.name); }
+    });
+}
+'''
+
+_JS_BODY_NODE_TREE_SCALING = '''\
+const _params = CONFIG.parameters || {};
+const _sizes = _params.tree_sizes || [100, 1000, 10000];
+const _depth = _params.depth || 5;
+const _childCount = _params.child_count || 3;
+function _buildTree(size, maxDepth, children) {
+    let _nodeCount = 0;
+    function _node(depth) {
+        if (_nodeCount >= size || depth >= maxDepth) return null;
+        _nodeCount++;
+        const _n = {type: "div", props: {id: "n" + _nodeCount, className: "item"}, children: []};
+        if (depth < maxDepth) {
+            for (let _i = 0; _i < children && _nodeCount < size; _i++) {
+                const _child = _node(depth + 1);
+                if (_child) _n.children.push(_child);
+            }
+        }
+        return _n;
+    }
+    return _node(0);
+}
+function _traverseTree(node) {
+    if (!node) return 0;
+    let _count = 1;
+    if (node.children) {
+        for (const _c of node.children) _count += _traverseTree(_c);
+    }
+    return _count;
+}
+for (const _sz of _sizes) {
+    await _measureStep("tree_size_" + _sz, {tree_size: _sz, depth: _depth, child_count: _childCount}, () => {
+        const _tree = _buildTree(_sz, _depth, _childCount);
+        const _count = _traverseTree(_tree);
+        // Serialize to check memory
+        JSON.stringify(_tree);
+    });
+}
+'''
+
+_JS_BODY_NODE_MATH_COMPUTATION = '''\
+const _params = CONFIG.parameters || {};
+const _opCounts = _params.op_counts || [1000, 10000, 100000];
+// 4x4 matrix multiply (pure JS)
+function _mat4Multiply(a, b) {
+    const _r = new Float64Array(16);
+    for (let _i = 0; _i < 4; _i++) {
+        for (let _j = 0; _j < 4; _j++) {
+            let _sum = 0;
+            for (let _k = 0; _k < 4; _k++) _sum += a[_i * 4 + _k] * b[_k * 4 + _j];
+            _r[_i * 4 + _j] = _sum;
+        }
+    }
+    return _r;
+}
+function _vec3Transform(v, m) {
+    return [
+        v[0]*m[0] + v[1]*m[4] + v[2]*m[8] + m[12],
+        v[0]*m[1] + v[1]*m[5] + v[2]*m[9] + m[13],
+        v[0]*m[2] + v[1]*m[6] + v[2]*m[10] + m[14],
+    ];
+}
+function _vec3Dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function _vec3Cross(a, b) {
+    return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+}
+function _vec3Normalize(v) {
+    const _len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]) || 1;
+    return [v[0]/_len, v[1]/_len, v[2]/_len];
+}
+for (const _ops of _opCounts) {
+    await _measureStep("math_ops_" + _ops, {op_count: _ops}, () => {
+        let _mat = Float64Array.from([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+        const _rot = Float64Array.from([
+            Math.cos(0.1), -Math.sin(0.1), 0, 0,
+            Math.sin(0.1), Math.cos(0.1), 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ]);
+        for (let _i = 0; _i < _ops; _i++) {
+            _mat = _mat4Multiply(_mat, _rot);
+            const _v = [_i * 0.01, _i * 0.02, _i * 0.03];
+            _vec3Transform(_v, _mat);
+            _vec3Dot(_v, [1, 0, 0]);
+            _vec3Cross(_v, [0, 1, 0]);
+            _vec3Normalize(_v);
+        }
+    });
+}
+'''
+
+_JS_BODY_NODE_PUBSUB_REACTIVITY = '''\
+const _params = CONFIG.parameters || {};
+const _subscriberCounts = _params.subscriber_counts || [10, 100, 1000];
+const _updateCount = _params.update_count || 100;
+for (const _sc of _subscriberCounts) {
+    await _measureStep("subscribers_" + _sc, {subscriber_count: _sc, update_count: _updateCount}, () => {
+        const _emitter = new EventEmitter();
+        _emitter.setMaxListeners(0);
+        let _delivered = 0;
+        // Subscribe
+        for (let _i = 0; _i < _sc; _i++) {
+            _emitter.on("update", (data) => { _delivered++; void data; });
+        }
+        // Publish updates
+        for (let _j = 0; _j < _updateCount; _j++) {
+            _emitter.emit("update", {value: _j, timestamp: Date.now()});
+        }
+        const _expected = _sc * _updateCount;
+        if (_delivered < _expected * 0.99) {
+            _recordError(
+                new Error("Missed notifications: " + _delivered + "/" + _expected),
+                "pubsub_delivery"
+            );
+        }
+        // Cleanup
+        _emitter.removeAllListeners();
+    });
+}
+'''
+
+_JS_BODY_NODE_CLOSURE_MEMORY = '''\
+const _params = CONFIG.parameters || {};
+const _closureCounts = _params.closure_counts || [100, 500, 1000];
+const _scopeSize = _params.scope_size || 1000;
+for (const _cc of _closureCounts) {
+    await _measureStep("closures_" + _cc, {closure_count: _cc, scope_size: _scopeSize}, () => {
+        const _closures = [];
+        // useState-like setter closures
+        for (let _i = 0; _i < _cc; _i++) {
+            const _scopeData = new Array(_scopeSize).fill(_i);
+            let _state = {value: _i, data: _scopeData};
+            const _setter = (newVal) => { _state = {value: newVal, data: _scopeData}; };
+            _closures.push({setter: _setter, state: _state});
+        }
+        // useEffect-like cleanup closures
+        const _cleanups = [];
+        for (let _i = 0; _i < _cc; _i++) {
+            const _resources = {timer: _i, subscription: new Array(100).fill(_i)};
+            _cleanups.push(() => { _resources.timer = null; _resources.subscription = null; });
+        }
+        // useMemo-like factory closures
+        const _memos = [];
+        for (let _i = 0; _i < _cc; _i++) {
+            const _deps = [_i, _i + 1, _i + 2];
+            const _compute = () => _deps.reduce((a, b) => a + b, 0);
+            _memos.push({compute: _compute, value: _compute()});
+        }
+        // Exercise closures
+        for (const _c of _closures) _c.setter(_c.state.value + 1);
+        for (const _fn of _cleanups) _fn();
+        for (const _m of _memos) _m.value = _m.compute();
+    });
+}
+'''
+
+_JS_BODY_NODE_ANIMATION_LOOP = '''\
+const _params = CONFIG.parameters || {};
+const _frameCount = _params.frame_count || 1000;
+const _allocPerFrame = _params.allocations_per_frame || 10;
+// Anti-pattern: allocate new objects every frame
+await _measureStep("alloc_per_frame", {frame_count: _frameCount, alloc_per_frame: _allocPerFrame}, () => {
+    for (let _f = 0; _f < _frameCount; _f++) {
+        for (let _a = 0; _a < _allocPerFrame; _a++) {
+            // Simulate creating new vectors/matrices per frame (anti-pattern)
+            const _v = [Math.random(), Math.random(), Math.random()];
+            const _m = new Float64Array(16);
+            for (let _i = 0; _i < 16; _i++) _m[_i] = Math.random();
+            void _v;
+            void _m;
+        }
+    }
+});
+// Good pattern: reuse objects
+await _measureStep("reuse_objects", {frame_count: _frameCount, alloc_per_frame: _allocPerFrame}, () => {
+    const _v = [0, 0, 0];
+    const _m = new Float64Array(16);
+    for (let _f = 0; _f < _frameCount; _f++) {
+        for (let _a = 0; _a < _allocPerFrame; _a++) {
+            _v[0] = Math.random(); _v[1] = Math.random(); _v[2] = Math.random();
+            for (let _i = 0; _i < 16; _i++) _m[_i] = Math.random();
+        }
+    }
+});
+'''
+
 # JS Category -> body mapping
 _JS_CATEGORY_BODIES: dict[str, str] = {
     "async_failures": _JS_BODY_ASYNC_FAILURES,
     "event_listener_accumulation": _JS_BODY_EVENT_LISTENER_ACCUMULATION,
     "state_management_degradation": _JS_BODY_STATE_MANAGEMENT_DEGRADATION,
+    # Node.js-compatible bodies for browser-only deps (keyed with node_ prefix)
+    "node_data_processing": _JS_BODY_NODE_DATA_PROCESSING,
+    "node_object_lifecycle": _JS_BODY_NODE_OBJECT_LIFECYCLE,
+    "node_rapid_updates": _JS_BODY_NODE_RAPID_UPDATES,
+    "node_edge_case_data": _JS_BODY_NODE_EDGE_CASE_DATA,
+    "node_tree_scaling": _JS_BODY_NODE_TREE_SCALING,
+    "node_math_computation": _JS_BODY_NODE_MATH_COMPUTATION,
+    "node_pubsub_reactivity": _JS_BODY_NODE_PUBSUB_REACTIVITY,
+    "node_closure_memory": _JS_BODY_NODE_CLOSURE_MEMORY,
+    "node_animation_loop": _JS_BODY_NODE_ANIMATION_LOOP,
 }
