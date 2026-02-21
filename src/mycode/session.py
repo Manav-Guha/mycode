@@ -386,11 +386,15 @@ class SessionManager:
 
     def _install_js_dependencies(self):
         """Install Node.js dependencies in the project copy if package.json exists."""
+        logger.debug("[JS-DEPS] _install_js_dependencies called, project_copy_dir=%s", self.project_copy_dir)
         if not self.project_copy_dir:
+            logger.debug("[JS-DEPS] No project_copy_dir, skipping")
             return
 
         pkg_json = self.project_copy_dir / "package.json"
+        logger.debug("[JS-DEPS] Checking for package.json at %s — exists=%s", pkg_json, pkg_json.is_file())
         if not pkg_json.is_file():
+            logger.debug("[JS-DEPS] No package.json found, skipping")
             return
 
         lock_file = self.project_copy_dir / "package-lock.json"
@@ -398,6 +402,8 @@ class SessionManager:
             cmd = ["npm", "ci", "--ignore-scripts"]
         else:
             cmd = ["npm", "install", "--ignore-scripts"]
+
+        logger.debug("[JS-DEPS] Running command: %s in cwd=%s", cmd, self.project_copy_dir)
 
         try:
             result = subprocess.run(
@@ -407,6 +413,9 @@ class SessionManager:
                 timeout=120,
                 cwd=str(self.project_copy_dir),
             )
+            logger.debug("[JS-DEPS] Exit code: %d", result.returncode)
+            logger.debug("[JS-DEPS] stdout:\n%s", result.stdout[:2000])
+            logger.debug("[JS-DEPS] stderr:\n%s", result.stderr[:2000])
             if result.returncode != 0:
                 logger.warning(
                     "npm install failed (exit %d): %s",

@@ -438,7 +438,7 @@ def _run_ingestion(
         else:
             ingester = JsProjectIngester(
                 project_path=session.project_copy_dir,
-                installed_packages=installed,
+                installed_packages=None,
                 skip_npm_check=skip_version_check,
             )
 
