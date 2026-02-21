@@ -513,7 +513,8 @@ class ExecutionEngine:
         target_files = config.get("target_files", [])
         if target_files:
             if self.language == "javascript":
-                return [f for f in target_files]
+                # Skip .jsx/.tsx — Node.js can't natively require JSX syntax
+                return [f for f in target_files if not f.endswith((".jsx", ".tsx"))]
             return [
                 f.replace(".py", "").replace("/", ".").replace("\\", ".")
                 for f in target_files
@@ -526,7 +527,10 @@ class ExecutionEngine:
                 continue
             if self.language == "javascript":
                 # JS: keep relative file paths as-is for require()
+                # Skip .jsx/.tsx — Node.js can't natively require JSX syntax
                 fp = analysis.file_path
+                if fp.endswith((".jsx", ".tsx")):
+                    continue
                 base = fp.split("/")[-1].split("\\")[-1]
                 if not base.startswith("test") and not base.startswith("_"):
                     modules.append(fp)

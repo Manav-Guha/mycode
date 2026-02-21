@@ -993,6 +993,23 @@ class TestScenarioExecution:
         assert "src/app.js" in modules
         assert "utils/helpers.js" in modules
 
+    def test_js_target_modules_excludes_jsx_tsx(self, tmp_path):
+        """JSX/TSX files should be excluded — Node.js can't natively require them."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion(files=[
+            FileAnalysis(file_path="src/App.jsx", lines_of_code=100),
+            FileAnalysis(file_path="src/api.js", lines_of_code=50),
+            FileAnalysis(file_path="src/types.tsx", lines_of_code=30),
+            FileAnalysis(file_path="src/utils.ts", lines_of_code=40),
+        ])
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenario = _make_scenario(test_config={"parameters": {}, "resource_limits": {}})
+        modules = engine._get_target_modules(scenario)
+        assert "src/api.js" in modules
+        assert "src/utils.ts" in modules
+        assert "src/App.jsx" not in modules
+        assert "src/types.tsx" not in modules
+
     def test_failure_indicators_attached_to_result(self, tmp_path):
         session = _make_session(tmp_path)
         harness_stdout = _make_harness_output(steps=[
