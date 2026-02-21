@@ -130,8 +130,8 @@ class ExecutionEngine:
     """Runs stress test scenarios inside the Session Manager's sandbox.
 
     Takes StressTestScenario objects from the Scenario Generator, generates
-    self-contained Python test harness scripts, executes them inside the
-    session's virtual environment, and returns structured results.
+    self-contained test harness scripts, executes them inside the session's
+    sandbox, and returns structured results.
 
     The engine:
     - Generates synthetic data based on scenario configurations
@@ -142,7 +142,7 @@ class ExecutionEngine:
 
     Usage::
 
-        engine = ExecutionEngine(session, ingestion)
+        engine = ExecutionEngine(session, ingestion, language="javascript")
         result = engine.execute(scenarios)
     """
 
@@ -150,6 +150,7 @@ class ExecutionEngine:
         self,
         session: SessionManager,
         ingestion: IngestionResult,
+        language: str = "python",
     ):
         if not session._setup_complete:
             raise EngineError(
@@ -157,6 +158,7 @@ class ExecutionEngine:
             )
         self.session = session
         self.ingestion = ingestion
+        self.language = language.lower()
 
     def execute(
         self,
@@ -220,8 +222,13 @@ class ExecutionEngine:
 
         start = time.perf_counter()
 
-        # Build harness script and config — route JS categories to Node.js
-        is_js = scenario.category in _JS_CATEGORIES
+        # Build harness script and config — route to correct runtime
+        # JS-specific categories always use Node.js; shared categories
+        # use the project language to pick the right harness.
+        is_js = (
+            scenario.category in _JS_CATEGORIES
+            or self.language == "javascript"
+        )
         harness_config = self._build_harness_config(scenario)
 
         if is_js:
@@ -286,12 +293,15 @@ class ExecutionEngine:
         # Add function info from ingestion
         target_funcs = []
         for analysis in self.ingestion.file_analyses:
-            mod = (
-                analysis.file_path
-                .replace(".py", "")
-                .replace("/", ".")
-                .replace("\\", ".")
-            )
+            if self.language == "javascript":
+                mod = analysis.file_path
+            else:
+                mod = (
+                    analysis.file_path
+                    .replace(".py", "")
+                    .replace("/", ".")
+                    .replace("\\", ".")
+                )
             if mod in target_modules or not target_modules:
                 for func in analysis.functions:
                     if not func.is_method and not func.name.startswith("_"):
@@ -478,24 +488,33 @@ class ExecutionEngine:
         # Prefer explicit target_files from test_config
         target_files = config.get("target_files", [])
         if target_files:
+            if self.language == "javascript":
+                return [f for f in target_files]
             return [
                 f.replace(".py", "").replace("/", ".").replace("\\", ".")
                 for f in target_files
             ]
 
-        # Fall back to all analyzed Python files (excluding tests/private)
+        # Fall back to all analyzed files (excluding tests/private)
         modules = []
         for analysis in self.ingestion.file_analyses:
             if analysis.parse_error:
                 continue
-            mod = (
-                analysis.file_path
-                .replace(".py", "")
-                .replace("/", ".")
-                .replace("\\", ".")
-            )
-            if not mod.startswith("test_") and not mod.startswith("_"):
-                modules.append(mod)
+            if self.language == "javascript":
+                # JS: keep relative file paths as-is for require()
+                fp = analysis.file_path
+                base = fp.split("/")[-1].split("\\")[-1]
+                if not base.startswith("test") and not base.startswith("_"):
+                    modules.append(fp)
+            else:
+                mod = (
+                    analysis.file_path
+                    .replace(".py", "")
+                    .replace("/", ".")
+                    .replace("\\", ".")
+                )
+                if not mod.startswith("test_") and not mod.startswith("_"):
+                    modules.append(mod)
 
         return modules[:20]
 
@@ -883,7 +902,7 @@ const _callables = [];
 // ── Module Import ──
 for (const _modName of (CONFIG.target_modules || [])) {
     try {
-        const _modPath = path.resolve(process.cwd(), _modName.replace(/\\./g, path.sep));
+        const _modPath = path.resolve(process.cwd(), _modName);
         _modules[_modName] = require(_modPath);
     } catch (_e) {
         _importErrors.push({

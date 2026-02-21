@@ -377,7 +377,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             approved = _run_scenario_review(scenarios, config, result)
 
             # ── Stage 8: Execution ──
-            _run_execution(session, ingestion, approved, result)
+            _run_execution(session, ingestion, approved, result, language)
 
             # Record execution
             if result.execution is not None:
@@ -729,6 +729,7 @@ def _run_execution(
     ingestion: IngestionResult,
     approved_scenarios: list[StressTestScenario],
     result: PipelineResult,
+    language: str = "python",
 ) -> None:
     """Stage 8: Execute approved scenarios."""
     stage_start = time.monotonic()
@@ -742,7 +743,9 @@ def _run_execution(
         return
 
     try:
-        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        engine = ExecutionEngine(
+            session=session, ingestion=ingestion, language=language,
+        )
         execution = engine.execute(scenarios=approved_scenarios)
         result.execution = execution
 

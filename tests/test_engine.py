@@ -938,6 +938,61 @@ class TestScenarioExecution:
             result = engine._execute_scenario(scenario)
             assert result.status == "completed", f"Category {cat} should complete"
 
+    def test_js_language_shared_categories_use_node(self, tmp_path):
+        """Shared categories (data_volume_scaling, etc.) should use node for JS projects."""
+        session = _make_session(tmp_path)
+        harness_stdout = _make_harness_output(steps=[_make_step_data()])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout=harness_stdout, stderr="",
+        )
+
+        engine = ExecutionEngine(session, _make_ingestion(), language="javascript")
+        shared_categories = [
+            "data_volume_scaling", "memory_profiling",
+            "edge_case_input", "concurrent_execution",
+        ]
+        for cat in shared_categories:
+            session.run_in_session.reset_mock()
+            session.run_in_session.return_value = SessionResult(
+                returncode=0, stdout=harness_stdout, stderr="",
+            )
+            scenario = _make_scenario(name=f"js_{cat}", category=cat)
+            engine._execute_scenario(scenario)
+            call_args = session.run_in_session.call_args[0][0]
+            assert call_args[0] == "node", (
+                f"Shared category '{cat}' should use node for JS projects"
+            )
+            assert call_args[1].endswith(".js"), (
+                f"Shared category '{cat}' should write .js harness for JS projects"
+            )
+
+    def test_python_language_shared_categories_use_python(self, tmp_path):
+        """Shared categories should still use python for Python projects."""
+        session = _make_session(tmp_path)
+        harness_stdout = _make_harness_output(steps=[_make_step_data()])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout=harness_stdout, stderr="",
+        )
+
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+        scenario = _make_scenario(name="py_scaling", category="data_volume_scaling")
+        engine._execute_scenario(scenario)
+        call_args = session.run_in_session.call_args[0][0]
+        assert call_args[0] == "python", "Shared category should use python for Python projects"
+
+    def test_js_target_modules_preserve_file_paths(self, tmp_path):
+        """JS projects should keep file paths as-is, not convert to dot notation."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion(files=[
+            FileAnalysis(file_path="src/app.js", lines_of_code=100),
+            FileAnalysis(file_path="utils/helpers.js", lines_of_code=50),
+        ])
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenario = _make_scenario(test_config={"parameters": {}, "resource_limits": {}})
+        modules = engine._get_target_modules(scenario)
+        assert "src/app.js" in modules
+        assert "utils/helpers.js" in modules
+
     def test_failure_indicators_attached_to_result(self, tmp_path):
         session = _make_session(tmp_path)
         harness_stdout = _make_harness_output(steps=[
