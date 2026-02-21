@@ -690,18 +690,37 @@ class ReportGenerator:
         #
         # Priority order: resource cap hits first, then memory degradation,
         # then execution time degradation, then other findings.
-        # This ensures the most impactful items surface first.
+        # Degradation points are preferred over findings for the same
+        # scenario because they contain richer curve data (start→end
+        # values, breaking points).
 
         # Build a list of (priority, scenario_name, translated_text)
         candidates: list[tuple[int, str, str]] = []
 
-        # Critical/warning findings (resource caps, failures)
+        # Degradation points first — they have the richest data
+        degradation_scenarios: set[str] = set()
+        for dp in report.degradation_points:
+            translated = self._translate_degradation(dp, project_ref)
+            degradation_scenarios.add(dp.scenario_name)
+            # Memory degradation at priority 1, execution time at 2
+            if dp.metric == "memory_peak_mb":
+                prio = 1
+            elif dp.metric == "error_count":
+                prio = 1
+            else:
+                prio = 2
+            candidates.append((prio, dp.scenario_name, translated))
+
+        # Critical/warning findings — only for scenarios without
+        # degradation points (which already have better data)
         for f in report.findings:
             if f.severity == "info":
                 continue
             scenario_name = (
                 f.title.split(": ", 1)[-1] if ": " in f.title else ""
             )
+            if scenario_name in degradation_scenarios:
+                continue
             translated = self._translate_finding(f, project_ref)
             if translated:
                 # Resource cap hits get priority 0, other criticals 1, warnings 2
@@ -712,18 +731,6 @@ class ReportGenerator:
                 else:
                     prio = 2
                 candidates.append((prio, scenario_name, translated))
-
-        # Degradation points
-        for dp in report.degradation_points:
-            translated = self._translate_degradation(dp, project_ref)
-            # Memory degradation at priority 1, execution time at 2
-            if dp.metric == "memory_peak_mb":
-                prio = 1
-            elif dp.metric == "error_count":
-                prio = 1
-            else:
-                prio = 2
-            candidates.append((prio, dp.scenario_name, translated))
 
         # Sort by priority, then pick top 3 (one per scenario)
         candidates.sort(key=lambda c: c[0])
@@ -832,7 +839,7 @@ class ReportGenerator:
             if f._peak_memory_mb > 0:
                 parts.append(f"memory reached {f._peak_memory_mb:.0f}MB")
             if f._error_count > 0:
-                parts.append(f"{f._error_count} errors occurred")
+                parts.append(_describe_errors(f))
             if parts:
                 return f"When {ctx}, {' and '.join(parts)}."
             return f"When {ctx}, the system struggled under load."
@@ -859,8 +866,8 @@ class ReportGenerator:
                 return f"When {ctx}, the system hits safety limits."
             if f._error_count > 0:
                 return (
-                    f"When {ctx}, errors start appearing — "
-                    f"{f._error_count} errors at the highest load."
+                    f"When {ctx}, {_describe_errors(f)} "
+                    f"at the highest load."
                 )
             # Use actual metrics
             parts = []
@@ -896,7 +903,7 @@ class ReportGenerator:
             if f._peak_memory_mb > 0:
                 parts.append(f"memory reached {f._peak_memory_mb:.0f}MB")
             if f._error_count > 0:
-                parts.append(f"{f._error_count} errors occurred")
+                parts.append(_describe_errors(f))
             if parts:
                 return f"When {activity}, {' and '.join(parts)}."
             return f"When {activity}, issues were found."
@@ -1488,6 +1495,34 @@ def _extract_cap_type(f: "Finding") -> str:
     if "resource" in combined and "cap" in combined:
         return "the system hit its resource limits"
     return ""
+
+
+def _describe_errors(f: "Finding") -> str:
+    """Describe errors from a finding in plain language.
+
+    Uses the finding's details/title to determine error type, and
+    handles singular/plural correctly.
+    """
+    count = f._error_count
+    details_lower = f.details.lower() if f.details else ""
+    title_lower = f.title.lower() if f.title else ""
+    combined = f"{details_lower} {title_lower}"
+
+    if "timeout" in combined:
+        if count == 1:
+            return "1 request timed out"
+        return f"{count} requests timed out"
+    if "memory" in combined and ("oom" in combined or "limit" in combined or "cap" in combined):
+        return "the system ran out of memory"
+    if "connection" in combined:
+        if count == 1:
+            return "1 connection failed"
+        return f"{count} connections failed"
+
+    # Generic fallback with correct pluralization
+    if count == 1:
+        return "1 error occurred"
+    return f"{count} errors occurred"
 
 
 def _extract_project_ref(operational_intent: str) -> str:

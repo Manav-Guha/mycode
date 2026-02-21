@@ -28,6 +28,7 @@ from mycode.report import (
     _describe_impact,
     _describe_scenario,
     _describe_step,
+    _describe_errors,
     _extract_cap_type,
     _extract_project_ref,
     _format_ms,
@@ -1670,6 +1671,81 @@ class TestPlainSummary:
             "Sales Dashboard \u2014 shows monthly revenue"
         ) == "Sales Dashboard"
 
+    def test_degradation_preferred_over_finding_same_scenario(self):
+        """Degradation points surface instead of findings for the same scenario."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                # This scenario produces BOTH a finding (failed) AND degradation
+                # points. The degradation point has curve data so should be preferred.
+                ScenarioResult(
+                    scenario_name="streamlit_cache_memory_growth",
+                    scenario_category="memory_profiling",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="batch_0", execution_time_ms=5.0, memory_peak_mb=0.08),
+                        StepResult(step_name="batch_50", execution_time_ms=5.0, memory_peak_mb=72.0),
+                    ],
+                    total_errors=0,
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+
+        lower = report.plain_summary.lower()
+        # Should contain degradation curve data (actual MB values)
+        assert "0mb" in lower or "72mb" in lower
+        # Should NOT just say "keeps growing" without numbers
+        assert "72mb" in lower
+
+    def test_error_pluralization_singular(self):
+        """Single error uses singular form."""
+        gen = ReportGenerator(offline=True)
+        f = Finding(
+            title="Errors during: flask_concurrent_request_load",
+            severity="warning",
+            category="concurrent_execution",
+        )
+        f._execution_time_ms = 0.0
+        f._peak_memory_mb = 0.0
+        f._error_count = 1
+        result = gen._translate_finding(f, "your project")
+        assert "1 error occurred" in result.lower() or "1 request" in result.lower()
+        assert "1 errors" not in result.lower()
+
+    def test_error_pluralization_plural(self):
+        """Multiple errors uses plural form."""
+        gen = ReportGenerator(offline=True)
+        f = Finding(
+            title="Errors during: flask_concurrent_request_load",
+            severity="warning",
+            category="concurrent_execution",
+        )
+        f._execution_time_ms = 0.0
+        f._peak_memory_mb = 0.0
+        f._error_count = 5
+        result = gen._translate_finding(f, "your project")
+        assert "5 errors occurred" in result.lower() or "5 request" in result.lower()
+
+    def test_error_describes_timeout_type(self):
+        """Error description identifies timeout errors from details."""
+        gen = ReportGenerator(offline=True)
+        f = Finding(
+            title="Errors during: requests_timeout_behavior",
+            severity="warning",
+            category="concurrent_execution",
+            details="TimeoutError: Connection timed out after 30s",
+        )
+        f._execution_time_ms = 0.0
+        f._peak_memory_mb = 0.0
+        f._error_count = 3
+        result = gen._translate_finding(f, "your project")
+        assert "timed out" in result.lower()
+
 
 class TestPlainSummaryHelpers:
     """Tests for plain summary module-level helpers."""
@@ -1785,3 +1861,29 @@ class TestPlainSummaryHelpers:
         # Should NOT contain vague phrases
         assert "things slow down" not in lower
         assert "problems were detected" not in lower
+
+    def test_describe_errors_singular(self):
+        f = Finding(title="test", severity="warning")
+        f._error_count = 1
+        result = _describe_errors(f)
+        assert "1 error occurred" == result
+
+    def test_describe_errors_plural(self):
+        f = Finding(title="test", severity="warning")
+        f._error_count = 5
+        result = _describe_errors(f)
+        assert "5 errors occurred" == result
+
+    def test_describe_errors_timeout(self):
+        f = Finding(title="test", severity="warning",
+                    details="TimeoutError: read timed out")
+        f._error_count = 3
+        result = _describe_errors(f)
+        assert "3 requests timed out" == result
+
+    def test_describe_errors_timeout_singular(self):
+        f = Finding(title="test", severity="warning",
+                    details="TimeoutError: read timed out")
+        f._error_count = 1
+        result = _describe_errors(f)
+        assert "1 request timed out" == result
