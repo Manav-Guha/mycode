@@ -785,63 +785,53 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
         coupling points from the ingester, and generic scenarios for coverage.
         """
         scenarios: list[StressTestScenario] = []
+        warnings: list[str] = []
+
+        # Collect browser-only deps — skip library-specific tests for these
+        browser_only_deps: list[str] = []
+        for match in recognized:
+            if match.profile is not None and match.profile.browser_only:
+                browser_only_deps.append(match.dependency_name)
 
         # 1. Profile-based scenarios from stress_test_templates
         for match in recognized:
             profile = match.profile
             assert profile is not None
 
-            # Browser-only deps: prefer node_stress_test_templates
-            if profile.browser_only and profile.node_stress_test_templates:
-                for template in profile.node_stress_test_templates:
-                    cat = template.get("category", "")
-                    if cat not in valid_categories:
-                        continue
-                    test_cfg: dict = {
+            # Browser-only deps: skip library-specific stress tests entirely.
+            # Rendering stress tests require a browser environment.
+            if profile.browser_only:
+                continue
+
+            for template in profile.stress_test_templates:
+                cat = template.get("category", "")
+                if cat not in valid_categories:
+                    continue
+                scenarios.append(StressTestScenario(
+                    name=f"{profile.name}_{template['name']}",
+                    category=cat,
+                    description=template.get("description", ""),
+                    target_dependencies=[match.dependency_name],
+                    test_config={
                         "parameters": template.get("parameters", {}),
                         "measurements": _infer_measurements(cat),
                         "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
-                        "skip_imports": True,
-                    }
-                    harness_body = template.get("harness_body", "")
-                    if harness_body:
-                        test_cfg["harness_body"] = harness_body
-                    scenarios.append(StressTestScenario(
-                        name=f"{profile.name}_{template['name']}",
-                        category=cat,
-                        description=template.get("description", ""),
-                        target_dependencies=[match.dependency_name],
-                        test_config=test_cfg,
-                        expected_behavior=template.get("expected_behavior", ""),
-                        failure_indicators=template.get("failure_indicators", []),
-                        priority=_infer_priority_from_template(template),
-                        source="offline",
-                    ))
-            else:
-                for template in profile.stress_test_templates:
-                    cat = template.get("category", "")
-                    if cat not in valid_categories:
-                        continue
-                    scenarios.append(StressTestScenario(
-                        name=f"{profile.name}_{template['name']}",
-                        category=cat,
-                        description=template.get("description", ""),
-                        target_dependencies=[match.dependency_name],
-                        test_config={
-                            "parameters": template.get("parameters", {}),
-                            "measurements": _infer_measurements(cat),
-                            "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
-                        },
-                        expected_behavior=template.get("expected_behavior", ""),
-                        failure_indicators=template.get("failure_indicators", []),
-                        priority=_infer_priority_from_template(template),
-                        source="offline",
-                    ))
+                    },
+                    expected_behavior=template.get("expected_behavior", ""),
+                    failure_indicators=template.get("failure_indicators", []),
+                    priority=_infer_priority_from_template(template),
+                    source="offline",
+                ))
 
         # 2. Failure-mode scenarios for critical/high severity issues
         for match in recognized:
             profile = match.profile
             assert profile is not None
+
+            # Browser-only deps: skip failure mode tests too (they import browser libs)
+            if profile.browser_only:
+                continue
+
             for mode in profile.known_failure_modes:
                 if mode.get("severity") not in ("critical", "high"):
                     continue
@@ -852,8 +842,6 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                     "measurements": ["error_count", "error_type"],
                     "resource_limits": {"memory_mb": 512, "timeout_seconds": 30},
                 }
-                if profile.browser_only:
-                    fm_config["skip_imports"] = True
                 scenarios.append(StressTestScenario(
                     name=f"{profile.name}_{mode['name']}_check",
                     category="edge_case_input",
@@ -1104,10 +1092,20 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 source="offline",
             ))
 
+        # Add warning for browser-only deps that were skipped
+        if browser_only_deps:
+            dep_list = ", ".join(sorted(set(browser_only_deps)))
+            warnings.append(
+                f"{dep_list} are browser-rendered libraries. "
+                f"Rendering stress tests require a browser environment "
+                f"(planned for future release). "
+                f"Data flow and coupling tests were performed."
+            )
+
         return ScenarioGeneratorResult(
             scenarios=scenarios,
             reasoning="",
-            warnings=[],
+            warnings=warnings,
             model_used="offline",
         )
 

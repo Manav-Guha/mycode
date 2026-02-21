@@ -1517,10 +1517,10 @@ class TestRealProfileIntegration:
 
 
 class TestBrowserOnlyHandling:
-    """Test browser-only deps route to node-safe templates with skip_imports."""
+    """Test browser-only deps are skipped entirely with a warning."""
 
-    def test_browser_only_uses_node_templates(self):
-        """Browser-only profile with node templates → uses node templates, has skip_imports and harness_body."""
+    def test_browser_only_skips_library_tests(self):
+        """Browser-only profile → no library-specific scenarios generated, warning emitted."""
         profile = _make_browser_only_profile("chartjs")
         match = ProfileMatch(
             dependency_name="chart.js",
@@ -1537,21 +1537,18 @@ class TestBrowserOnlyHandling:
         gen = ScenarioGenerator(offline=True)
         result = gen.generate(ingestion, [match], "A charting app", "javascript")
 
-        template_scenarios = [s for s in result.scenarios if s.name.startswith("chartjs_")]
-        # Should use node_stress_test_templates (2), not stress_test_templates (1)
-        # (failure mode scenarios also start with chartjs_ so filter those out)
-        node_template_scenarios = [
-            s for s in template_scenarios
-            if s.test_config.get("skip_imports") is True
-            and "harness_body" in s.test_config
-        ]
-        assert len(node_template_scenarios) == 2
-        # Each should have harness_body
-        for s in node_template_scenarios:
-            assert s.test_config["harness_body"].startswith("node_")
+        # No library-specific scenarios (templates or failure modes)
+        chartjs_scenarios = [s for s in result.scenarios if s.name.startswith("chartjs_")]
+        assert len(chartjs_scenarios) == 0
 
-    def test_non_browser_ignores_node_templates(self):
-        """Non-browser profile → uses regular stress_test_templates, no skip_imports."""
+        # Warning should mention browser-rendered libraries
+        assert len(result.warnings) >= 1
+        assert "chart.js" in result.warnings[0]
+        assert "browser-rendered" in result.warnings[0]
+        assert "browser environment" in result.warnings[0]
+
+    def test_non_browser_generates_normally(self):
+        """Non-browser profile → uses regular stress_test_templates, no warning."""
         profile = _make_profile("express", "web_framework")
         match = ProfileMatch(
             dependency_name="express",
@@ -1569,40 +1566,13 @@ class TestBrowserOnlyHandling:
         result = gen.generate(ingestion, [match], "A web server", "javascript")
 
         template_scenarios = [s for s in result.scenarios if s.name.startswith("express_")]
-        for s in template_scenarios:
-            assert s.test_config.get("skip_imports") is not True
-            assert "harness_body" not in s.test_config
-
-    def test_browser_only_without_node_templates_falls_back(self):
-        """browser_only=True but empty node_stress_test_templates → uses regular templates."""
-        profile = _make_browser_only_profile("testlib")
-        # Clear node_stress_test_templates
-        profile.node_stress_test_templates.clear()
-        match = ProfileMatch(
-            dependency_name="testlib",
-            profile=profile,
-            installed_version="1.0.0",
-            version_match=True,
-        )
-        ingestion = IngestionResult(
-            project_path="/tmp/test",
-            files_analyzed=1,
-            total_lines=50,
-            file_analyses=[],
-        )
-        gen = ScenarioGenerator(offline=True)
-        result = gen.generate(ingestion, [match], "A test app", "javascript")
-
-        template_scenarios = [s for s in result.scenarios if s.name.startswith("testlib_")]
-        # Should fall back to regular stress_test_templates
         assert len(template_scenarios) >= 1
-        # Regular templates don't have skip_imports
-        for s in template_scenarios:
-            if not s.name.endswith("_check"):
-                assert s.test_config.get("skip_imports") is not True
+        # No browser-only warning
+        browser_warnings = [w for w in result.warnings if "browser-rendered" in w]
+        assert len(browser_warnings) == 0
 
-    def test_browser_only_failure_modes_skip_imports(self):
-        """Failure mode scenarios for browser-only dep should have skip_imports."""
+    def test_browser_only_no_failure_mode_scenarios(self):
+        """Browser-only dep should NOT generate failure mode scenarios either."""
         profile = _make_browser_only_profile("chartjs")
         match = ProfileMatch(
             dependency_name="chart.js",
@@ -1620,9 +1590,26 @@ class TestBrowserOnlyHandling:
         result = gen.generate(ingestion, [match], "A charting app", "javascript")
 
         failure_scenarios = [s for s in result.scenarios if s.name.endswith("_check")]
-        assert len(failure_scenarios) >= 1
-        for s in failure_scenarios:
-            assert s.test_config.get("skip_imports") is True
+        assert len(failure_scenarios) == 0
+
+    def test_browser_only_warning_lists_all_deps(self):
+        """Warning should list all browser-only deps that were skipped."""
+        profile1 = _make_browser_only_profile("chartjs")
+        profile2 = _make_browser_only_profile("react")
+        match1 = ProfileMatch(dependency_name="chart.js", profile=profile1)
+        match2 = ProfileMatch(dependency_name="react", profile=profile2)
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+            file_analyses=[],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [match1, match2], "A charting app", "javascript")
+
+        assert len(result.warnings) >= 1
+        assert "chart.js" in result.warnings[0]
+        assert "react" in result.warnings[0]
 
     def test_dom_render_coupling_js_skip_imports(self):
         """DOM_RENDER coupling points in JS should get skip_imports."""
