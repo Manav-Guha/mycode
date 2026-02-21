@@ -1077,6 +1077,43 @@ class TestCouplingBehaviorClassification:
         result = classify_coupling_point(cp, [fa], "python")
         assert result == CouplingBehaviorType.ERROR_HANDLER
 
+    def test_classify_react_usestate_setter_with_import(self):
+        """setLoading in file importing react → STATE_SETTER (even without FunctionInfo)."""
+        fa = self._make_fa("components/App.jsx", functions=[
+            # setLoading is NOT a defined function — comes from useState()
+            # Only other functions exist in the file
+            FunctionInfo(name="App", file_path="components/App.jsx", lineno=1,
+                        calls=["useState", "useEffect"]),
+        ], imports=[
+            ImportInfo(module="react", names=["useState"], is_from_import=True, lineno=1),
+        ])
+        # setLoading has no FunctionInfo — can't be resolved
+        cp = CouplingPoint(source="components/App.setLoading", targets=["a", "b", "c"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [fa], "javascript")
+        assert result == CouplingBehaviorType.STATE_SETTER
+
+    def test_classify_react_setter_js_without_file_resolution(self):
+        """setError in JS with no matching file → STATE_SETTER by name convention."""
+        cp = CouplingPoint(source="unknown.setError", targets=["a"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [], "javascript")
+        assert result == CouplingBehaviorType.STATE_SETTER
+
+    def test_classify_set_prefix_not_triggered_for_python(self):
+        """setConfig in Python without signals → PURE_COMPUTATION (no React convention)."""
+        cp = CouplingPoint(source="unknown.setConfig", targets=["a"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [], "python")
+        assert result == CouplingBehaviorType.PURE_COMPUTATION
+
+    def test_classify_set_lowercase_not_triggered(self):
+        """setup (lowercase after set) should NOT match set[A-Z] pattern."""
+        cp = CouplingPoint(source="unknown.setup", targets=["a"],
+                          coupling_type="high_fan_in", description="test")
+        result = classify_coupling_point(cp, [], "javascript")
+        assert result == CouplingBehaviorType.PURE_COMPUTATION
+
 
 class TestCouplingPointGrouping:
     """Test grouping coupling points by behavior."""
@@ -1139,8 +1176,8 @@ class TestCouplingPointGrouping:
 class TestOfflineCouplingBehavior:
     """Test that offline generation uses behavior-aware coupling scenarios."""
 
-    def test_offline_state_setters_collapsed(self):
-        """5 state setter CPs → 1 grouped scenario."""
+    def test_offline_state_setters_collapsed_python(self):
+        """5 state setter CPs (Python globals) → 1 grouped scenario."""
         ingestion = IngestionResult(
             project_path="/tmp/test",
             files_analyzed=1,
@@ -1167,6 +1204,42 @@ class TestOfflineCouplingBehavior:
         result = gen.generate(ingestion, [], "A web app", "python")
         coupling_scenarios = [s for s in result.scenarios if s.name.startswith("coupling_")]
         # All 5 state setters should collapse into 1 scenario
+        assert len(coupling_scenarios) == 1
+        assert "state_setters_group" in coupling_scenarios[0].name
+
+    def test_offline_react_setters_collapsed(self):
+        """React useState setters (setLoading, setError, etc.) → 1 grouped scenario."""
+        setter_names = ["setLoading", "setError", "setRawScores",
+                        "setNormScores", "setClassResult"]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=200,
+            file_analyses=[FileAnalysis(
+                file_path="components/App.jsx",
+                functions=[
+                    FunctionInfo(name="App", file_path="components/App.jsx",
+                                lineno=1, calls=["useState", "useEffect"]),
+                ],
+                imports=[
+                    ImportInfo(module="react", names=["useState"],
+                             is_from_import=True, lineno=1),
+                ],
+                lines_of_code=200,
+            )],
+            coupling_points=[
+                CouplingPoint(
+                    source=f"components/App.{name}", targets=["a", "b", "c"],
+                    coupling_type="high_fan_in",
+                    description=f"'{name}' is called by 3 functions",
+                )
+                for name in setter_names
+            ],
+        )
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, [], "A React app", "javascript")
+        coupling_scenarios = [s for s in result.scenarios if s.name.startswith("coupling_")]
+        # All 5 React state setters should collapse into 1 scenario
         assert len(coupling_scenarios) == 1
         assert "state_setters_group" in coupling_scenarios[0].name
 

@@ -272,8 +272,8 @@ class LLMBackend:
 
 
 _ERROR_HANDLER_NAMES = frozenset({
-    "error", "handle_error", "catch", "fallback", "exception",
-    "on_error", "onerror",
+    "error", "handle_error", "handleerror", "catch", "fallback", "exception",
+    "on_error", "onerror", "error_handler", "errorhandler",
 })
 
 _ERROR_HANDLER_DECORATORS = frozenset({
@@ -385,10 +385,22 @@ def classify_coupling_point(
                         break
 
     # Apply classification rules in priority order
+    func_name_lower = func_name.lower()
+
+    # 0. React/Vue useState setter pattern: setXxx where Xxx is capitalized.
+    #    Unambiguous — always a state setter. Checked first to prevent
+    #    "setError" from matching the error-handler "error" pattern.
+    if re.match(r"set[A-Z]", func_name):
+        if file_analysis:
+            file_imports_lower = {
+                imp.module.lower().split(".")[0] for imp in file_analysis.imports
+            }
+            if file_imports_lower & _DOM_MODULES:
+                return CouplingBehaviorType.STATE_SETTER
+        if language.lower() == "javascript":
+            return CouplingBehaviorType.STATE_SETTER
 
     # 1. Error handler — by name
-    source_lower = source.lower()
-    func_name_lower = func_name.lower()
     for pattern in _ERROR_HANDLER_NAMES:
         if pattern in func_name_lower:
             return CouplingBehaviorType.ERROR_HANDLER

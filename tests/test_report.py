@@ -1075,6 +1075,138 @@ class TestMetricsSimilar:
         assert ReportGenerator._metrics_similar(a, b) is False
 
 
+class TestDegradationGrouping:
+    """Tests for grouping similar degradation points."""
+
+    def _make_dp(self, name, metric="execution_time_ms",
+                 first=10.0, last=100.0):
+        """Helper to create a DegradationPoint with steps."""
+        return DegradationPoint(
+            scenario_name=name,
+            metric=metric,
+            steps=[("small", first), ("large", last)],
+            breaking_point="large",
+            description=f"{metric} increased {last/first:.1f}x",
+        )
+
+    def test_group_identical_degradation(self):
+        """3 degradation points with same metric and ratio → 1 with count=3."""
+        points = [
+            self._make_dp(f"coupling_compute_{i}", first=10.0, last=260.0)
+            for i in range(3)
+        ]
+        result = ReportGenerator._group_similar_degradation_points(points)
+        assert len(result) == 1
+        assert result[0].group_count == 3
+        assert len(result[0].grouped_points) == 2
+
+    def test_no_group_different_metrics(self):
+        """Same ratio, different metrics → 2 separate."""
+        points = [
+            self._make_dp("test_a", metric="execution_time_ms", first=10, last=100),
+            self._make_dp("test_b", metric="memory_peak_mb", first=10, last=100),
+        ]
+        result = ReportGenerator._group_similar_degradation_points(points)
+        assert len(result) == 2
+
+    def test_no_group_divergent_ratios(self):
+        """>10% ratio difference → 2 separate."""
+        points = [
+            self._make_dp("test_a", first=10.0, last=260.0),   # 26x
+            self._make_dp("test_b", first=10.0, last=100.0),   # 10x
+        ]
+        result = ReportGenerator._group_similar_degradation_points(points)
+        assert len(result) == 2
+
+    def test_within_10pct_ratio_groups(self):
+        """26x vs 28x (7.7% diff) → grouped."""
+        points = [
+            self._make_dp("test_a", first=10.0, last=260.0),   # 26x
+            self._make_dp("test_b", first=10.0, last=280.0),   # 28x
+        ]
+        result = ReportGenerator._group_similar_degradation_points(points)
+        assert len(result) == 1
+        assert result[0].group_count == 2
+
+    def test_grouped_degradation_rendering(self):
+        """as_text() shows '(and N similar)' and Also: list for degradation."""
+        dp = DegradationPoint(
+            scenario_name="coupling_compute_setLoading",
+            metric="execution_time_ms",
+            steps=[("small", 10.0), ("large", 2600.0)],
+            breaking_point="large",
+            description="Execution time increased 260.0x",
+            grouped_points=[
+                DegradationPoint(
+                    scenario_name="coupling_compute_setError",
+                    metric="execution_time_ms",
+                ),
+                DegradationPoint(
+                    scenario_name="coupling_compute_setRawScores",
+                    metric="execution_time_ms",
+                ),
+            ],
+            group_count=3,
+        )
+        report = DiagnosticReport(degradation_points=[dp])
+        text = report.as_text()
+        assert "(and 2 similar)" in text
+        assert "Also: coupling_compute_setError, coupling_compute_setRawScores" in text
+
+    def test_many_grouped_shows_plus_more(self):
+        """More than 5 grouped → shows '+N more'."""
+        grouped = [
+            DegradationPoint(
+                scenario_name=f"coupling_compute_func_{i}",
+                metric="execution_time_ms",
+            )
+            for i in range(8)
+        ]
+        dp = DegradationPoint(
+            scenario_name="coupling_compute_func_main",
+            metric="execution_time_ms",
+            steps=[("small", 10.0), ("large", 260.0)],
+            grouped_points=grouped,
+            group_count=9,
+        )
+        report = DiagnosticReport(degradation_points=[dp])
+        text = report.as_text()
+        assert "(and 8 similar)" in text
+        assert "+3 more" in text
+
+    def test_grouping_wired_into_generate(self):
+        """End-to-end: identical degradation from multiple scenarios gets grouped."""
+        # Create 5 scenarios that all produce identical degradation
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name=f"coupling_compute_{i}",
+                    scenario_category="data_volume_scaling",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="size_100",
+                                  execution_time_ms=10.0, memory_peak_mb=5.0),
+                        StepResult(step_name="size_10000",
+                                  execution_time_ms=250.0, memory_peak_mb=120.0),
+                    ],
+                    total_errors=0,
+                )
+                for i in range(5)
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+        # 5 scenarios × 2 metrics (time + memory) = 10 degradation points raw
+        # Should group to 2 (one per metric)
+        assert len(report.degradation_points) == 2
+        for dp in report.degradation_points:
+            assert dp.group_count == 5
+
+
 class TestFindingPattern:
     """Direct tests for _finding_pattern."""
 

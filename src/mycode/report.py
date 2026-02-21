@@ -81,6 +81,8 @@ class DegradationPoint:
         breaking_point: The step label where degradation became severe,
             or empty if performance stayed stable.
         description: Plain-language description of the degradation curve.
+        grouped_points: Other degradation points collapsed into this one.
+        group_count: Total in this group (1 = ungrouped).
     """
 
     scenario_name: str
@@ -88,6 +90,8 @@ class DegradationPoint:
     steps: list[tuple[str, float]] = field(default_factory=list)
     breaking_point: str = ""
     description: str = ""
+    grouped_points: list["DegradationPoint"] = field(default_factory=list)
+    group_count: int = 1
 
 
 @dataclass
@@ -184,7 +188,10 @@ class DiagnosticReport:
             sections.append("  Degradation Curves")
             sections.append("-" * 40)
             for dp in self.degradation_points:
-                sections.append(f"\n  {dp.scenario_name} ({dp.metric}):")
+                header = f"{dp.scenario_name} ({dp.metric})"
+                if dp.group_count > 1:
+                    header += f" (and {dp.group_count - 1} similar)"
+                sections.append(f"\n  {header}:")
                 if dp.description:
                     sections.append(f"    {dp.description}")
                 if dp.steps:
@@ -194,6 +201,14 @@ class DiagnosticReport:
                     sections.append(
                         f"    >> Breaking point: {dp.breaking_point}"
                     )
+                if dp.grouped_points:
+                    names = [gp.scenario_name for gp in dp.grouped_points]
+                    shown = names[:5]
+                    extra = len(names) - 5
+                    also_line = ", ".join(shown)
+                    if extra > 0:
+                        also_line += f" +{extra} more"
+                    sections.append(f"    Also: {also_line}")
 
         # Version flags
         if self.version_flags:
@@ -294,8 +309,11 @@ class ReportGenerator:
         # 3. Flag unrecognized dependencies
         self._flag_unrecognized_deps(profile_matches, report)
 
-        # 3b. Group similar findings to reduce noise
+        # 3b. Group similar findings and degradation points to reduce noise
         report.findings = self._group_similar_findings(report.findings)
+        report.degradation_points = self._group_similar_degradation_points(
+            report.degradation_points,
+        )
 
         # 4. Sort findings by severity
         severity_order = {"critical": 0, "warning": 1, "info": 2}
@@ -917,6 +935,75 @@ class ReportGenerator:
                     representative.grouped_findings = cluster[1:]
                     representative.group_count = len(cluster)
                     result.append(representative)
+
+        return result
+
+    @staticmethod
+    def _degradation_ratio(dp: DegradationPoint) -> float:
+        """Compute first-to-last ratio from a degradation point's steps."""
+        if len(dp.steps) < 2:
+            return 1.0
+        first = dp.steps[0][1]
+        last = dp.steps[-1][1]
+        if first < 0.001:
+            return last  # treat near-zero baseline as the raw last value
+        return last / first
+
+    @staticmethod
+    def _group_similar_degradation_points(
+        points: list[DegradationPoint],
+        tolerance: float = 0.10,
+    ) -> list[DegradationPoint]:
+        """Group degradation points with the same metric and similar ratio.
+
+        Uses anchor-based clustering: within each metric group, the first
+        point becomes the anchor. Subsequent points whose degradation ratio
+        is within ±tolerance of the anchor join the cluster.
+
+        Returns a flat list of representatives (with grouped_points and
+        group_count set) plus singletons.
+        """
+        from collections import defaultdict
+
+        # Group by metric
+        buckets: dict[str, list[DegradationPoint]] = defaultdict(list)
+        for dp in points:
+            buckets[dp.metric].append(dp)
+
+        result: list[DegradationPoint] = []
+        for _metric, bucket in buckets.items():
+            if len(bucket) == 1:
+                result.append(bucket[0])
+                continue
+
+            # Anchor-based clustering by ratio similarity
+            clusters: list[list[DegradationPoint]] = []
+            for dp in bucket:
+                ratio = ReportGenerator._degradation_ratio(dp)
+                placed = False
+                for cluster in clusters:
+                    anchor_ratio = ReportGenerator._degradation_ratio(cluster[0])
+                    # Both near-zero or both similar
+                    if anchor_ratio == 0.0 and ratio == 0.0:
+                        cluster.append(dp)
+                        placed = True
+                        break
+                    denom = max(abs(anchor_ratio), abs(ratio))
+                    if denom > 0 and abs(anchor_ratio - ratio) / denom <= tolerance:
+                        cluster.append(dp)
+                        placed = True
+                        break
+                if not placed:
+                    clusters.append([dp])
+
+            for cluster in clusters:
+                if len(cluster) == 1:
+                    result.append(cluster[0])
+                else:
+                    rep = cluster[0]
+                    rep.grouped_points = cluster[1:]
+                    rep.group_count = len(cluster)
+                    result.append(rep)
 
         return result
 
