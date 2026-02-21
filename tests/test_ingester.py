@@ -659,6 +659,21 @@ class TestRequirementsTxtParsing:
         deps = ingester._parse_requirements_txt(f)
         assert deps[0] == ("requests", ">=2.20")
 
+    def test_requirement_singular_txt(self, tmp_path):
+        """Projects with requirement.txt (no s) should still extract deps."""
+        (tmp_path / "app.py").write_text("import flask\n")
+        (tmp_path / "requirement.txt").write_text(
+            "flask==2.3.0\npandas>=1.5\nrequests\n"
+        )
+        ingester = ProjectIngester(
+            tmp_path, installed_packages={}, skip_pypi_check=True
+        )
+        deps = ingester._extract_dependencies()
+        names = [d.name for d in deps]
+        assert "flask" in names
+        assert "pandas" in names
+        assert "requests" in names
+
 
 # ── pyproject.toml Parsing Tests ──
 

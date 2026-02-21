@@ -24,6 +24,7 @@ from mycode.engine import (
     _JS_BODY_GENERIC,
     _JS_HARNESS_PREAMBLE,
     _JS_HARNESS_POSTAMBLE,
+    _PY_COUPLING_BODIES,
     _RESULTS_START,
     _RESULTS_END,
 )
@@ -1397,8 +1398,8 @@ class TestJSCouplingBodies:
         assert config["coupling_sources"] == ["setCount", "setName", "setItems"]
         assert config["target_modules"] == []
 
-    def test_python_coupling_unchanged(self, tmp_path):
-        """Python scenario with behavior key still imports user modules."""
+    def test_python_coupling_skips_imports(self, tmp_path):
+        """Python scenario with behavior key skips user module imports."""
         session = _make_session(tmp_path)
         engine = ExecutionEngine(session, _make_ingestion(), language="python")
 
@@ -1416,8 +1417,9 @@ class TestJSCouplingBodies:
         )
         config = engine._build_harness_config(scenario)
 
-        # Python coupling still discovers user modules
-        assert config["target_modules"] != []
+        # Python coupling now also skips user module imports
+        assert config["target_modules"] == []
+        assert config["target_functions"] == []
 
     def test_js_coupling_body_routing(self, tmp_path):
         """behavior parameter routes to _JS_COUPLING_BODIES."""
@@ -1454,3 +1456,67 @@ class TestJSCouplingBodies:
             assert opens == closes, (
                 f"'{name}' brace mismatch: {opens} opens vs {closes} closes"
             )
+
+
+class TestPyCouplingBodies:
+    """Test standalone Python coupling body templates."""
+
+    def test_python_coupling_body_routing(self, tmp_path):
+        """behavior parameter routes to _PY_COUPLING_BODIES."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        harness = engine._build_harness(
+            "data_volume_scaling",
+            behavior="pure_computation",
+        )
+        # Should contain coupling body content, not category body
+        assert "_workload_for_source" in harness
+        assert "json" in harness
+
+    def test_all_py_coupling_bodies_registered(self):
+        """All 5 behavior keys present in _PY_COUPLING_BODIES."""
+        expected = {
+            "pure_computation",
+            "state_setter",
+            "api_caller",
+            "dom_render",
+            "error_handler",
+        }
+        assert set(_PY_COUPLING_BODIES.keys()) == expected
+
+    def test_py_coupling_bodies_compile(self):
+        """Every Python coupling body must produce valid Python."""
+        for name, body in _PY_COUPLING_BODIES.items():
+            script = _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
+            try:
+                compile(script, f"harness_coupling_{name}.py", "exec")
+            except SyntaxError as e:
+                pytest.fail(f"Python coupling body '{name}' has syntax error: {e}")
+
+    def test_py_coupling_bodies_valid_structure(self):
+        """Every Python coupling body produces complete harness with markers."""
+        for name, body in _PY_COUPLING_BODIES.items():
+            script = _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
+            assert "__MYCODE_RESULTS_START__" in script, f"'{name}' missing start marker"
+            assert "__MYCODE_RESULTS_END__" in script, f"'{name}' missing end marker"
+            assert "CONFIG" in body, f"'{name}' does not reference CONFIG"
+
+    def test_py_coupling_body_does_not_use_callables(self):
+        """Python coupling bodies must not reference _callables or _modules."""
+        for name, body in _PY_COUPLING_BODIES.items():
+            assert "_callables" not in body, f"'{name}' references _callables"
+            assert "_modules" not in body, f"'{name}' references _modules"
+            assert "importlib" not in body, f"'{name}' references importlib"
+
+    def test_behavior_fallback_to_category(self, tmp_path):
+        """Unknown behavior falls back to category body."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        harness = engine._build_harness(
+            "data_volume_scaling",
+            behavior="nonexistent_behavior",
+        )
+        # Should fall back to data_volume_scaling body
+        assert "data_sizes" in harness

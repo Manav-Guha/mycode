@@ -554,7 +554,10 @@ class ProjectIngester:
         parsers = [
             (
                 self._parse_requirements_txt,
-                ["requirements.txt", "requirements-dev.txt", "requirements_dev.txt"],
+                [
+                    "requirements.txt", "requirement.txt",
+                    "requirements-dev.txt", "requirements_dev.txt",
+                ],
             ),
             (self._parse_pyproject_toml, ["pyproject.toml"]),
             (self._parse_setup_py, ["setup.py"]),

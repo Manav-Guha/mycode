@@ -242,7 +242,10 @@ class ExecutionEngine:
             )
             runner = "node"
         else:
-            harness_content = self._build_harness(scenario.category)
+            harness_content = self._build_harness(
+                scenario.category,
+                behavior=harness_config.get("behavior", ""),
+            )
             harness_path, config_path = self._write_harness(
                 harness_content, harness_config, scenario.name,
             )
@@ -285,8 +288,8 @@ class ExecutionEngine:
         behavior = config.get("behavior", "")
         skip_imports = config.get("skip_imports", False)
 
-        # JS coupling scenarios are standalone — no user imports needed
-        if behavior and self.language == "javascript":
+        # Coupling scenarios are standalone — no user imports needed
+        if behavior:
             skip_imports = True
 
         if skip_imports:
@@ -347,9 +350,12 @@ class ExecutionEngine:
 
         return harness_config
 
-    def _build_harness(self, category: str) -> str:
+    def _build_harness(self, category: str, behavior: str = "") -> str:
         """Generate a self-contained Python test harness script."""
-        body = _CATEGORY_BODIES.get(category, _BODY_GENERIC)
+        if behavior and behavior in _PY_COUPLING_BODIES:
+            body = _PY_COUPLING_BODIES[behavior]
+        else:
+            body = _CATEGORY_BODIES.get(category, _BODY_GENERIC)
         return _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
 
     def _build_js_harness(
@@ -924,6 +930,286 @@ _CATEGORY_BODIES: dict[str, str] = {
     "concurrent_execution": _BODY_CONCURRENT_EXECUTION,
     "blocking_io": _BODY_BLOCKING_IO,
     "gil_contention": _BODY_GIL_CONTENTION,
+}
+
+
+# ── Python Coupling Test Bodies ──
+#
+# Standalone bodies for Python coupling scenarios.  They do NOT reference
+# _callables or _modules — all operations are synthetic, driven by
+# the coupling metadata in CONFIG (coupling_source, coupling_sources,
+# coupling_targets, behavior).
+
+_PY_COUPLING_BODY_PURE_COMPUTATION = '''\
+_params = CONFIG.get("parameters", {})
+_source = CONFIG.get("coupling_source", "")
+_sizes = _params.get("data_sizes", [100, 1000, 10000, 100000])
+
+def _workload_for_source(name):
+    _lower = name.lower()
+    if "json" in _lower:
+        return "json"
+    if "sort" in _lower or "filter" in _lower or "map" in _lower:
+        return "list_ops"
+    if "fetch" in _lower or "request" in _lower:
+        return "fetch"
+    return "generic"
+
+_workload = _workload_for_source(_source)
+
+for _sz in _sizes:
+    def _run(_s=_sz, _wl=_workload):
+        if _wl == "json":
+            import json as _json
+            _obj = {("key_%d" % _i): {"value": _i, "label": "item_%d" % _i, "nested": {"a": _i}} for _i in range(_s)}
+            _str = _json.dumps(_obj)
+            _parsed = _json.loads(_str)
+            _ = len(_parsed)
+        elif _wl == "list_ops":
+            _arr = list(range(_s))
+            _mapped = [x * 2 + 1 for x in _arr]
+            _filtered = [x for x in _mapped if x % 3 != 0]
+            _reduced = sum(_filtered)
+            _ = _reduced
+        elif _wl == "fetch":
+            _responses = [
+                {"status": 200, "headers": {"content-type": "application/json"},
+                 "body": {"id": _i, "data": "x" * 100}}
+                for _i in range(_s)
+            ]
+            import json as _json
+            _total = 0
+            for _r in _responses:
+                _total += len(_json.dumps(_r["body"]))
+            _ = _total
+        else:
+            _arr = [{"v": _i, "s": str(_i)} for _i in range(_s)]
+            _arr.sort(key=lambda x: x["v"])
+            _total = sum(item["v"] for item in _arr)
+            _ = _total
+    _measure_step("compute_%d" % _sz, {"data_size": _sz, "workload": _workload, "source": _source}, _run)
+'''
+
+_PY_COUPLING_BODY_STATE_SETTER = '''\
+import threading
+_params = CONFIG.get("parameters", {})
+_sources = CONFIG.get("coupling_sources", [CONFIG.get("coupling_source", "setState")])
+_cycle_counts = _params.get("cycle_counts", [10, 100, 1000])
+
+for _cycles in _cycle_counts:
+    def _run(_n=_cycles, _setters=_sources):
+        _state = {s: 0 for s in _setters}
+        _lock = threading.Lock()
+        _race_detected = [False]
+
+        def _mutate(setter_name, count):
+            for _c in range(count):
+                with _lock:
+                    _state[setter_name] = _c
+                    # Simulate derived state
+                    _derived = {k + "_derived": v * 2 for k, v in _state.items()}
+                    _ = _derived
+
+        _threads = []
+        for _setter in _setters:
+            _t = threading.Thread(target=_mutate, args=(_setter, _n))
+            _threads.append(_t)
+            _t.start()
+        for _t in _threads:
+            _t.join(timeout=30)
+
+        # Verify final state consistency
+        for _setter in _setters:
+            if _state[_setter] != _n - 1:
+                _record_error(
+                    RuntimeError("State inconsistency: %s = %s" % (_setter, _state[_setter])),
+                    "state_check",
+                )
+    _measure_step("state_cycles_%d" % _cycles, {"cycles": _cycles, "setter_count": len(_sources)}, _run)
+'''
+
+_PY_COUPLING_BODY_API_CALLER = '''\
+import concurrent.futures
+_params = CONFIG.get("parameters", {})
+_source = CONFIG.get("coupling_source", "fetch")
+_concurrency_levels = _params.get("concurrency_levels", [1, 5, 10, 50])
+
+def _mock_api_call(call_id, fail_rate=0.05):
+    import random
+    _data = {("field_%d" % _i): "value_%d_%d" % (call_id, _i) for _i in range(100)}
+    if random.random() < fail_rate:
+        raise RuntimeError("API_ERROR_%d" % call_id)
+    return {"status": 200, "data": _data, "id": call_id}
+
+for _conc in _concurrency_levels:
+    def _run(_n=_conc):
+        import json as _json
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_n) as _pool:
+            _futs = [_pool.submit(_mock_api_call, _i) for _i in range(_n)]
+            _success = 0
+            _errors = 0
+            for _f in concurrent.futures.as_completed(_futs, timeout=30):
+                try:
+                    _result = _f.result()
+                    _json.dumps(_result["data"])
+                    _success += 1
+                except Exception as _e:
+                    _errors += 1
+                    _record_error(_e, "api_worker")
+            _ = _success
+    _measure_step("api_concurrency_%d" % _conc, {"concurrency": _conc, "source": _source}, _run)
+
+# Timeout handling test
+def _run_timeout():
+    import concurrent.futures
+    import time as _time
+    _timeout_ms = 100
+
+    def _slow_call():
+        _time.sleep((_timeout_ms + 50) / 1000.0)
+        return {"status": 200}
+
+    _results = []
+    for _i in range(10):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+            _fut = _pool.submit(_slow_call)
+            try:
+                _fut.result(timeout=_timeout_ms / 1000.0)
+                _results.append("ok")
+            except concurrent.futures.TimeoutError:
+                _results.append("timeout")
+    _ = len(_results)
+
+_measure_step("api_timeout_handling", {"source": _source}, _run_timeout)
+'''
+
+_PY_COUPLING_BODY_DOM_RENDER = '''\
+_params = CONFIG.get("parameters", {})
+_source = CONFIG.get("coupling_source", "render")
+_node_counts = _params.get("node_counts", [10, 100, 500, 1000])
+
+def _create_vnode(vtype, props=None, children=None):
+    import random
+    return {"type": vtype, "props": props or {}, "children": children or [], "_key": random.random()}
+
+def _build_tree(depth, breadth):
+    if depth <= 0:
+        return _create_vnode("span", {"text": "leaf"})
+    _children = []
+    for _i in range(breadth):
+        _children.append(_build_tree(depth - 1, max(1, breadth - 1)))
+    return _create_vnode("div", {"className": "node_%d" % depth}, _children)
+
+def _count_nodes(tree):
+    _count = 1
+    for _child in tree.get("children", []):
+        _count += _count_nodes(_child)
+    return _count
+
+def _diff_trees(old_tree, new_tree):
+    _patches = 0
+    if old_tree["type"] != new_tree["type"]:
+        return 1
+    for _k in new_tree["props"]:
+        if old_tree["props"].get(_k) != new_tree["props"][_k]:
+            _patches += 1
+    _max_ch = max(len(old_tree["children"]), len(new_tree["children"]))
+    for _i in range(_max_ch):
+        if _i >= len(old_tree["children"]) or _i >= len(new_tree["children"]):
+            _patches += 1
+        else:
+            _patches += _diff_trees(old_tree["children"][_i], new_tree["children"][_i])
+    return _patches
+
+for _node_count in _node_counts:
+    _depth = 2
+    _breadth = 2
+    while _breadth ** _depth < _node_count and _depth < 8:
+        _breadth += 1
+        if _breadth > 10:
+            _breadth = 3
+            _depth += 1
+
+    def _run(_d=_depth, _b=_breadth):
+        _tree1 = _build_tree(_d, _b)
+        _tree2 = _build_tree(_d, _b)
+        _patch_count = _diff_trees(_tree1, _tree2)
+        _ = _patch_count
+    _measure_step("render_nodes_%d" % _node_count, {"target_nodes": _node_count, "source": _source}, _run)
+
+# Memory growth across repeated render cycles
+_render_cycles = _params.get("render_cycles", 50)
+def _run_memory():
+    _retained = []
+    for _c in range(_render_cycles):
+        _tree = _build_tree(3, 4)
+        _retained.append(_tree)
+        if len(_retained) > 20:
+            _retained.pop(0)
+    _ = len(_retained)
+_measure_step("render_memory_growth", {"cycles": _render_cycles, "source": _source}, _run_memory)
+'''
+
+_PY_COUPLING_BODY_ERROR_HANDLER = '''\
+_params = CONFIG.get("parameters", {})
+_source = CONFIG.get("coupling_source", "handle_error")
+_batch_sizes = _params.get("batch_sizes", [10, 100, 1000, 5000])
+
+def _generate_errors(count):
+    _errors = []
+    _types = [
+        lambda: TypeError("Cannot read attribute of NoneType"),
+        lambda: ValueError("invalid literal for int()"),
+        lambda: KeyError("missing_key"),
+        lambda: RuntimeError("unexpected state"),
+        lambda: OSError("connection refused"),
+        lambda: TimeoutError("operation timed out"),
+        lambda: IndexError("list index out of range"),
+        lambda: AttributeError("object has no attribute"),
+        lambda: ZeroDivisionError("division by zero"),
+    ]
+    for _i in range(count):
+        _errors.append(_types[_i % len(_types)]())
+    return _errors
+
+def _handle_error(error):
+    _type = type(error).__name__
+    _msg = str(error)[:200]
+    _severity = "unknown"
+    if _type in ("TypeError", "AttributeError"):
+        _severity = "bug"
+    elif _type in ("MemoryError", "RecursionError"):
+        _severity = "resource"
+    elif _type in ("OSError", "TimeoutError"):
+        _severity = "transient"
+    elif _type in ("ValueError", "KeyError", "IndexError"):
+        _severity = "input"
+    _action = "retry" if _severity == "transient" else "report"
+    return {"type": _type, "severity": _severity, "action": _action}
+
+for _batch_size in _batch_sizes:
+    def _run(_n=_batch_size):
+        _errors = _generate_errors(_n)
+        _retry_count = 0
+        _report_count = 0
+        for _err in _errors:
+            _result = _handle_error(_err)
+            if _result["action"] == "retry":
+                _retry_count += 1
+            else:
+                _report_count += 1
+        _ = _retry_count
+        _ = _report_count
+    _measure_step("error_flood_%d" % _batch_size, {"batch_size": _batch_size, "source": _source}, _run)
+'''
+
+# Coupling behavior -> body mapping (separate from category bodies)
+_PY_COUPLING_BODIES: dict[str, str] = {
+    "pure_computation": _PY_COUPLING_BODY_PURE_COMPUTATION,
+    "state_setter": _PY_COUPLING_BODY_STATE_SETTER,
+    "api_caller": _PY_COUPLING_BODY_API_CALLER,
+    "dom_render": _PY_COUPLING_BODY_DOM_RENDER,
+    "error_handler": _PY_COUPLING_BODY_ERROR_HANDLER,
 }
 
 
