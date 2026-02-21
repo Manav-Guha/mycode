@@ -237,7 +237,7 @@ class ExecutionEngine:
                 harness_body=harness_config.get("harness_body", ""),
             )
             harness_path, config_path = self._write_harness(
-                harness_content, harness_config, scenario.name, ext=".js",
+                harness_content, harness_config, scenario.name, ext=".cjs",
             )
             runner = "node"
         else:

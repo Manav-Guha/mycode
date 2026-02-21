@@ -288,7 +288,7 @@ class TestExecute:
         # run_in_session should be called with node
         call_args = session.run_in_session.call_args[0][0]
         assert call_args[0] == "node"
-        assert call_args[1].endswith(".js")
+        assert call_args[1].endswith(".cjs")
 
     def test_engine_error_during_scenario(self, tmp_path):
         session = _make_session(tmp_path)
@@ -458,12 +458,12 @@ class TestHarnessGeneration:
             "console.log('hello')",
             {"key": "value"},
             "test_js_scenario",
-            ext=".js",
+            ext=".cjs",
         )
 
         assert harness_path.exists()
         assert config_path.exists()
-        assert harness_path.name.endswith(".js")
+        assert harness_path.name.endswith(".cjs")
         assert "_mycode_harness_" in harness_path.name
         assert harness_path.read_text() == "console.log('hello')"
 
@@ -874,7 +874,7 @@ class TestScenarioExecution:
             # Verify node was used, not python
             call_args = session.run_in_session.call_args[0][0]
             assert call_args[0] == "node", f"JS category {cat} should use node"
-            assert call_args[1].endswith(".js"), f"JS category {cat} should write .js file"
+            assert call_args[1].endswith(".cjs"), f"JS category {cat} should write .cjs file"
 
     def test_all_js_categories_generate_valid_harness(self, tmp_path):
         """Verify that every JS category produces a harness and completes."""
@@ -910,7 +910,7 @@ class TestScenarioExecution:
         scenario = _make_scenario(name="js_async", category="async_failures")
         engine._execute_scenario(scenario)
 
-        # Harness .js and config files should be cleaned up
+        # Harness .cjs and config files should be cleaned up
         project_dir = session.project_copy_dir
         remaining = list(project_dir.glob("_mycode_*"))
         assert remaining == []
@@ -962,8 +962,8 @@ class TestScenarioExecution:
             assert call_args[0] == "node", (
                 f"Shared category '{cat}' should use node for JS projects"
             )
-            assert call_args[1].endswith(".js"), (
-                f"Shared category '{cat}' should write .js harness for JS projects"
+            assert call_args[1].endswith(".cjs"), (
+                f"Shared category '{cat}' should write .cjs harness for JS projects"
             )
 
     def test_python_language_shared_categories_use_python(self, tmp_path):
