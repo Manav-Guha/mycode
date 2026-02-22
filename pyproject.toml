@@ -3,14 +3,26 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mycode"
+name = "mycode-ai"
 version = "0.1.0"
 description = "Stress-testing tool for AI-generated code"
+readme = "README.md"
 requires-python = ">=3.10"
 authors = [
     {name = "Machine Adjacent Systems"},
 ]
 license = "MIT"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/Manav-Guha/mycode"
+Repository = "https://github.com/Manav-Guha/mycode"
+Issues = "https://github.com/Manav-Guha/mycode/issues"
 
 [project.scripts]
 mycode = "mycode.cli:main"
