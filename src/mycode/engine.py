@@ -437,19 +437,33 @@ class ExecutionEngine:
         scenario: StressTestScenario,
     ) -> ScenarioResult:
         """Parse harness stdout into a ScenarioResult."""
-        # Handle timeout
+        # Handle timeout — check if it looks like a deadlock
         if session_result.timed_out:
+            is_deadlock = self._looks_like_deadlock(scenario, session_result)
+            if is_deadlock:
+                label = "deadlock"
+                err_type = "Deadlock"
+                err_msg = (
+                    "Probable deadlock: concurrent scenario timed out with "
+                    "no progress — threads likely blocked on each other"
+                )
+                summary = "Probable deadlock detected (timed out with no output progress)."
+            else:
+                label = "timeout"
+                err_type = "Timeout"
+                err_msg = "Execution timed out"
+                summary = "Scenario timed out before completion."
             return ScenarioResult(
                 scenario_name=scenario.name,
                 scenario_category=scenario.category,
                 status="partial",
                 resource_cap_hit=True,
-                summary="Scenario timed out before completion.",
+                summary=summary,
                 steps=[StepResult(
-                    step_name="timeout",
-                    resource_cap_hit="timeout",
+                    step_name=label,
+                    resource_cap_hit=label,
                     error_count=1,
-                    errors=[{"type": "Timeout", "message": "Execution timed out"}],
+                    errors=[{"type": err_type, "message": err_msg}],
                     stdout_snippet=session_result.stdout[-_SNIPPET_MAX:],
                     stderr_snippet=session_result.stderr[-_SNIPPET_MAX:],
                 )],
@@ -561,6 +575,38 @@ class ExecutionEngine:
             summary=". ".join(parts) + "." if parts else "No results.",
         )
 
+    @staticmethod
+    def _looks_like_deadlock(
+        scenario: StressTestScenario,
+        session_result: SessionResult,
+    ) -> bool:
+        """Heuristic: a timeout in a concurrent scenario with no completed steps
+        is likely a deadlock rather than just slow execution."""
+        concurrent_categories = {
+            "concurrent_execution", "gil_contention",
+            "blocking_io", "async_failures",
+        }
+        concurrent_behaviors = {"state_setter", "db_connector", "api_caller"}
+
+        cat = scenario.category
+        behavior = scenario.test_config.get("behavior", "")
+        is_concurrent = (
+            cat in concurrent_categories
+            or behavior in concurrent_behaviors
+            or "concurrent" in cat
+        )
+        if not is_concurrent:
+            return False
+
+        # If harness produced no result markers, it made no progress — likely stuck
+        has_results = _RESULTS_START in session_result.stdout
+        # Also check for explicit deadlock keywords in stderr
+        combined = (session_result.stderr + " " + session_result.stdout).lower()
+        deadlock_keywords = ("deadlock", "still alive after join", "lock timeout")
+        has_deadlock_hint = any(kw in combined for kw in deadlock_keywords)
+
+        return not has_results or has_deadlock_hint
+
     def _get_target_modules(self, scenario: StressTestScenario) -> list[str]:
         """Determine which user modules to target for this scenario."""
         config = scenario.test_config
@@ -626,6 +672,7 @@ class ExecutionEngine:
             session_result.timed_out
             or any(s.resource_cap_hit == "timeout" for s in steps)
         )
+        any_deadlock = any(s.resource_cap_hit == "deadlock" for s in steps)
         any_memory_cap = any(s.resource_cap_hit == "memory" for s in steps)
         any_crash = session_result.returncode not in (0, -1)
         total_errors = sum(s.error_count for s in steps)
@@ -644,11 +691,15 @@ class ExecutionEngine:
             ind = indicator.lower()
             if ind == "timeout" and any_timeout:
                 triggered.append(indicator)
+            elif ind in ("deadlock", "dead_lock") and any_deadlock:
+                triggered.append(indicator)
             elif ind == "crash" and any_crash:
                 triggered.append(indicator)
             elif ind in ("memory", "oom", "memory_error") and any_memory_cap:
                 triggered.append(indicator)
             elif ind in ("memory_growth_unbounded", "memory_leak") and memory_growing:
+                triggered.append(indicator)
+            elif ind in ("race_condition", "race", "torn_read") and "race_condition" in all_text:
                 triggered.append(indicator)
             elif ind in ("error", "errors") and total_errors > 0:
                 triggered.append(indicator)
@@ -1024,31 +1075,51 @@ _cycle_counts = _params.get("cycle_counts", [10, 100, 1000])
 
 for _cycles in _cycle_counts:
     def _run(_n=_cycles, _setters=_sources):
+        # Shared state WITHOUT a lock — the point is to expose race
+        # conditions in user code that mutates shared state unsafely.
         _state = {s: 0 for s in _setters}
-        _lock = threading.Lock()
-        _race_detected = [False]
+        _state["_checksum"] = 0  # derived value that should stay consistent
+        _torn_reads = []  # collects snapshots where state is inconsistent
 
         def _mutate(setter_name, count):
             for _c in range(count):
-                with _lock:
-                    _state[setter_name] = _c
-                    # Simulate derived state
-                    _derived = {k + "_derived": v * 2 for k, v in _state.items()}
-                    _ = _derived
+                _state[setter_name] = _c
+                # Update derived value non-atomically — a concurrent reader
+                # may see a partial update (torn read).
+                _state["_checksum"] = sum(v for k, v in _state.items() if k != "_checksum")
+
+        def _reader(count):
+            """Read state repeatedly, looking for torn reads."""
+            for _ in range(count):
+                snap = dict(_state)
+                expected = sum(v for k, v in snap.items() if k != "_checksum")
+                if snap.get("_checksum") != expected:
+                    _torn_reads.append(snap)
 
         _threads = []
         for _setter in _setters:
             _t = threading.Thread(target=_mutate, args=(_setter, _n))
             _threads.append(_t)
             _t.start()
+        # Reader thread runs concurrently to detect torn reads
+        _rt = threading.Thread(target=_reader, args=(_n,))
+        _threads.append(_rt)
+        _rt.start()
         for _t in _threads:
             _t.join(timeout=30)
+
+        # Report torn reads as race condition evidence
+        if _torn_reads:
+            _record_error(
+                RuntimeError("Race condition: %d torn reads detected out of %d checks" % (len(_torn_reads), _n)),
+                "race_condition",
+            )
 
         # Verify final state consistency
         for _setter in _setters:
             if _state[_setter] != _n - 1:
                 _record_error(
-                    RuntimeError("State inconsistency: %s = %s" % (_setter, _state[_setter])),
+                    RuntimeError("State inconsistency: %s = %s (expected %s)" % (_setter, _state[_setter], _n - 1)),
                     "state_check",
                 )
     _measure_step("state_cycles_%d" % _cycles, {"cycles": _cycles, "setter_count": len(_sources)}, _run)
@@ -1229,11 +1300,122 @@ for _batch_size in _batch_sizes:
     _measure_step("error_flood_%d" % _batch_size, {"batch_size": _batch_size, "source": _source}, _run)
 '''
 
+_PY_COUPLING_BODY_DB_CONNECTOR = '''\
+import sqlite3
+import threading
+_params = CONFIG.get("parameters", {})
+_source = CONFIG.get("coupling_source", "db")
+_writer_counts = _params.get("concurrent_writers", [1, 2, 4, 8])
+_rows_per_writer = _params.get("rows_per_writer", 50)
+
+import tempfile as _tmpmod
+import os as _osmod
+_db_path = _osmod.path.join(_tmpmod.gettempdir(), "mycode_sqlite_%s.db" % _osmod.getpid())
+
+# Set up schema
+_conn0 = sqlite3.connect(_db_path)
+_conn0.execute("CREATE TABLE IF NOT EXISTS stress (id INTEGER PRIMARY KEY, writer TEXT, seq INTEGER, payload TEXT)")
+_conn0.commit()
+_conn0.close()
+
+for _wc in _writer_counts:
+    def _run(_n=_wc, _rows=_rows_per_writer):
+        _errors_lock = threading.Lock()
+        _db_errors = []
+
+        def _writer(writer_id, row_count):
+            """Each writer opens its own connection — the classic vibe-code pattern."""
+            conn = None
+            try:
+                conn = sqlite3.connect(_db_path, timeout=5)
+                for _seq in range(row_count):
+                    try:
+                        conn.execute(
+                            "INSERT INTO stress (writer, seq, payload) VALUES (?, ?, ?)",
+                            ("w%d" % writer_id, _seq, "x" * 200),
+                        )
+                        conn.commit()
+                    except sqlite3.OperationalError as _e:
+                        with _errors_lock:
+                            _db_errors.append({"type": "OperationalError", "message": str(_e)[:500], "writer": writer_id})
+                    except sqlite3.DatabaseError as _e:
+                        with _errors_lock:
+                            _db_errors.append({"type": type(_e).__name__, "message": str(_e)[:500], "writer": writer_id})
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+        def _reader(read_count):
+            """Concurrent reader — checks row count consistency."""
+            conn = None
+            try:
+                conn = sqlite3.connect(_db_path, timeout=5)
+                for _ in range(read_count):
+                    try:
+                        _cur = conn.execute("SELECT COUNT(*) FROM stress")
+                        _ = _cur.fetchone()
+                    except sqlite3.OperationalError as _e:
+                        with _errors_lock:
+                            _db_errors.append({"type": "OperationalError", "message": str(_e)[:500], "writer": "reader"})
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+        _threads = []
+        for _wid in range(_n):
+            _t = threading.Thread(target=_writer, args=(_wid, _rows))
+            _threads.append(_t)
+            _t.start()
+        # Concurrent reader
+        _rt = threading.Thread(target=_reader, args=(_rows,))
+        _threads.append(_rt)
+        _rt.start()
+
+        _hung = []
+        for _t in _threads:
+            _t.join(timeout=30)
+            if _t.is_alive():
+                _hung.append(_t.name)
+
+        if _hung:
+            _record_error(
+                RuntimeError("Possible deadlock: %d threads still alive after join timeout" % len(_hung)),
+                "deadlock",
+            )
+
+        for _de in _db_errors:
+            _record_error(RuntimeError(_de["message"]), "sqlite_%s" % _de["type"])
+
+        # Clean table for next iteration
+        try:
+            _c = sqlite3.connect(_db_path, timeout=5)
+            _c.execute("DELETE FROM stress")
+            _c.commit()
+            _c.close()
+        except Exception:
+            pass
+
+    _measure_step("sqlite_writers_%d" % _wc, {"concurrent_writers": _wc, "rows_per_writer": _rows_per_writer, "source": _source}, _run)
+
+# Cleanup temp database
+try:
+    _osmod.unlink(_db_path)
+except OSError:
+    pass
+'''
+
 # Coupling behavior -> body mapping (separate from category bodies)
 _PY_COUPLING_BODIES: dict[str, str] = {
     "pure_computation": _PY_COUPLING_BODY_PURE_COMPUTATION,
     "state_setter": _PY_COUPLING_BODY_STATE_SETTER,
     "api_caller": _PY_COUPLING_BODY_API_CALLER,
+    "db_connector": _PY_COUPLING_BODY_DB_CONNECTOR,
     "dom_render": _PY_COUPLING_BODY_DOM_RENDER,
     "error_handler": _PY_COUPLING_BODY_ERROR_HANDLER,
 }

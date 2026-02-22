@@ -1508,11 +1508,12 @@ class TestPyCouplingBodies:
         assert "json" in harness
 
     def test_all_py_coupling_bodies_registered(self):
-        """All 5 behavior keys present in _PY_COUPLING_BODIES."""
+        """All 6 behavior keys present in _PY_COUPLING_BODIES."""
         expected = {
             "pure_computation",
             "state_setter",
             "api_caller",
+            "db_connector",
             "dom_render",
             "error_handler",
         }
