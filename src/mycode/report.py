@@ -747,16 +747,20 @@ class ReportGenerator:
                     prio = 2
                 candidates.append((prio, scenario_name, translated))
 
-        # Sort by priority, then pick top 3 (one per scenario)
+        # Sort by priority, then pick top 3 (one per scenario, no duplicate text)
         candidates.sort(key=lambda c: c[0])
         items: list[str] = []
         seen_scenarios: set[str] = set()
+        seen_text: set[str] = set()
         for _prio, scenario_name, translated in candidates:
             if len(items) >= 3:
                 break
             if scenario_name in seen_scenarios:
                 continue
+            if translated in seen_text:
+                continue
             seen_scenarios.add(scenario_name)
+            seen_text.add(translated)
             items.append(translated)
 
         if items:
