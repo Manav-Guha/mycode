@@ -263,9 +263,21 @@ class ExecutionEngine:
             )
             runner = "python"
 
+        # Build command — for Node.js, cap V8 heap to match resource caps
+        if runner == "node":
+            heap_mb = self.session.resource_caps.memory_mb
+            cmd = [
+                runner,
+                f"--max-old-space-size={heap_mb}",
+                str(harness_path),
+                str(config_path),
+            ]
+        else:
+            cmd = [runner, str(harness_path), str(config_path)]
+
         # Run harness in session sandbox
         session_result = self.session.run_in_session(
-            [runner, str(harness_path), str(config_path)],
+            cmd,
             timeout=timeout,
         )
 

@@ -664,15 +664,26 @@ class SessionManager:
 
                 memory_bytes = caps.memory_mb * 1024 * 1024
 
-                # Memory limit — try platform-appropriate options
+                # Memory limit — set every available rlimit so the
+                # tightest one that the OS actually enforces wins.
+                memory_limit_set = False
                 for limit_name in ("RLIMIT_AS", "RLIMIT_RSS", "RLIMIT_DATA"):
                     limit_attr = getattr(res, limit_name, None)
                     if limit_attr is not None:
                         try:
                             res.setrlimit(limit_attr, (memory_bytes, memory_bytes))
-                            break
+                            memory_limit_set = True
                         except (ValueError, OSError):
                             continue
+
+                if not memory_limit_set:
+                    import sys as _sys
+                    print(
+                        "mycode: WARNING — could not set any memory rlimit "
+                        f"(RLIMIT_AS/RSS/DATA) to {caps.memory_mb} MB; "
+                        "memory cap will NOT be enforced by the OS",
+                        file=_sys.stderr,
+                    )
 
                 # Process limit
                 nproc = getattr(res, "RLIMIT_NPROC", None)

@@ -289,10 +289,11 @@ class TestExecute:
         assert result.scenarios_skipped == 0
         assert result.scenarios_completed == 1
         assert result.scenario_results[0].status == "completed"
-        # run_in_session should be called with node
+        # run_in_session should be called with node + --max-old-space-size
         call_args = session.run_in_session.call_args[0][0]
         assert call_args[0] == "node"
-        assert call_args[1].endswith(".cjs")
+        assert call_args[1].startswith("--max-old-space-size=")
+        assert call_args[2].endswith(".cjs")
 
     def test_engine_error_during_scenario(self, tmp_path):
         session = _make_session(tmp_path)
@@ -904,7 +905,8 @@ class TestScenarioExecution:
             # Verify node was used, not python
             call_args = session.run_in_session.call_args[0][0]
             assert call_args[0] == "node", f"JS category {cat} should use node"
-            assert call_args[1].endswith(".cjs"), f"JS category {cat} should write .cjs file"
+            assert call_args[1].startswith("--max-old-space-size="), f"JS category {cat} should set heap limit"
+            assert call_args[2].endswith(".cjs"), f"JS category {cat} should write .cjs file"
 
     def test_all_js_categories_generate_valid_harness(self, tmp_path):
         """Verify that every JS category produces a harness and completes."""
@@ -992,7 +994,10 @@ class TestScenarioExecution:
             assert call_args[0] == "node", (
                 f"Shared category '{cat}' should use node for JS projects"
             )
-            assert call_args[1].endswith(".cjs"), (
+            assert call_args[1].startswith("--max-old-space-size="), (
+                f"Shared category '{cat}' should set heap limit for JS projects"
+            )
+            assert call_args[2].endswith(".cjs"), (
                 f"Shared category '{cat}' should write .cjs harness for JS projects"
             )
 
