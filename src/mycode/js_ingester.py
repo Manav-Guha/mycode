@@ -140,6 +140,27 @@ _REQUIRE_DESTRUCTURE_RE = re.compile(
     re.DOTALL,
 )
 
+# Dynamic import('module') with string literal
+_DYNAMIC_IMPORT_LITERAL_RE = re.compile(
+    r"""\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)"""
+)
+
+# Dynamic import(expr) with non-literal (variable, template, concatenation)
+_DYNAMIC_IMPORT_VARIABLE_RE = re.compile(
+    r"""\bimport\s*\(\s*(?!['"])"""
+)
+
+# require('module') — all forms including bare (side-effect) requires.
+# Span dedup skips those already matched by _REQUIRE_CONST_RE / _REQUIRE_DESTRUCTURE_RE.
+_REQUIRE_BARE_RE = re.compile(
+    r"""\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)"""
+)
+
+# require(expr) with non-literal (variable, template, concatenation)
+_REQUIRE_VARIABLE_RE = re.compile(
+    r"""\brequire\s*\(\s*(?!['"])"""
+)
+
 # ── Function Patterns ──
 
 # [export [default]] [async] function name(args)
@@ -489,6 +510,41 @@ class _JsFileAnalyzer:
                 is_from_import=False, lineno=lineno,
             ))
 
+        # Dynamic import('module') with string literal
+        for m in _DYNAMIC_IMPORT_LITERAL_RE.finditer(source):
+            lineno = source[: m.start()].count("\n") + 1
+            _add(m.span(), ImportInfo(
+                module=m.group(1), is_from_import=True, lineno=lineno,
+            ))
+
+        # Bare require('module') — side-effect form without assignment.
+        # Span dedup skips those already matched by _REQUIRE_CONST_RE / _REQUIRE_DESTRUCTURE_RE.
+        for m in _REQUIRE_BARE_RE.finditer(source):
+            lineno = source[: m.start()].count("\n") + 1
+            _add(m.span(), ImportInfo(
+                module=m.group(1), is_from_import=False, lineno=lineno,
+            ))
+
+        # Dynamic import(variable) — unresolvable, record for warning
+        for m in _DYNAMIC_IMPORT_VARIABLE_RE.finditer(source):
+            lineno = source[: m.start()].count("\n") + 1
+            rest = source[m.end():m.end() + 80]
+            expr = rest.split(")")[0].strip() if ")" in rest else rest.split("\n")[0].strip()
+            _add(m.span(), ImportInfo(
+                module=f"<dynamic: {expr[:60]}>",
+                is_from_import=True, lineno=lineno,
+            ))
+
+        # require(variable) — unresolvable, record for warning
+        for m in _REQUIRE_VARIABLE_RE.finditer(source):
+            lineno = source[: m.start()].count("\n") + 1
+            rest = source[m.end():m.end() + 80]
+            expr = rest.split(")")[0].strip() if ")" in rest else rest.split("\n")[0].strip()
+            _add(m.span(), ImportInfo(
+                module=f"<dynamic: {expr[:60]}>",
+                is_from_import=False, lineno=lineno,
+            ))
+
         return imports
 
     # ── Classes ──
@@ -713,7 +769,21 @@ class JsProjectIngester:
             successful, result.function_flows
         )
 
-        # 7. Summary
+        # 7. Warn about unresolvable dynamic imports
+        unresolved_files = []
+        for analysis in result.file_analyses:
+            if any(imp.module.startswith("<dynamic:") for imp in analysis.imports):
+                unresolved_files.append(analysis.file_path)
+        if unresolved_files:
+            listing = ", ".join(unresolved_files[:5])
+            if len(unresolved_files) > 5:
+                listing += f" (and {len(unresolved_files) - 5} more)"
+            result.warnings.append(
+                f"Dynamic imports with variable paths in {len(unresolved_files)} "
+                f"file(s) could not be statically resolved: {listing}"
+            )
+
+        # 8. Summary
         total = result.files_analyzed + result.files_failed
         if result.files_failed > 0:
             result.warnings.append(
