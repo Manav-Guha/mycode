@@ -537,6 +537,7 @@ class ProjectIngester:
             tree = ast.parse(source, filename=str(file_path))
         except SyntaxError as e:
             analysis.parse_error = f"Syntax error at line {e.lineno}: {e.msg}"
+            analysis.imports = self._extract_imports_regex(source, rel_path)
             return analysis
 
         analyzer = _FileAnalyzer(rel_path)
@@ -548,6 +549,65 @@ class ProjectIngester:
         analysis.global_vars = result.global_vars
 
         return analysis
+
+    @staticmethod
+    def _extract_imports_regex(source: str, rel_path: str) -> list[ImportInfo]:
+        """Best-effort import extraction using regex when ast.parse fails.
+
+        Handles the two standard forms:
+            import foo
+            import foo as bar
+            import foo, bar
+            from foo import bar
+            from foo import bar, baz
+            from foo import (bar, baz)
+        """
+        imports: list[ImportInfo] = []
+
+        for lineno, line in enumerate(source.splitlines(), start=1):
+            stripped = line.strip()
+
+            # Skip comments and blanks
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            # "from X import Y" form
+            m = re.match(
+                r"^from\s+([\w.]+)\s+import\s+(.+?)(?:\s*#.*)?$", stripped
+            )
+            if m:
+                module = m.group(1)
+                names_part = m.group(2).strip().strip("()")
+                names = [n.strip().split(" as ")[0].strip()
+                         for n in names_part.split(",") if n.strip()]
+                imports.append(ImportInfo(
+                    module=module,
+                    names=names,
+                    is_from_import=True,
+                    lineno=lineno,
+                ))
+                continue
+
+            # "import X" form (possibly "import X as Y", "import X, Y")
+            m = re.match(
+                r"^import\s+(.+?)(?:\s*#.*)?$", stripped
+            )
+            if m:
+                for part in m.group(1).split(","):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    pieces = re.split(r"\s+as\s+", part, maxsplit=1)
+                    module_name = pieces[0].strip()
+                    alias = pieces[1].strip() if len(pieces) > 1 else None
+                    imports.append(ImportInfo(
+                        module=module_name,
+                        alias=alias,
+                        is_from_import=False,
+                        lineno=lineno,
+                    ))
+
+        return imports
 
     # ── Dependency Extraction ──
 
