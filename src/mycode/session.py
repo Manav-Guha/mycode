@@ -206,14 +206,23 @@ class SessionManager:
         self._cleaned_up = True
 
         # Kill any in-flight child process tree before removing files
+        process_confirmed_dead = True
         proc = self._active_process
         if proc is not None:
-            self._kill_process_tree(proc)
+            process_confirmed_dead = self._kill_process_tree(proc)
             self._active_process = None
 
         self._unregister_session()
 
-        if self.workspace_dir and self.workspace_dir.exists():
+        if not process_confirmed_dead:
+            # Process may still be writing — leave workspace intact for
+            # orphan cleanup on next startup rather than risk deleting
+            # files out from under a running process.
+            logger.error(
+                "Subprocess did not exit after SIGKILL; leaving workspace "
+                "intact for orphan cleanup: %s", self.workspace_dir,
+            )
+        elif self.workspace_dir and self.workspace_dir.exists():
             try:
                 shutil.rmtree(self.workspace_dir)
                 logger.info("Cleaned up session: %s", self.workspace_dir)
@@ -600,7 +609,7 @@ class SessionManager:
             )
 
     @staticmethod
-    def _kill_process_tree(proc: subprocess.Popen):
+    def _kill_process_tree(proc: subprocess.Popen) -> bool:
         """Kill the entire process tree rooted at *proc*.
 
         Because we launch children with ``start_new_session=True``, every child
@@ -608,9 +617,12 @@ class SessionManager:
         ``os.killpg`` sends a signal to every process in that group, so
         timeouts and signals clean up the whole tree — not just the immediate
         child.
+
+        Returns True if the process was confirmed dead, False if it may
+        still be running after SIGKILL.
         """
         if proc is None or proc.poll() is not None:
-            return  # already exited
+            return True  # already exited
 
         pgid: Optional[int] = None
         try:
@@ -633,7 +645,7 @@ class SessionManager:
         # Give processes a brief window to exit cleanly
         try:
             proc.wait(timeout=3)
-            return
+            return True
         except subprocess.TimeoutExpired:
             pass
 
@@ -651,8 +663,10 @@ class SessionManager:
 
         try:
             proc.wait(timeout=3)
+            return True
         except subprocess.TimeoutExpired:
             logger.warning("Process %d did not exit after SIGKILL", proc.pid)
+            return False
 
     def _make_preexec_fn(self):
         """Create a preexec function that sets resource limits for the child process."""
