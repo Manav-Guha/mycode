@@ -37,7 +37,11 @@ COPY_EXCLUDE_PATTERNS = {
     ".pytest_cache",
     ".tox",
     ".DS_Store",
+    ".claude",
 }
+
+# Directory name prefixes to exclude (matched with str.startswith)
+COPY_EXCLUDE_PREFIXES = ("pytest-of-",)
 
 COPY_EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
 
@@ -495,6 +499,8 @@ class SessionManager:
                 if item in COPY_EXCLUDE_PATTERNS:
                     ignored.add(item)
                 elif any(item.endswith(sfx) for sfx in COPY_EXCLUDE_SUFFIXES):
+                    ignored.add(item)
+                elif item.startswith(COPY_EXCLUDE_PREFIXES):
                     ignored.add(item)
             return ignored
 

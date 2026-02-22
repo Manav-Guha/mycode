@@ -51,7 +51,11 @@ DISCOVER_EXCLUDE_DIRS = {
     "build",
     "dist",
     ".DS_Store",
+    ".claude",
 }
+
+# Directory name prefixes to exclude (matched with str.startswith)
+DISCOVER_EXCLUDE_PREFIXES = ("pytest-of-",)
 
 # Regex for extracting a package name from a PEP 508 dependency string
 _PKG_NAME_RE = re.compile(r"^([A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)")
@@ -502,7 +506,7 @@ class ProjectIngester:
             parts = path.relative_to(self._project_path).parts
             skip = False
             for part in parts[:-1]:  # check parent directories
-                if part in DISCOVER_EXCLUDE_DIRS or part.endswith(".egg-info"):
+                if part in DISCOVER_EXCLUDE_DIRS or part.endswith(".egg-info") or part.startswith(DISCOVER_EXCLUDE_PREFIXES):
                     skip = True
                     break
             if not skip:

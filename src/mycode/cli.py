@@ -13,6 +13,7 @@ Options::
     --api-base URL        Base URL for OpenAI-compatible API
     --model MODEL         Model identifier
     --skip-version-check  Skip PyPI/npm version lookups
+    --non-interactive     Skip conversational interface
     --verbose / -v        Enable verbose logging
 """
 
@@ -88,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        default=False,
+        help="Skip conversational interface (use default stress testing profile)",
+    )
     return parser
 
 
@@ -124,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     offline = args.offline or (api_key is None)
 
     # Build pipeline config
+    non_interactive = args.non_interactive or not sys.stdin.isatty()
     config = PipelineConfig(
         project_path=project,
         language=args.language,
@@ -132,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
         skip_version_check=args.skip_version_check,
         consent=args.consent,
         io=TerminalIO(),
+        operational_intent="General stress testing" if non_interactive else "",
+        auto_approve_scenarios=non_interactive,
     )
 
     # Run pipeline

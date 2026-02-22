@@ -61,7 +61,11 @@ JS_DISCOVER_EXCLUDE_DIRS = {
     ".vite",
     "coverage",
     ".DS_Store",
+    ".claude",
 }
+
+# Directory name prefixes to exclude (matched with str.startswith)
+JS_DISCOVER_EXCLUDE_PREFIXES = ("pytest-of-",)
 
 # JS keywords that look like function calls but aren't
 _JS_KEYWORDS = {
@@ -730,7 +734,7 @@ class JsProjectIngester:
                 parts = path.relative_to(self._project_path).parts
                 skip = False
                 for part in parts[:-1]:
-                    if part in JS_DISCOVER_EXCLUDE_DIRS:
+                    if part in JS_DISCOVER_EXCLUDE_DIRS or part.startswith(JS_DISCOVER_EXCLUDE_PREFIXES):
                         skip = True
                         break
                 if not skip:
