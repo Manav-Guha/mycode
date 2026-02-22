@@ -209,3 +209,5 @@ __marimo__/
 .env
 .DS_Store
 .claude/
+simulation_results.*
+token_simulation.py
