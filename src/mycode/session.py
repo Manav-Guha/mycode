@@ -137,6 +137,7 @@ class SessionManager:
 
         self._cleaned_up = False
         self._setup_complete = False
+        self._active_process: Optional[subprocess.Popen] = None
 
     # ── Context Manager ──
 
@@ -203,6 +204,12 @@ class SessionManager:
         if self._cleaned_up:
             return
         self._cleaned_up = True
+
+        # Kill any in-flight child process tree before removing files
+        proc = self._active_process
+        if proc is not None:
+            self._kill_process_tree(proc)
+            self._active_process = None
 
         self._unregister_session()
 
@@ -548,48 +555,104 @@ class SessionManager:
         )
         sys.stderr.flush()
 
+        proc = None
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 resolved_command,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
                 cwd=str(self.project_copy_dir),
                 env=env,
                 preexec_fn=self._make_preexec_fn(),
+                start_new_session=True,
             )
+            self._active_process = proc
+            stdout, stderr = proc.communicate(timeout=timeout)
+            self._active_process = None
             return SessionResult(
-                returncode=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
-            )
-        except subprocess.TimeoutExpired as e:
-            stdout = ""
-            stderr = ""
-            if e.stdout:
-                stdout = (
-                    e.stdout
-                    if isinstance(e.stdout, str)
-                    else e.stdout.decode("utf-8", errors="replace")
-                )
-            if e.stderr:
-                stderr = (
-                    e.stderr
-                    if isinstance(e.stderr, str)
-                    else e.stderr.decode("utf-8", errors="replace")
-                )
-            return SessionResult(
-                returncode=-1,
+                returncode=proc.returncode,
                 stdout=stdout,
                 stderr=stderr,
+            )
+        except subprocess.TimeoutExpired:
+            self._kill_process_tree(proc)
+            self._active_process = None
+            stdout, stderr = "", ""
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+            return SessionResult(
+                returncode=-1,
+                stdout=stdout or "",
+                stderr=stderr or "",
                 timed_out=True,
             )
         except OSError as e:
+            if proc is not None:
+                self._kill_process_tree(proc)
+                self._active_process = None
             return SessionResult(
                 returncode=-1,
                 stdout="",
                 stderr=str(e),
             )
+
+    @staticmethod
+    def _kill_process_tree(proc: subprocess.Popen):
+        """Kill the entire process tree rooted at *proc*.
+
+        Because we launch children with ``start_new_session=True``, every child
+        and grandchild shares the same process-group ID (the child's PID).
+        ``os.killpg`` sends a signal to every process in that group, so
+        timeouts and signals clean up the whole tree — not just the immediate
+        child.
+        """
+        if proc is None or proc.poll() is not None:
+            return  # already exited
+
+        pgid: Optional[int] = None
+        try:
+            pgid = os.getpgid(proc.pid)
+        except OSError:
+            pass
+
+        # 1. SIGTERM the group (graceful)
+        if pgid is not None and pgid > 0:
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except OSError:
+                pass
+        else:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+
+        # Give processes a brief window to exit cleanly
+        try:
+            proc.wait(timeout=3)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+        # 2. SIGKILL the group (forceful)
+        if pgid is not None and pgid > 0:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except OSError:
+                pass
+        else:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            logger.warning("Process %d did not exit after SIGKILL", proc.pid)
 
     def _make_preexec_fn(self):
         """Create a preexec function that sets resource limits for the child process."""
