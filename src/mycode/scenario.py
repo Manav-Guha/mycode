@@ -836,8 +836,9 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 cat = template.get("category", "")
                 if cat not in valid_categories:
                     continue
+                raw_params = template.get("parameters", {})
                 tc: dict = {
-                    "parameters": template.get("parameters", {}),
+                    "parameters": _normalize_template_params(raw_params, cat),
                     "measurements": _infer_measurements(cat),
                     "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
                 }
@@ -1331,6 +1332,100 @@ def _serialize_coupling_points(
             f"{len(cp.targets)} dependents: {cp.description}{annotation}"
         )
     return "\n".join(lines)
+
+
+def _normalize_template_params(params: dict, category: str) -> dict:
+    """Normalize profile template parameter keys to canonical harness keys.
+
+    Profile templates use descriptive, dependency-specific parameter names
+    (e.g. ``row_counts``, ``payload_sizes_kb``, ``initial_concurrent``).
+    Harness bodies expect canonical keys (``data_sizes``, ``concurrent``,
+    ``iterations``).  This function translates one to the other so
+    profile-specific tuning actually takes effect at runtime.
+
+    The original parameters are preserved alongside the canonical keys,
+    so harness bodies that already read profile-specific keys (e.g.
+    library-specific standalone bodies) continue to work.
+    """
+    out = dict(params)  # preserve originals
+
+    if category in ("data_volume_scaling", "blocking_io"):
+        # Canonical key: data_sizes (list[int])
+        if "data_sizes" not in out:
+            for key in (
+                "row_counts", "array_sizes", "vector_counts",
+                "matrix_sizes", "file_counts", "document_counts",
+                "instance_counts", "chain_steps",
+            ):
+                if key in out and isinstance(out[key], list):
+                    out["data_sizes"] = out[key]
+                    break
+            else:
+                # Convert single-dimension size lists expressed in KB/MB
+                for key in ("payload_sizes_kb", "file_sizes_mb", "response_sizes_mb"):
+                    if key in out and isinstance(out[key], list):
+                        # Convert to abstract item counts for the generic body
+                        if "kb" in key:
+                            out["data_sizes"] = [int(v * 10) for v in out[key]]
+                        elif "mb" in key:
+                            out["data_sizes"] = [int(v * 1000) for v in out[key]]
+                        break
+
+    elif category in ("concurrent_execution", "gil_contention", "async_failures"):
+        # Canonical key: concurrent (list[int])
+        if "concurrent" not in out:
+            # Range-based: initial/max/step
+            if "initial_concurrent" in out and "max_concurrent" in out:
+                initial = out["initial_concurrent"]
+                maximum = out["max_concurrent"]
+                step = out.get("step", out.get("step_multiplier", 10))
+                levels = []
+                v = initial
+                while v <= maximum:
+                    levels.append(v)
+                    if "step_multiplier" in out:
+                        v = v * step
+                    else:
+                        v = v + step
+                if not levels:
+                    levels = [initial, maximum]
+                out["concurrent"] = levels
+            else:
+                # Direct list keys
+                for key in (
+                    "thread_counts", "concurrent_requests",
+                    "concurrent_threads", "concurrent_writers",
+                    "concurrent_users", "concurrent_chains",
+                    "concurrent_queries", "concurrent_sessions",
+                    "concurrent_operations", "concurrent_connections",
+                    "session_counts",
+                ):
+                    if key in out and isinstance(out[key], list):
+                        out["concurrent"] = out[key]
+                        break
+                else:
+                    # Scalar concurrency values → single-element list
+                    for key in (
+                        "concurrent_requests", "concurrent_writers",
+                        "concurrent_threads", "thread_count",
+                        "concurrent_users",
+                    ):
+                        if key in out and isinstance(out[key], (int, float)):
+                            out["concurrent"] = [1, int(out[key])]
+                            break
+
+    elif category == "memory_profiling":
+        # Canonical key: iterations (int)
+        if "iterations" not in out:
+            if "total_requests" in out:
+                batch = out.get("batch_size", 100)
+                out["iterations"] = max(1, out["total_requests"] // batch)
+            elif "cycles" in out and isinstance(out["cycles"], int):
+                out["iterations"] = out["cycles"]
+            elif "sessions" in out and isinstance(out["sessions"], int):
+                out["iterations"] = out["sessions"]
+
+    return out
 
 
 def _infer_measurements(category: str) -> list[str]:
