@@ -158,7 +158,16 @@ class DiagnosticReport:
             sections.append(f"Total errors captured: {self.total_errors}")
 
         # Findings
-        if self.findings:
+        if not self.findings and self.scenarios_run:
+            sections.append("\n" + "-" * 40)
+            sections.append("  Findings")
+            sections.append("-" * 40)
+            sections.append(
+                "\n  All stress test scenarios completed cleanly. "
+                "No errors, resource limit hits, or degradation detected "
+                "under the conditions tested."
+            )
+        elif self.findings:
             sections.append("\n" + "-" * 40)
             sections.append("  Findings")
             sections.append("-" * 40)
@@ -770,10 +779,16 @@ class ReportGenerator:
 
         # ── Closing line ──
         lines.append("")
-        lines.append(
-            "See detailed technical findings below — you can paste these "
-            "into your coding tool for specific fixes."
-        )
+        if items:
+            lines.append(
+                "See detailed technical findings below — you can paste these "
+                "into your coding tool for specific fixes."
+            )
+        else:
+            lines.append(
+                "No issues were found under the conditions we tested. "
+                "See detailed results below."
+            )
 
         return "\n".join(lines)
 
@@ -1094,7 +1109,8 @@ class ReportGenerator:
             "1. Write in clear, simple language. No engineering jargon.\n"
             "2. DIAGNOSE ONLY. Never suggest fixes, patches, or code changes.\n"
             "3. Frame findings relative to the user's stated purpose.\n"
-            "4. Be direct about what broke and where.\n"
+            "4. Be direct about what broke and where. If nothing broke, "
+            "say so clearly and note what was tested.\n"
             "5. Describe degradation curves in terms the user understands "
             "(e.g. 'response time doubled when data exceeded 10,000 rows').\n"
             "6. Keep it under 500 words.\n\n"
