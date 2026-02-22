@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ──
 
-# Default profiles root is profiles/ at the repository top level
-_DEFAULT_PROFILES_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "profiles"
+# Default profiles root is the profiles/ directory inside the mycode package
+_DEFAULT_PROFILES_ROOT = Path(__file__).resolve().parent.parent / "profiles"
 
 SUPPORTED_LANGUAGES = {"python", "javascript"}
 

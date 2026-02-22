@@ -545,7 +545,7 @@ class TestDefaultProfilesRoot:
 
     def test_default_root_points_to_profiles_dir(self):
         lib = ComponentLibrary()
-        expected = Path(__file__).resolve().parent.parent / "profiles"
+        expected = Path(__file__).resolve().parent.parent / "src" / "mycode" / "profiles"
         assert lib.profiles_root == expected
 
     def test_custom_root(self, profiles_dir):
@@ -559,7 +559,7 @@ class TestDefaultProfilesRoot:
 class TestRealProfiles:
     """Integration tests that load the actual shipped profiles."""
 
-    REAL_PROFILES_ROOT = Path(__file__).resolve().parent.parent / "profiles"
+    REAL_PROFILES_ROOT = Path(__file__).resolve().parent.parent / "src" / "mycode" / "profiles"
 
     @pytest.fixture
     def real_library(self):
@@ -685,7 +685,7 @@ class TestRealProfiles:
 class TestRealJavaScriptProfiles:
     """Integration tests that load the actual shipped JavaScript profiles."""
 
-    REAL_PROFILES_ROOT = Path(__file__).resolve().parent.parent / "profiles"
+    REAL_PROFILES_ROOT = Path(__file__).resolve().parent.parent / "src" / "mycode" / "profiles"
 
     @pytest.fixture
     def real_library(self):
