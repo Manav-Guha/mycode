@@ -18,6 +18,8 @@ LLM-dependent component (one of three).
 
 import json
 import logging
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -329,6 +331,14 @@ class ReportGenerator:
         report.plain_summary = self._generate_plain_summary(
             report, operational_intent, project_name,
         )
+
+        # 4c. If online with API key, enhance plain summary via Gemini Flash
+        if not self._offline and self._llm_config and self._llm_config.api_key:
+            llm_plain = self._generate_llm_plain_summary(
+                report, operational_intent, project_name,
+            )
+            if llm_plain:
+                report.plain_summary = llm_plain
 
         # 5. Generate narrative summary
         if self._offline:
@@ -762,6 +772,104 @@ class ReportGenerator:
         )
 
         return "\n".join(lines)
+
+    # ── Gemini Flash Plain Summary ──
+
+    _GEMINI_ENDPOINT = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-2.0-flash:generateContent"
+    )
+
+    def _generate_llm_plain_summary(
+        self,
+        report: DiagnosticReport,
+        operational_intent: str,
+        project_name: str = "",
+    ) -> Optional[str]:
+        """Enhance the plain summary via a single Gemini Flash call.
+
+        Returns the LLM-generated summary text, or None on any failure
+        (in which case the caller keeps the template summary).
+        """
+        if not self._llm_config or not self._llm_config.api_key:
+            return None
+
+        # ── Build the safe payload (no code, no paths, no traces) ──
+        context_parts: list[str] = []
+
+        if project_name:
+            context_parts.append(f"Project: {project_name}")
+        if operational_intent:
+            context_parts.append(f"Description: {operational_intent}")
+
+        # Top 5 findings — only safe fields
+        if report.findings:
+            context_parts.append("\nFindings:")
+            for f in report.findings[:5]:
+                context_parts.append(
+                    f"- [{f.severity}] {f.category}: {f.description}"
+                )
+
+        # Top 5 degradation curves — start/end values only
+        if report.degradation_points:
+            context_parts.append("\nDegradation:")
+            for dp in report.degradation_points[:5]:
+                start = dp.steps[0][1] if dp.steps else 0
+                end = dp.steps[-1][1] if dp.steps else 0
+                bp = f", breaking at {dp.breaking_point}" if dp.breaking_point else ""
+                context_parts.append(
+                    f"- {dp.scenario_name} ({dp.metric}): "
+                    f"{start:.2f} → {end:.2f}{bp}"
+                )
+
+        prompt = (
+            "You are writing a summary for myCode, a stress-testing tool "
+            "for AI-generated code. A non-technical user just ran stress "
+            "tests on their project.\n\n"
+            "Write 3-5 bullet points explaining what these findings mean "
+            "for this specific project, in terms a non-technical user would "
+            "understand.\n\n"
+            "RULES:\n"
+            "- Do not suggest fixes or code changes.\n"
+            "- Do not use engineering jargon.\n"
+            "- Each bullet should start with '- '.\n"
+            "- Be specific about what happened, using the project name.\n"
+            "- End with a brief closing line (not a bullet) directing them "
+            "to the detailed findings below.\n\n"
+            + "\n".join(context_parts)
+        )
+
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+        }
+
+        url = f"{self._GEMINI_ENDPOINT}?key={self._llm_config.api_key}"
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            text = text.strip()
+            if not text:
+                return None
+            return text
+        except (
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            OSError,
+            TimeoutError,
+            json.JSONDecodeError,
+            KeyError,
+            IndexError,
+        ):
+            logger.debug("Gemini plain summary call failed, using template", exc_info=True)
+            return None
 
     def _translate_degradation(
         self, dp: DegradationPoint, project_ref: str,

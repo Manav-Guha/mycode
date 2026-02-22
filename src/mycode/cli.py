@@ -18,6 +18,7 @@ Options::
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -108,18 +109,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: Project path is not a directory: {project}", file=sys.stderr)
         return 1
 
-    # Build LLM config
+    # Build LLM config — flag takes precedence, then env var
+    api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
     llm_config = None
-    if args.api_key:
-        kwargs: dict = {"api_key": args.api_key}
+    if api_key:
+        kwargs: dict = {"api_key": api_key}
         if args.api_base:
             kwargs["base_url"] = args.api_base
         if args.model:
             kwargs["model"] = args.model
         llm_config = LLMConfig(**kwargs)
 
-    # Offline mode: explicit flag or no API key
-    offline = args.offline or (args.api_key is None)
+    # Offline mode: explicit flag or no API key available
+    offline = args.offline or (api_key is None)
 
     # Build pipeline config
     config = PipelineConfig(
