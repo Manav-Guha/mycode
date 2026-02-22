@@ -137,6 +137,44 @@ Your project mostly handles stress well, but there are a few areas to watch.
 
 ---
 
+## Project 5: Python CLI Tool (Self-Test)
+
+**Profile:** subprocess, json, pathlib, ast, urllib, signal, tempfile, os, re, collections
+**Size:** 26 files, 24,053 lines
+**Scenarios run:** 279
+**Result:** 0 critical, 0 warnings, 279 clean
+
+### Summary
+
+```
+Your project looks solid under the conditions we tested.
+
+- When running calculations across components, memory grows from 0MB to 26MB.
+- When running calculations across components, memory grows from 0MB to 116MB — if 10 users are active, that's 1162MB on your server.
+- When running calculations across components, memory grows from 0MB to 8MB.
+```
+
+### Key Degradation Curves
+
+| Component | Metric | Start | End | Scaling Factor | Breaking Point |
+|-----------|--------|-------|-----|----------------|----------------|
+| sorted (coupling) | Execution time | 0.01ms | 64ms | 6,421x | 1,000 ops |
+| f.write_text (coupling) | Execution time | 0.19ms | 314ms | 1,653x | 100,000 ops |
+| pathlib.Path (coupling) | Execution time | 0.20ms | 247ms | 1,237x | 1,000 ops |
+| json.dumps (coupling) | Execution time | 0.78ms | 810ms | 1,038x | 1,000 ops |
+| json.dumps (coupling) | Memory | 0.11MB | 116MB | 1,056x | 100,000 ops |
+| urllib.request (coupling) | Memory | 0.06MB | 56MB | 941x | 10,000 ops |
+| pathlib.Path (coupling) | Memory | 0.02MB | 26.5MB | 1,325x | 1,000 ops |
+
+### Notable Findings
+- All 279 scenarios passed — zero crashes, zero resource cap hits, zero errors
+- Memory growth linear and proportional to data size — no leaks detected
+- json.dumps at 116MB peak for 100,000 operations is the highest memory point; acceptable for a CLI tool running locally
+- High scenario count (279) driven by coupling analysis generating scenarios for Python builtins (len, str, isinstance, range) — these are noise, not real risk. Scenario count scaling is a known post-launch improvement item
+- myCode successfully stress-tested itself without any operational issues
+
+---
+
 ## Summary Across All Validated Projects
 
 | Project | Language | Files | Lines | Scenarios | Critical | Warnings | Clean |
@@ -145,9 +183,10 @@ Your project mostly handles stress well, but there are a few areas to watch.
 | Analysis tool | JavaScript | 17 | 24,000+ | 25 | 4 | 2 | 16 |
 | Multi-component framework | JavaScript | Multiple | — | 19 | 0 | 0 | 19 |
 | Expense tracker | JavaScript | Small | — | 5 | 0 | 1 | 4 |
-| **Total** | | | | **119** | **7** | **28** | **60** |
+| CLI tool (self-test) | Python | 26 | 24,053 | 279 | 0 | 0 | 279 |
+| **Total** | | | | **398** | **7** | **28** | **339** |
 
-119 scenarios executed across 4 real-world projects. 7 critical issues found, 28 warnings, 60 clean passes. All projects completed without myCode errors or crashes.
+398 scenarios executed across 5 real-world projects. 7 critical issues found, 28 warnings, 339 clean passes. All projects completed without myCode errors or crashes.
 
 ---
 

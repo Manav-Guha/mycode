@@ -124,8 +124,9 @@ myCode has been tested against real-world projects across Python and JavaScript:
 | Analysis tool (React + charting libraries) | JavaScript | 25 | 4 | Edge case input crashes, memory growth |
 | Multi-component framework (React) | JavaScript | 19 | 0 | All clean |
 | Expense tracker (React) | JavaScript | 5 | 0 | Mostly clean |
+| CLI tool — myCode self-test (26 files, 24K lines) | Python | 279 | 0 | All clean |
 
-119 total scenarios, 7 critical issues found, 0 myCode errors.
+398 total scenarios, 7 critical issues found, 0 myCode errors.
 
 [See full anonymized test reports →](docs/validation-reports.md)
 
