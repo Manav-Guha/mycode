@@ -13,7 +13,7 @@ myCode answers these questions. It reads your code, understands your dependencie
 ## Quick Start
 
 ```bash
-pip install mycode
+pip install mycode-ai
 mycode ~/path/to/your/project
 ```
 
