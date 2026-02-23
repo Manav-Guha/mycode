@@ -199,8 +199,7 @@ class LLMBackend:
             "model": self._config.model,
             "messages": messages,
             "temperature": self._config.temperature,
-            "max_tokens": self._config.max_tokens,
-            "response_format": {"type": "json_object"},
+            "max_completion_tokens": self._config.max_tokens,
         }
         body = json.dumps(payload).encode("utf-8")
         headers = {

@@ -878,8 +878,16 @@ class ReportGenerator:
             if not text:
                 return None
             return text
+        except urllib.error.HTTPError as exc:
+            try:
+                error_body = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                error_body = ""
+            logger.debug(
+                "Gemini plain summary HTTP %s: %s", exc.code, error_body[:500],
+            )
+            return None
         except (
-            urllib.error.HTTPError,
             urllib.error.URLError,
             OSError,
             TimeoutError,

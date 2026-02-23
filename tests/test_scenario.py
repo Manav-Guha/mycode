@@ -904,7 +904,9 @@ class TestLLMGeneration:
 
         body = json.loads(req.data)
         assert body["model"] == "gpt-4o"
-        assert body["response_format"] == {"type": "json_object"}
+        assert "max_completion_tokens" in body
+        assert "max_tokens" not in body
+        assert "response_format" not in body
         assert len(body["messages"]) == 2
 
 
