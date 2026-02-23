@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ── Constants ──
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"
 
 SHARED_CATEGORIES = frozenset({
     "data_volume_scaling",
@@ -92,7 +92,7 @@ class LLMConfig:
         api_key: API key for the provider. Required unless offline.
         base_url: Base URL for the OpenAI-compatible API endpoint.
             Defaults to Gemini Flash endpoint.
-        model: Model identifier. Defaults to gemini-2.0-flash.
+        model: Model identifier. Defaults to gemini-2.5-flash.
         max_tokens: Maximum output tokens for the LLM response.
         temperature: Sampling temperature. Lower = more deterministic.
         timeout_seconds: HTTP request timeout.

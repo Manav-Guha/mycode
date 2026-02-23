@@ -392,7 +392,7 @@ class TestLLMConfig:
 
     def test_default_config(self):
         config = LLMConfig()
-        assert config.model == "gemini-2.0-flash"
+        assert config.model == "gemini-2.5-flash"
         assert "googleapis.com" in config.base_url
         assert config.api_key is None
         assert config.max_retries == 2
@@ -822,7 +822,7 @@ class TestLLMGeneration:
         mock_resp.read.return_value = json.dumps({
             "choices": [{"message": {"content": response_json}}],
             "usage": {"prompt_tokens": 1000, "completion_tokens": 500},
-            "model": "gemini-2.0-flash",
+            "model": "gemini-2.5-flash",
         }).encode("utf-8")
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
@@ -838,7 +838,7 @@ class TestLLMGeneration:
                               "A web app", "python")
 
         assert len(result.scenarios) == 2
-        assert result.model_used == "gemini-2.0-flash"
+        assert result.model_used == "gemini-2.5-flash"
         assert result.token_usage["input_tokens"] == 1000
         assert result.token_usage["output_tokens"] == 500
         for s in result.scenarios:

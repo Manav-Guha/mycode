@@ -796,7 +796,7 @@ class ReportGenerator:
 
     _GEMINI_ENDPOINT = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.0-flash:generateContent"
+        "gemini-2.5-flash:generateContent"
     )
 
     def _generate_llm_plain_summary(
