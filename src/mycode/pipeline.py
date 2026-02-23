@@ -379,7 +379,10 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             approved = _run_scenario_review(scenarios, config, result)
 
             # ── Stage 8: Execution ──
-            _run_execution(session, ingestion, approved, result, language)
+            _run_execution(
+                session, ingestion, approved, result, language,
+                io=config.io,
+            )
 
             # Record execution
             if result.execution is not None:
@@ -567,7 +570,8 @@ def _run_conversation(
             duration_ms=_elapsed_ms(stage_start),
         ))
         logger.info("Conversation skipped — operational intent provided.")
-        return config.operational_intent, ""
+        project_name = Path(config.project_path).resolve().name
+        return config.operational_intent, project_name
 
     try:
         io = config.io or TerminalIO()
@@ -734,6 +738,7 @@ def _run_execution(
     approved_scenarios: list[StressTestScenario],
     result: PipelineResult,
     language: str = "python",
+    io: Optional[UserIO] = None,
 ) -> None:
     """Stage 8: Execute approved scenarios."""
     stage_start = time.monotonic()
@@ -749,6 +754,7 @@ def _run_execution(
     try:
         engine = ExecutionEngine(
             session=session, ingestion=ingestion, language=language,
+            io=io,
         )
         execution = engine.execute(scenarios=approved_scenarios)
         result.execution = execution

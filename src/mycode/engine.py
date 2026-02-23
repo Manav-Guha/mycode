@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from mycode.ingester import IngestionResult
+from mycode.interface import TerminalIO, UserIO
 from mycode.scenario import StressTestScenario
 from mycode.session import SessionManager, SessionResult
 
@@ -156,6 +157,7 @@ class ExecutionEngine:
         session: SessionManager,
         ingestion: IngestionResult,
         language: str = "python",
+        io: Optional[UserIO] = None,
     ):
         if not session._setup_complete:
             raise EngineError(
@@ -164,6 +166,7 @@ class ExecutionEngine:
         self.session = session
         self.ingestion = ingestion
         self.language = language.lower()
+        self._io: UserIO = io or TerminalIO()
 
     def execute(
         self,
@@ -184,7 +187,11 @@ class ExecutionEngine:
         warnings: list[str] = []
         start = time.perf_counter()
 
-        for scenario in scenarios:
+        total = len(scenarios)
+        for idx, scenario in enumerate(scenarios, 1):
+            self._io.display(
+                f"[{idx}/{total}] Running scenario: {scenario.name}..."
+            )
             try:
                 result = self._execute_scenario(scenario)
                 results.append(result)

@@ -118,6 +118,7 @@ class DiagnosticReport:
     summary: str = ""
     plain_summary: str = ""
     findings: list[Finding] = field(default_factory=list)
+    incomplete_tests: list[Finding] = field(default_factory=list)
     degradation_points: list[DegradationPoint] = field(default_factory=list)
     version_flags: list[str] = field(default_factory=list)
     unrecognized_deps: list[str] = field(default_factory=list)
@@ -197,6 +198,21 @@ class DiagnosticReport:
                     if extra > 0:
                         also_line += f" +{extra} more"
                     sections.append(f"    Also: {also_line}")
+
+        # Incomplete tests (environment issues, not real failures)
+        if self.incomplete_tests:
+            sections.append("\n" + "-" * 40)
+            sections.append("  Incomplete Tests")
+            sections.append("-" * 40)
+            sections.append(
+                "  These tests could not run fully due to environment "
+                "issues (missing modules, uninstalled dependencies, "
+                "missing files). They are not code failures."
+            )
+            for f in self.incomplete_tests:
+                sections.append(f"\n  - {f.title}")
+                if f.details:
+                    sections.append(f"    {f.details}")
 
         # Degradation
         if self.degradation_points:
@@ -362,6 +378,29 @@ class ReportGenerator:
 
     # ── Execution Analysis ──
 
+    # Error types that indicate the test environment was incomplete,
+    # not that the user's code failed under stress.
+    _ENVIRONMENT_ERROR_TYPES = frozenset({
+        "ModuleNotFoundError",
+        "ImportError",
+        "FileNotFoundError",
+        "ConfigError",
+    })
+
+    def _is_environment_only(self, sr: ScenarioResult) -> bool:
+        """True when every error in a scenario is an environment issue."""
+        if sr.total_errors == 0:
+            return False
+        seen = 0
+        for step in sr.steps:
+            for err in step.errors:
+                etype = err.get("type", "") if isinstance(err, dict) else ""
+                if etype not in self._ENVIRONMENT_ERROR_TYPES:
+                    return False
+                seen += 1
+        # Must have inspected at least one typed error dict
+        return seen > 0
+
     def _analyze_execution(
         self,
         execution: ExecutionEngineResult,
@@ -387,6 +426,23 @@ class ReportGenerator:
             sr_exec_time = max(
                 (s.execution_time_ms for s in sr.steps), default=0.0,
             )
+
+            # ── Environment-only failures → incomplete tests ──
+            if self._is_environment_only(sr):
+                f = Finding(
+                    title=f"Could not test: {sr.scenario_name}",
+                    severity="info",
+                    category=sr.scenario_category,
+                    description=(
+                        "This test could not run fully due to missing "
+                        "modules or files in the test environment."
+                    ),
+                    details=self._summarize_errors(sr),
+                    affected_dependencies=self._deps_from_name(sr.scenario_name),
+                )
+                f._error_count = sr.total_errors
+                report.incomplete_tests.append(f)
+                continue
 
             # Check for failures
             if sr.status == "failed":
