@@ -503,6 +503,11 @@ class TestConversationalInterfaceLLM:
                     for w in result.warnings)
         # Intent should still capture user responses
         assert result.intent.project_description == "my app"
+        # Should have switched to offline after first failure — backend
+        # called only once (turn 1), not again for turn 2 or synthesis
+        assert interface._offline is True
+        assert interface._backend is None
+        assert mock_backend.generate.call_count == 1
 
     def test_llm_bad_json_falls_back(self, simple_ingestion):
         interface, io = self._make_interface_with_mock_backend(

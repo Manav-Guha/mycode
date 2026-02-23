@@ -689,6 +689,9 @@ class ConversationalInterface:
         except LLMError as exc:
             logger.warning("LLM call failed in interface: %s", exc)
             warnings.append(f"LLM unavailable ({exc}) — using defaults.")
+            # Switch to offline mode so remaining calls skip the LLM
+            self._offline = True
+            self._backend = None
             return None
 
     # ── Scenario Review Helpers ──
