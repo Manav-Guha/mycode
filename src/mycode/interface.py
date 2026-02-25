@@ -21,6 +21,17 @@ import logging
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Protocol
 
+from mycode.constraints import (
+    OperationalConstraints,
+    infer_availability,
+    parse_data_sensitivity,
+    parse_data_type,
+    parse_deployment_context,
+    parse_growth_expectation,
+    parse_max_payload,
+    parse_usage_pattern,
+    parse_user_scale,
+)
 from mycode.ingester import IngestionResult
 from mycode.scenario import (
     LLMBackend,
@@ -147,6 +158,7 @@ class InterfaceResult:
     """
 
     intent: OperationalIntent = field(default_factory=OperationalIntent)
+    constraints: Optional[OperationalConstraints] = None
     review: Optional[ScenarioReview] = None
     project_summary: str = ""
     token_usage: dict = field(
