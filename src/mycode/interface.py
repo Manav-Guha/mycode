@@ -355,6 +355,12 @@ class ConversationalInterface:
         # Turn 2: Confirm understanding and ask about stress priorities
         turn2_response = self._run_turn_2(summary, turn1_response, warnings)
 
+        # Extract structured constraints from conversation
+        constraints = self._extract_constraints(
+            turn1_response, turn2_response, warnings,
+        )
+        result.constraints = constraints
+
         # Ask for a short project name
         project_name = self._ask_project_name()
 
@@ -504,6 +510,102 @@ class ConversationalInterface:
             cut = name[:50].rfind(" ")
             name = name[:cut] if cut > 10 else name[:50]
         return name
+
+    # ── Constraint Extraction (Offline) ──
+
+    def _extract_constraints(
+        self,
+        turn1: str,
+        turn2: str,
+        warnings: list[str],
+    ) -> OperationalConstraints:
+        """Extract structured constraints from conversation turns.
+
+        In offline mode, runs context-only parsers on turn 1 text, then
+        asks explicit structured questions for parameters that couldn't
+        be inferred.  In online mode (future E7), the LLM extracts
+        parameters — this method only handles offline extraction.
+
+        Any parameter that cannot be extracted stays ``None``.
+        """
+        combined = f"{turn1} {turn2}"
+        raw_answers = [turn1, turn2]
+
+        # ── Context-only extraction from Turn 1 ──
+        deployment_context = parse_deployment_context(combined)
+        data_sensitivity = parse_data_sensitivity(combined)
+        growth_expectation = parse_growth_expectation(combined)
+
+        # ── Try to infer structured parameters from existing text ──
+        # user_scale, data_type, usage_pattern use keyword matching that's
+        # specific enough for turn text.  max_payload_mb is always asked
+        # explicitly — bare numbers in turn text are too ambiguous (e.g.
+        # "200 users" would be misread as 200 MB).
+        user_scale = parse_user_scale(combined)
+        data_type = parse_data_type(combined)
+        usage_pattern = parse_usage_pattern(combined)
+        max_payload_mb: float | None = None
+
+        # ── Ask explicit questions for parameters still None ──
+        if self._offline:
+            if user_scale is None:
+                answer = self._io.prompt(
+                    "How many users do you expect at the same time? "
+                    "(a number, or 'not sure')"
+                )
+                raw_answers.append(answer)
+                user_scale = parse_user_scale(answer)
+
+            if data_type is None:
+                answer = self._io.prompt(
+                    "What kind of data does your project handle?\n"
+                    "  1. Tabular data (CSV, spreadsheets, databases)\n"
+                    "  2. Text / documents\n"
+                    "  3. Images / media / files\n"
+                    "  4. API responses / JSON\n"
+                    "  5. Mixed / various\n"
+                    "(enter a number or describe it)"
+                )
+                raw_answers.append(answer)
+                data_type = parse_data_type(answer)
+
+            if usage_pattern is None:
+                answer = self._io.prompt(
+                    "How will people use it?\n"
+                    "  1. Steady, continuous use throughout the day\n"
+                    "  2. Bursts of heavy use at peak times\n"
+                    "  3. Occasional, on-demand use\n"
+                    "  4. Growing usage over time\n"
+                    "(enter a number or describe it)"
+                )
+                raw_answers.append(answer)
+                usage_pattern = parse_usage_pattern(answer)
+
+            if max_payload_mb is None:
+                answer = self._io.prompt(
+                    "What's the largest input your project handles?\n"
+                    "  1. Small (under 1 MB)\n"
+                    "  2. Medium (1–50 MB)\n"
+                    "  3. Large (over 50 MB)\n"
+                    "(enter a number, a size like '50 MB', or 'not sure')"
+                )
+                raw_answers.append(answer)
+                max_payload_mb = parse_max_payload(answer)
+
+        # ── Derive availability from usage pattern ──
+        availability_requirement = infer_availability(usage_pattern)
+
+        return OperationalConstraints(
+            user_scale=user_scale,
+            usage_pattern=usage_pattern,
+            max_payload_mb=max_payload_mb,
+            data_type=data_type,
+            deployment_context=deployment_context,
+            availability_requirement=availability_requirement,
+            data_sensitivity=data_sensitivity,
+            growth_expectation=growth_expectation,
+            raw_answers=raw_answers,
+        )
 
     # ── LLM-Powered Question Generation ──
 

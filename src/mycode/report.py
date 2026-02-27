@@ -23,6 +23,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
 
+from mycode.constraints import OperationalConstraints
 from mycode.engine import ExecutionEngineResult, ScenarioResult, StepResult
 from mycode.ingester import DependencyInfo, IngestionResult
 from mycode.library.loader import ProfileMatch
@@ -315,6 +316,7 @@ class ReportGenerator:
         profile_matches: list[ProfileMatch],
         operational_intent: str = "",
         project_name: str = "",
+        constraints: Optional[OperationalConstraints] = None,
     ) -> DiagnosticReport:
         """Generate a diagnostic report.
 
@@ -324,6 +326,10 @@ class ReportGenerator:
             profile_matches: Component library matches.
             operational_intent: User's stated intent from the
                 Conversational Interface.
+            project_name: Short project name from user.
+            constraints: Structured constraints for intent-contextualised
+                reporting.  When provided, findings are classified relative
+                to user-stated capacity.
 
         Returns:
             DiagnosticReport with findings, degradation curves, and flags.
@@ -341,6 +347,10 @@ class ReportGenerator:
 
         # 3. Flag unrecognized dependencies
         self._flag_unrecognized_deps(profile_matches, report)
+
+        # 3a. Apply constraint-driven severity classification
+        if constraints is not None:
+            self._contextualise_findings(report, constraints)
 
         # 3b. Group similar findings and degradation points to reduce noise
         report.findings = self._group_similar_findings(report.findings)
@@ -638,6 +648,84 @@ class ReportGenerator:
             )
 
         return None
+
+    # ── Constraint-Driven Contextualisation ──
+
+    @staticmethod
+    def _contextualise_findings(
+        report: DiagnosticReport,
+        constraints: OperationalConstraints,
+    ) -> None:
+        """Classify finding severity relative to user-stated constraints.
+
+        Per spec §7:
+        - Within stated capacity → CRITICAL
+        - Beyond stated capacity but ≤3x → WARNING
+        - Far beyond (>3x) → INFORMATIONAL
+        - None parameters → note "not specified — tested at default range"
+
+        Also adds constraint context to finding descriptions so findings
+        reference the user's stated intent (e.g. "You said 20 users").
+        """
+        user_scale = constraints.user_scale
+        max_payload = constraints.max_payload_mb
+
+        for finding in report.findings:
+            # Skip version/dep info findings — not capacity-related
+            if finding.severity == "info" and (
+                "outdated" in finding.title.lower()
+                or "missing" in finding.title.lower()
+                or "unrecognized" in finding.title.lower()
+            ):
+                continue
+
+            # Try to extract the load level from the scenario name or details
+            load_level = _extract_load_level(finding)
+
+            if user_scale is not None and load_level is not None:
+                ratio = load_level / user_scale if user_scale > 0 else float("inf")
+
+                if ratio <= 1.0:
+                    # Within stated capacity → CRITICAL
+                    finding.severity = "critical"
+                    finding.description = (
+                        f"You said {user_scale} users. "
+                        f"This issue occurs at {load_level} concurrent "
+                        f"sessions — within your stated capacity. "
+                        f"{finding.description}"
+                    )
+                elif ratio <= 3.0:
+                    # Beyond but ≤3x → WARNING
+                    finding.severity = "warning"
+                    finding.description = (
+                        f"You said {user_scale} users. "
+                        f"This issue occurs at {load_level} concurrent "
+                        f"sessions ({ratio:.1f}x your stated capacity). "
+                        f"{finding.description}"
+                    )
+                else:
+                    # Far beyond → INFORMATIONAL
+                    finding.severity = "info"
+                    finding.description = (
+                        f"You said {user_scale} users. "
+                        f"This issue occurs at {load_level} — "
+                        f"far beyond your stated capacity ({ratio:.0f}x). "
+                        f"{finding.description}"
+                    )
+            elif user_scale is None and finding.severity in ("critical", "warning"):
+                # No user_scale → keep original severity but note it
+                finding.description = (
+                    f"User scale not specified — tested at default range. "
+                    f"{finding.description}"
+                )
+
+        # Add constraint summary to report operational_context
+        if constraints.as_summary() != "No specific constraints provided":
+            summary = constraints.as_summary()
+            if report.operational_context:
+                report.operational_context += f"\n\nConstraints: {summary}"
+            else:
+                report.operational_context = f"Constraints: {summary}"
 
     # ── Version Discrepancies ──
 
@@ -1720,6 +1808,30 @@ def _describe_errors(f: "Finding") -> str:
     if count == 1:
         return "1 error occurred"
     return f"{count} errors occurred"
+
+
+def _extract_load_level(finding: "Finding") -> Optional[int]:
+    """Extract the concurrent load level at which a finding occurred.
+
+    Looks for patterns like ``concurrent_N`` in the finding title/details,
+    or ``user_stated_capacity`` metadata.  Returns ``None`` if no load
+    level can be determined.
+    """
+    import re
+
+    combined = f"{finding.title} {finding.details}"
+
+    # Pattern: "concurrent_N" in step names
+    m = re.search(r"concurrent[_\s](\d+)", combined, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    # Pattern: "N concurrent" or "N sessions" or "N users"
+    m = re.search(r"(\d+)\s+(?:concurrent|sessions?|users?)", combined, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+
+    return None
 
 
 def _extract_project_ref(operational_intent: str) -> str:

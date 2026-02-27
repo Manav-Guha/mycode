@@ -320,24 +320,37 @@ class TestConversationalInterfaceOffline:
         io = MockIO(responses=[
             "It's a web app for tracking expenses",
             "I care most about handling lots of data",
+            # Constraint questions (user_scale, data_type, usage_pattern, max_payload)
+            "about 20",
+            "1",
+            "1",
+            "2",
+            # Project name
             "Expense Tracker",
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
-        # Three prompts: turn 1, turn 2, project name
-        assert len(io.prompts) == 3
+        # 7 prompts: turn 1, turn 2, 4 constraint questions, project name
+        assert len(io.prompts) == 7
         # First prompt asks about the project
         assert "project" in io.prompts[0].lower() or "tell me" in io.prompts[0].lower()
         # Second prompt asks about stress priorities
         assert "stress" in io.prompts[1].lower() or "matters" in io.prompts[1].lower()
-        # Third prompt asks for a short project name
-        assert "call this project" in io.prompts[2].lower()
+        # Constraint questions asked
+        assert "how many users" in io.prompts[2].lower()
+        # Last prompt asks for a short project name
+        assert "call this project" in io.prompts[6].lower()
 
         # Intent should capture responses
         assert "expenses" in result.intent.project_description.lower()
         assert "data" in result.intent.stress_priorities.lower()
         assert result.intent.project_name == "Expense Tracker"
+
+        # Constraints should be extracted
+        assert result.constraints is not None
+        assert result.constraints.user_scale == 20
+        assert result.constraints.data_type == "tabular"
 
     def test_offline_summary_displayed(self, simple_ingestion):
         io = MockIO(responses=["app", "speed", ""])
@@ -480,7 +493,12 @@ class TestConversationalInterfaceLLM:
         assert "budget" in result.intent.summary.lower()
 
     def test_llm_failure_falls_back_to_offline(self, simple_ingestion):
-        io = MockIO(responses=["my app", "speed", ""])
+        io = MockIO(responses=[
+            "my app", "speed",
+            # Constraint questions (after LLM fallback triggers offline)
+            "not sure", "not sure", "not sure", "not sure",
+            "",  # project name
+        ])
         config = LLMConfig(api_key="test-key")
         interface = ConversationalInterface(
             llm_config=config, offline=False, io=io,
@@ -495,8 +513,8 @@ class TestConversationalInterfaceLLM:
 
         result = interface.run(simple_ingestion)
 
-        # Should still complete with offline questions + project name
-        assert len(io.prompts) == 3
+        # 7 prompts: turn 1, turn 2, 4 constraint questions, project name
+        assert len(io.prompts) == 7
         assert "project" in io.prompts[0].lower() or "tell me" in io.prompts[0].lower()
         # Warnings should mention LLM failure
         assert any("llm" in w.lower() or "unavailable" in w.lower()
@@ -661,6 +679,217 @@ class TestTerminalIO:
         io = TerminalIO()
         result = io.prompt("question?")
         assert result == "user response"
+
+
+# ── Constraint Extraction Tests ──
+
+
+class TestConstraintExtraction:
+    """Tests for offline constraint extraction wiring in ConversationalInterface."""
+
+    def test_constraints_extracted_from_explicit_answers(self, simple_ingestion):
+        """Explicit numbered answers produce correct constraints."""
+        io = MockIO(responses=[
+            "It's a Flask app for tracking budgets",
+            "I want to test data handling and speed",
+            "50",       # user_scale
+            "1",        # data_type → tabular
+            "2",        # usage_pattern → burst
+            "2",        # max_payload → medium (50 MB)
+            "Budget App",
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion)
+
+        c = result.constraints
+        assert c is not None
+        assert c.user_scale == 50
+        assert c.data_type == "tabular"
+        assert c.usage_pattern == "burst"
+        assert c.max_payload_mb == 50.0
+        assert c.availability_requirement == "business_hours"  # derived from burst
+
+    def test_constraints_inferred_from_turn_text(self, simple_ingestion):
+        """Context-only fields extracted from turn 1 text."""
+        io = MockIO(responses=[
+            "It's a medical records app deployed on AWS cloud for hospital staff",
+            "About 200 users uploading CSV files, steady use all day",
+            # user_scale, data_type, usage_pattern inferred from turn text
+            # max_payload always asked explicitly
+            "3",        # max_payload (large = 100 MB)
+            "Medical App",
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion)
+
+        c = result.constraints
+        assert c is not None
+        assert c.deployment_context == "cloud"
+        assert c.data_sensitivity == "medical"
+        assert c.user_scale == 200
+        assert c.data_type == "tabular"  # "CSV" matches tabular
+        assert c.usage_pattern == "sustained"  # "steady" + "all day"
+        assert c.max_payload_mb == 100.0  # choice 3 = large
+        assert c.availability_requirement == "always_on"  # derived from sustained
+
+    def test_constraints_none_when_skipped(self, simple_ingestion):
+        """Skipping all constraint questions leaves parameters as None."""
+        io = MockIO(responses=[
+            "just a side project",
+            "nothing specific",
+            "not sure",
+            "skip",
+            "n/a",
+            "pass",
+            "",
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion)
+
+        c = result.constraints
+        assert c is not None
+        assert c.user_scale is None
+        assert c.data_type is None
+        assert c.usage_pattern is None
+        assert c.max_payload_mb is None
+        assert c.availability_requirement is None
+
+    def test_constraints_raw_answers_preserved(self, simple_ingestion):
+        """Raw answers include all turns and explicit questions."""
+        io = MockIO(responses=[
+            "turn one",
+            "turn two",
+            "10",
+            "1",
+            "3",
+            "1",
+            "myproject",
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion)
+
+        c = result.constraints
+        assert c is not None
+        # First two entries are turn 1 and turn 2
+        assert c.raw_answers[0] == "turn one"
+        assert c.raw_answers[1] == "turn two"
+        # Additional entries for explicit constraint questions
+        assert len(c.raw_answers) >= 2
+
+    def test_constraints_keyword_parsing_for_data_type(self, simple_ingestion):
+        """Free-text keywords in turn text match data_type."""
+        io = MockIO(responses=[
+            "It processes images and photos uploaded by users",
+            "Speed matters most",
+            "5",
+            # data_type inferred from "images" + "photos" → no question asked
+            "1",
+            "1",
+            "",
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion)
+
+        c = result.constraints
+        assert c is not None
+        assert c.data_type == "images"
+
+    def test_constraints_word_based_user_scale(self, simple_ingestion):
+        """Word-based user scale like 'a few hundred' is parsed."""
+        io = MockIO(responses=[
+            "A dashboard for our team",
+            "We need to handle a few hundred people at once",
+            # user_scale inferred from "a few hundred" → no question asked
+            "1",
+            "1",
+            "1",
+            "",
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion)
+
+        c = result.constraints
+        assert c is not None
+        assert c.user_scale == 300  # "a few hundred" → 300
+
+    def test_different_constraints_produce_different_results(self, simple_ingestion):
+        """Same project with different constraint inputs yields different constraints."""
+        # Run 1: small scale, tabular data
+        # "scaling" in turn 2 infers usage_pattern="growing", so that Q is skipped
+        io1 = MockIO(responses=[
+            "A data processing app",
+            "I want to test scaling",
+            "5",        # user_scale
+            "1",        # tabular
+            # usage_pattern skipped — inferred "growing" from "scaling"
+            "1",        # small payload
+            "",          # project name
+        ])
+        interface1 = ConversationalInterface(offline=True, io=io1)
+        result1 = interface1.run(simple_ingestion)
+
+        # Run 2: large scale, images
+        io2 = MockIO(responses=[
+            "A data processing app",
+            "I want to test scaling",
+            "5000",     # user_scale
+            "3",        # images
+            # usage_pattern skipped — inferred "growing" from "scaling"
+            "3",        # large payload
+            "",          # project name
+        ])
+        interface2 = ConversationalInterface(offline=True, io=io2)
+        result2 = interface2.run(simple_ingestion)
+
+        assert result1.constraints.user_scale == 5
+        assert result2.constraints.user_scale == 5000
+        assert result1.constraints.data_type == "tabular"
+        assert result2.constraints.data_type == "images"
+        assert result1.constraints.max_payload_mb == 1.0
+        assert result2.constraints.max_payload_mb == 100.0
+
+    def test_online_mode_skips_explicit_questions(self, simple_ingestion):
+        """In online mode (non-offline), no structured questions are asked."""
+        io = MockIO(responses=[
+            "A web app for 50 users handling CSV data",
+            "Steady use, up to 10MB files",
+            "",  # project name
+        ])
+        config = LLMConfig(api_key="test-key")
+        interface = ConversationalInterface(
+            llm_config=config, offline=False, io=io,
+        )
+        # Force offline=False but mock the backend to avoid real calls
+        mock_backend = MagicMock(spec=LLMBackend)
+        mock_backend.generate = MagicMock(
+            side_effect=[
+                LLMResponse(
+                    content='{"question": "Tell me about your project"}',
+                    input_tokens=100, output_tokens=50,
+                ),
+                LLMResponse(
+                    content='{"question": "What matters most?"}',
+                    input_tokens=100, output_tokens=50,
+                ),
+                LLMResponse(
+                    content='{"summary": "A web app", "project_description": "web app", '
+                            '"audience": "users", "operating_conditions": "50 users", '
+                            '"stress_priorities": "CSV handling"}',
+                    input_tokens=100, output_tokens=50,
+                ),
+            ],
+        )
+        interface._backend = mock_backend
+        interface._offline = False
+
+        result = interface.run(simple_ingestion)
+
+        # Only 3 prompts: turn 1, turn 2, project name (no constraint questions)
+        assert len(io.prompts) == 3
+        # Constraints still extracted from turn text (without explicit Qs)
+        assert result.constraints is not None
+        assert result.constraints.user_scale == 50
+        assert result.constraints.data_type == "tabular"  # "CSV" matches tabular
 
 
 # ── LLM Config Fallback Tests ──

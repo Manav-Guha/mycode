@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from mycode.constraints import OperationalConstraints
 from mycode.engine import ExecutionEngine, ExecutionEngineResult
 from mycode.ingester import IngestionResult, ProjectIngester
 from mycode.interface import (
@@ -364,8 +365,13 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                 )
 
             # ── Stage 6: Scenario Generation ──
+            constraints = (
+                result.interface_result.constraints
+                if result.interface_result else None
+            )
             scenarios = _run_scenario_generation(
                 ingestion, matches, config, language, result, intent,
+                constraints=constraints,
             )
             if scenarios is None:
                 result.total_duration_ms = _elapsed_ms(pipeline_start)
@@ -393,6 +399,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                 _run_report_generation(
                     result.execution, ingestion, matches, intent,
                     project_name, config, result,
+                    constraints=constraints,
                 )
 
                 # Record report
@@ -623,6 +630,7 @@ def _run_scenario_generation(
     language: str,
     result: PipelineResult,
     intent: str,
+    constraints: Optional[OperationalConstraints] = None,
 ) -> Optional[ScenarioGeneratorResult]:
     """Stage 6: Generate stress test scenarios."""
     stage_start = time.monotonic()
@@ -637,6 +645,7 @@ def _run_scenario_generation(
             profile_matches=matches,
             operational_intent=intent,
             language=language,
+            constraints=constraints,
         )
         result.scenarios = scenarios
 
@@ -791,6 +800,7 @@ def _run_report_generation(
     project_name: str,
     config: PipelineConfig,
     result: PipelineResult,
+    constraints: Optional[OperationalConstraints] = None,
 ) -> None:
     """Stage 9: Generate the diagnostic report."""
     stage_start = time.monotonic()
@@ -805,6 +815,7 @@ def _run_report_generation(
             profile_matches=matches,
             operational_intent=intent,
             project_name=project_name,
+            constraints=constraints,
         )
         result.report = report
 

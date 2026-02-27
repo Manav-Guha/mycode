@@ -2013,3 +2013,163 @@ class TestProfileDeduplication:
         pandas_scenarios = [s for s in result.scenarios if s.name.startswith("pandas_")]
         assert len(flask_scenarios) >= 2
         assert len(pandas_scenarios) >= 2
+
+
+# ── Constraint-Driven Parameterisation Tests ──
+
+
+class TestConstraintDrivenScenarios:
+    """Tests for constraint-driven parameterisation (E2)."""
+
+    def _make_basic_setup(self):
+        """Return (ingestion, matches) for a basic Flask+pandas project."""
+        flask_profile = _make_profile("flask", "web_framework")
+        pandas_profile = _make_profile("pandas", "data_processing")
+        matches = [
+            ProfileMatch(dependency_name="flask", profile=flask_profile),
+            ProfileMatch(dependency_name="pandas", profile=pandas_profile),
+        ]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=3,
+            total_lines=200,
+            file_analyses=[],
+        )
+        return ingestion, matches
+
+    def test_user_scale_overrides_concurrent_levels(self):
+        """user_scale of 20 → concurrent levels [20, 30, 40, 60]."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        concurrent_scenarios = [
+            s for s in result.scenarios
+            if s.category in ("concurrent_execution", "blocking_io", "gil_contention")
+        ]
+        assert len(concurrent_scenarios) > 0
+
+        for s in concurrent_scenarios:
+            params = s.test_config.get("parameters", {})
+            if "concurrent" in params:
+                levels = params["concurrent"]
+                # Should be derived from user_scale=20: [20, 30, 40, 60]
+                assert 20 in levels
+                assert max(levels) == 60  # 3x stated
+                assert all(lev >= 1 for lev in levels)
+            # Should have user_stated_capacity
+            assert s.test_config.get("user_stated_capacity") == 20
+
+    def test_no_constraints_uses_defaults(self):
+        """Without constraints, default ranges are used."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+
+        gen = ScenarioGenerator(offline=True)
+        result_none = gen.generate(ingestion, matches, "An app", "python")
+        result_empty = gen.generate(
+            ingestion, matches, "An app", "python",
+            constraints=OperationalConstraints(),
+        )
+
+        # Without constraints, no constraint_scale should be set
+        for s in result_none.scenarios:
+            assert "constraint_scale" not in s.test_config
+            assert "user_stated_capacity" not in s.test_config
+
+    def test_max_payload_adjusts_data_sizes(self):
+        """max_payload_mb sets data_sizes around the stated size."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        # Add an unrecognized dep to trigger data_volume_scaling scenario
+        matches.append(
+            ProfileMatch(dependency_name="customlib", profile=None),
+        )
+        constraints = OperationalConstraints(max_payload_mb=50.0)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_scenarios = [
+            s for s in result.scenarios
+            if s.category == "data_volume_scaling"
+        ]
+        assert len(data_scenarios) > 0
+
+        for s in data_scenarios:
+            if "constraint_max_payload_mb" in s.test_config:
+                assert s.test_config["constraint_max_payload_mb"] == 50.0
+
+    def test_none_parameters_produce_warnings(self):
+        """None constraint parameters generate warnings in the result."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints()  # All None
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        warning_text = " ".join(result.warnings)
+        assert "user scale not specified" in warning_text.lower()
+        assert "data type not specified" in warning_text.lower()
+
+    def test_different_constraints_produce_different_scenarios(self):
+        """Same project with different constraints yields different test configs."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+
+        # Small scale
+        c1 = OperationalConstraints(user_scale=5, max_payload_mb=1.0)
+        gen = ScenarioGenerator(offline=True)
+        r1 = gen.generate(ingestion, matches, "An app", "python", c1)
+
+        # Large scale
+        c2 = OperationalConstraints(user_scale=1000, max_payload_mb=500.0)
+        r2 = gen.generate(ingestion, matches, "An app", "python", c2)
+
+        # Extract concurrent levels from first concurrent scenario
+        def get_concurrent(result):
+            for s in result.scenarios:
+                if "constraint_scale" in s.test_config:
+                    return s.test_config["constraint_scale"]
+            return None
+
+        levels_small = get_concurrent(r1)
+        levels_large = get_concurrent(r2)
+
+        assert levels_small is not None
+        assert levels_large is not None
+        assert max(levels_small) == 15  # 3x of 5
+        assert max(levels_large) == 3000  # 3x of 1000
+
+    def test_constraint_data_type_added_to_config(self):
+        """data_type constraint is added to data_volume scenarios."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        # Add an unrecognized dep to trigger data_volume_scaling scenario
+        matches.append(
+            ProfileMatch(dependency_name="customlib", profile=None),
+        )
+        constraints = OperationalConstraints(data_type="tabular")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_scenarios = [
+            s for s in result.scenarios
+            if s.category == "data_volume_scaling"
+        ]
+        assert len(data_scenarios) > 0
+        assert any(
+            s.test_config.get("constraint_data_type") == "tabular"
+            for s in data_scenarios
+        )

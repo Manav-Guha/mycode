@@ -1901,3 +1901,193 @@ class TestPlainSummaryHelpers:
         f._error_count = 1
         result = _describe_errors(f)
         assert "1 request timed out" == result
+
+
+# ── Constraint Contextualisation Tests ──
+
+
+class TestConstraintContextualisation:
+    """Tests for constraint-driven finding severity classification (E3)."""
+
+    def _make_report_with_concurrent_findings(self) -> DiagnosticReport:
+        """Create a report with concurrent execution findings at various load levels."""
+        return DiagnosticReport(
+            scenarios_run=3,
+            findings=[
+                Finding(
+                    title="Errors during: flask_concurrent_10",
+                    severity="warning",
+                    category="concurrent_execution",
+                    description="3 errors occurred during this test.",
+                    details="concurrent_10: TimeoutError",
+                ),
+                Finding(
+                    title="Resource limit hit: flask_concurrent_50",
+                    severity="critical",
+                    category="concurrent_execution",
+                    description="Resource cap hit.",
+                    details="concurrent_50: memory cap",
+                ),
+                Finding(
+                    title="Errors during: flask_concurrent_500",
+                    severity="warning",
+                    category="concurrent_execution",
+                    description="Errors at high load.",
+                    details="concurrent_500: connection refused",
+                ),
+            ],
+        )
+
+    def test_within_capacity_stays_critical(self):
+        """Failure at load ≤ stated capacity → CRITICAL."""
+        from mycode.constraints import OperationalConstraints
+
+        report = self._make_report_with_concurrent_findings()
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        # concurrent_10 is within 20 users → critical
+        f10 = [f for f in report.findings if "concurrent_10" in f.title][0]
+        assert f10.severity == "critical"
+        assert "You said 20 users" in f10.description
+
+    def test_beyond_capacity_becomes_warning(self):
+        """Failure at 1x < load ≤ 3x → WARNING."""
+        from mycode.constraints import OperationalConstraints
+
+        report = self._make_report_with_concurrent_findings()
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        # concurrent_50 is 2.5x of 20 → warning
+        f50 = [f for f in report.findings if "concurrent_50" in f.title][0]
+        assert f50.severity == "warning"
+        assert "2.5x" in f50.description
+
+    def test_far_beyond_capacity_becomes_info(self):
+        """Failure at load > 3x → INFORMATIONAL."""
+        from mycode.constraints import OperationalConstraints
+
+        report = self._make_report_with_concurrent_findings()
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        # concurrent_500 is 25x of 20 → info
+        f500 = [f for f in report.findings if "concurrent_500" in f.title][0]
+        assert f500.severity == "info"
+        assert "far beyond" in f500.description.lower()
+
+    def test_no_user_scale_notes_default(self):
+        """None user_scale adds 'not specified' note to findings."""
+        from mycode.constraints import OperationalConstraints
+
+        report = self._make_report_with_concurrent_findings()
+        constraints = OperationalConstraints()  # user_scale=None
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        for f in report.findings:
+            if f.severity in ("critical", "warning"):
+                assert "not specified" in f.description.lower()
+
+    def test_info_findings_not_reclassified(self):
+        """Version/dep info findings keep their severity."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Outdated dependency: flask",
+                    severity="info",
+                    category="",
+                    description="Flask is outdated.",
+                ),
+            ],
+        )
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        # Should stay info — not reclassified
+        assert report.findings[0].severity == "info"
+        assert "You said 20 users" not in report.findings[0].description
+
+    def test_constraint_summary_added_to_context(self):
+        """Constraint summary is appended to report operational_context."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            operational_context="A budgeting app",
+            scenarios_run=1,
+            findings=[],
+        )
+        constraints = OperationalConstraints(
+            user_scale=50,
+            data_type="tabular",
+        )
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        assert "50" in report.operational_context
+        assert "tabular" in report.operational_context
+
+    def test_full_generate_with_constraints(self):
+        """Full generate() call with constraints threads through correctly."""
+        from mycode.constraints import OperationalConstraints
+
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="flask_concurrent_request_load",
+                    scenario_category="concurrent_execution",
+                    status="completed",
+                    steps=[
+                        StepResult(
+                            step_name="concurrent_10",
+                            execution_time_ms=50.0,
+                            memory_peak_mb=10.0,
+                        ),
+                        StepResult(
+                            step_name="concurrent_50",
+                            execution_time_ms=500.0,
+                            memory_peak_mb=200.0,
+                            error_count=3,
+                            errors=[
+                                {"type": "TimeoutError", "message": "timeout"},
+                            ],
+                        ),
+                    ],
+                    total_errors=3,
+                ),
+            ],
+            scenarios_completed=1,
+        )
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=1,
+            total_lines=50,
+        )
+
+        constraints = OperationalConstraints(user_scale=20)
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution=execution,
+            ingestion=ingestion,
+            profile_matches=[],
+            operational_intent="A budget app for 20 users",
+            constraints=constraints,
+        )
+
+        # Should have contextualised findings
+        assert report.scenarios_run == 1
+        assert "20" in report.operational_context

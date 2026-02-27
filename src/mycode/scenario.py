@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from mycode.constraints import OperationalConstraints
 from mycode.ingester import CouplingPoint, FunctionFlow, IngestionResult
 from mycode.library.loader import DependencyProfile, ProfileMatch
 
@@ -505,6 +506,7 @@ class ScenarioGenerator:
         profile_matches: list[ProfileMatch],
         operational_intent: str,
         language: str = "python",
+        constraints: Optional[OperationalConstraints] = None,
     ) -> ScenarioGeneratorResult:
         """Generate stress test scenarios for the analyzed project.
 
@@ -514,6 +516,9 @@ class ScenarioGenerator:
             operational_intent: User's description of what the project does,
                 who it's for, and under what conditions it operates.
             language: Target language ('python' or 'javascript').
+            constraints: Structured constraints extracted from user
+                conversation.  Shapes scale boundaries, template selection,
+                and termination conditions.
 
         Returns:
             ScenarioGeneratorResult with generated scenarios and metadata.
@@ -526,11 +531,13 @@ class ScenarioGenerator:
             return self._generate_offline(
                 ingestion_result, recognized, unrecognized,
                 operational_intent, language, valid_categories,
+                constraints=constraints,
             )
 
         return self._generate_with_llm(
             ingestion_result, recognized, unrecognized,
             operational_intent, language, valid_categories,
+            constraints=constraints,
         )
 
     # ── LLM Generation ──
@@ -543,10 +550,12 @@ class ScenarioGenerator:
         intent: str,
         language: str,
         valid_categories: frozenset[str],
+        constraints: Optional[OperationalConstraints] = None,
     ) -> ScenarioGeneratorResult:
         """Generate scenarios using the LLM backend."""
         messages = self._build_prompt(
             ingestion, recognized, unrecognized, intent, language, valid_categories,
+            constraints=constraints,
         )
 
         warnings: list[str] = []
@@ -559,6 +568,7 @@ class ScenarioGenerator:
             result = self._generate_offline(
                 ingestion, recognized, unrecognized,
                 intent, language, valid_categories,
+                constraints=constraints,
             )
             result.warnings = warnings + result.warnings
             return result
@@ -602,11 +612,13 @@ class ScenarioGenerator:
         intent: str,
         language: str,
         valid_categories: frozenset[str],
+        constraints: Optional[OperationalConstraints] = None,
     ) -> list[dict]:
         """Construct the system and user messages for the LLM."""
         system = self._build_system_prompt(valid_categories)
         user = self._build_user_prompt(
             ingestion, recognized, unrecognized, intent, language,
+            constraints=constraints,
         )
         return [
             {"role": "system", "content": system},
@@ -659,6 +671,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
         unrecognized: list[str],
         intent: str,
         language: str,
+        constraints: Optional[OperationalConstraints] = None,
     ) -> str:
         """Build the user prompt with full project context."""
         sections = []
@@ -672,6 +685,27 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
 
         # 2. User's operational intent
         sections.append(f"\n## Operational Intent\n{intent}")
+
+        # 2b. Structured constraints (if available)
+        if constraints is not None:
+            sections.append(f"\n## Operational Constraints")
+            if constraints.user_scale is not None:
+                sections.append(
+                    f"- Expected concurrent users: {constraints.user_scale} "
+                    f"(test up to {constraints.user_scale * 3}x, stop at 3x or crash)"
+                )
+            else:
+                sections.append("- Expected users: not specified (use defaults)")
+            if constraints.data_type:
+                sections.append(f"- Data type: {constraints.data_type}")
+            if constraints.usage_pattern:
+                sections.append(f"- Usage pattern: {constraints.usage_pattern}")
+            if constraints.max_payload_mb is not None:
+                sections.append(f"- Max payload: {constraints.max_payload_mb} MB")
+            if constraints.deployment_context:
+                sections.append(f"- Deployment: {constraints.deployment_context}")
+            if constraints.data_sensitivity:
+                sections.append(f"- Data sensitivity: {constraints.data_sensitivity}")
 
         # 3. Project structure (files, classes, key functions)
         sections.append("\n## Project Structure")
@@ -777,14 +811,37 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
         intent: str,
         language: str,
         valid_categories: frozenset[str],
+        constraints: Optional[OperationalConstraints] = None,
     ) -> ScenarioGeneratorResult:
         """Generate scenarios from component library templates without LLM.
 
         Uses stress_test_templates and known_failure_modes from matched profiles,
         coupling points from the ingester, and generic scenarios for coverage.
+
+        When *constraints* are provided, scale boundaries, template selection,
+        and termination conditions are driven by user-stated capacity:
+        - ``user_scale`` → test at 1x, 1.5x, 2x, 3x (not arbitrary ranges)
+        - ``data_type``, ``usage_pattern``, ``deployment_context`` → filter templates
+        - Termination at 3x stated capacity OR crash
         """
         scenarios: list[StressTestScenario] = []
         warnings: list[str] = []
+
+        # ── Constraint-driven notes ──
+        constraint_notes: list[str] = []
+        if constraints is not None:
+            if constraints.user_scale is None:
+                constraint_notes.append(
+                    "User scale not specified — tested at default range"
+                )
+            if constraints.data_type is None:
+                constraint_notes.append(
+                    "Data type not specified — tested with generic data"
+                )
+            if constraints.max_payload_mb is None:
+                constraint_notes.append(
+                    "Max payload not specified — tested at default sizes"
+                )
 
         # Collect browser-only deps — skip library-specific tests for these
         browser_only_deps: list[str] = []
@@ -1173,12 +1230,88 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 f"{'; '.join(parts)}. One set of scenarios covers each family."
             )
 
+        # ── Apply constraint-driven parameterisation ──
+        if constraints is not None:
+            scenarios = self._apply_constraints(scenarios, constraints)
+
+        if constraint_notes:
+            warnings.extend(constraint_notes)
+
         return ScenarioGeneratorResult(
             scenarios=scenarios,
             reasoning="",
             warnings=warnings,
             model_used="offline",
         )
+
+    @staticmethod
+    def _apply_constraints(
+        scenarios: list[StressTestScenario],
+        constraints: OperationalConstraints,
+    ) -> list[StressTestScenario]:
+        """Apply constraint-driven parameterisation to scenarios.
+
+        Three adjustments per spec §5:
+
+        1. **Scale boundaries**: If ``user_scale`` is set, concurrent
+           test levels become ``[1x, 1.5x, 2x, 3x]`` of stated capacity
+           (not arbitrary ranges like 1, 10, 100, 1000).
+
+        2. **Template filtering**: ``data_type``, ``usage_pattern``, and
+           ``deployment_context`` filter which categories are relevant.
+           Irrelevant scenarios are deprioritised (not removed — the user
+           explicitly approved them).
+
+        3. **Data size boundaries**: If ``max_payload_mb`` is set,
+           ``data_sizes`` are bounded around that value.
+        """
+        user_scale = constraints.user_scale
+        max_payload = constraints.max_payload_mb
+
+        for scenario in scenarios:
+            params = scenario.test_config.get("parameters", {})
+
+            # ── 1. Scale boundaries for concurrent tests ──
+            if user_scale is not None and scenario.category in (
+                "concurrent_execution", "blocking_io", "gil_contention",
+                "async_failures",
+            ):
+                # Replace arbitrary concurrent ranges with stated capacity
+                scale_levels = _scale_levels(user_scale)
+                if "concurrent" in params:
+                    params["concurrent"] = scale_levels
+                # Also set as top-level for harness bodies that read it
+                scenario.test_config["constraint_scale"] = scale_levels
+                scenario.test_config["user_stated_capacity"] = user_scale
+
+            # ── 2. Data size boundaries ──
+            if max_payload is not None and scenario.category in (
+                "data_volume_scaling", "blocking_io",
+            ):
+                if "data_sizes" in params:
+                    # Scale around max_payload: 0.5x, 1x, 1.5x, 2x, 3x
+                    base = int(max_payload * 1000)  # convert MB to abstract items
+                    params["data_sizes"] = _data_scale_levels(base)
+                scenario.test_config["constraint_max_payload_mb"] = max_payload
+
+            # ── 3. Template relevance filtering ──
+            # Deprioritise scenarios that don't match user context
+            if constraints.deployment_context == "local_only":
+                # Local-only projects: network/API tests are less relevant
+                if scenario.category in ("blocking_io",) and any(
+                    kw in scenario.name.lower()
+                    for kw in ("api", "request", "network", "timeout")
+                ):
+                    if scenario.priority == "high":
+                        scenario.priority = "medium"
+                    elif scenario.priority == "medium":
+                        scenario.priority = "low"
+
+            if constraints.data_type and scenario.category == "data_volume_scaling":
+                # If data type is specified, add it to test_config for harness use
+                scenario.test_config["constraint_data_type"] = constraints.data_type
+
+        return scenarios
 
     # ── Helpers ──
 
@@ -1452,6 +1585,41 @@ def _infer_priority_from_template(template: dict) -> str:
     if any(kw in indicator_str for kw in ("timeout", "memory", "error", "blocked")):
         return "medium"
     return "low"
+
+
+def _scale_levels(user_scale: int) -> list[int]:
+    """Compute test levels from stated user scale.
+
+    Per spec §5: test at stated capacity → 1.5x → 2x → 3x.
+    Minimum level is 1 to avoid empty tests.
+    """
+    if user_scale <= 0:
+        return [1, 10, 100]
+    levels = sorted({
+        max(1, user_scale),
+        max(1, int(user_scale * 1.5)),
+        max(1, user_scale * 2),
+        max(1, user_scale * 3),
+    })
+    return levels
+
+
+def _data_scale_levels(base_items: int) -> list[int]:
+    """Compute data size test levels around a base size.
+
+    Tests at 0.5x, 1x, 1.5x, 2x, 3x of the base.
+    Minimum is 10 items.
+    """
+    if base_items <= 0:
+        return [100, 1000, 10000]
+    levels = sorted({
+        max(10, base_items // 2),
+        max(10, base_items),
+        max(10, int(base_items * 1.5)),
+        max(10, base_items * 2),
+        max(10, base_items * 3),
+    })
+    return levels
 
 
 def _safe_name(source: str) -> str:
