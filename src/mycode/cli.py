@@ -14,18 +14,73 @@ Options::
     --model MODEL         Model identifier
     --skip-version-check  Skip PyPI/npm version lookups
     --non-interactive     Skip conversational interface
+    --json-output         Write structured JSON report alongside terminal output
     --verbose / -v        Enable verbose logging
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
 from pathlib import Path
 
 from mycode.interface import TerminalIO
-from mycode.pipeline import PipelineConfig, run_pipeline
+from mycode.pipeline import PipelineConfig, PipelineResult, run_pipeline
 from mycode.scenario import LLMConfig
+
+
+def _build_json_report(result: PipelineResult, project_path: Path) -> dict:
+    """Assemble the full structured JSON report from pipeline results.
+
+    Combines project metadata (from ingestion), constraints (from
+    conversational interface), and the diagnostic report into a single
+    JSON-serializable dictionary.
+    """
+    report_dict = result.report.as_dict() if result.report else {}
+
+    # Project metadata
+    project_meta: dict = {
+        "name": project_path.name,
+        "path": str(project_path),
+        "language": result.language,
+    }
+    if result.ingestion:
+        ing = result.ingestion
+        project_meta["files_analyzed"] = ing.files_analyzed
+        project_meta["files_failed"] = ing.files_failed
+        project_meta["total_lines"] = ing.total_lines
+        project_meta["dependencies"] = [
+            {
+                "name": d.name,
+                "installed_version": d.installed_version,
+                "latest_version": d.latest_version,
+                "is_outdated": d.is_outdated,
+            }
+            for d in ing.dependencies
+            if not d.is_dev
+        ]
+
+    # Constraints from conversational interface
+    constraints_dict: dict | None = None
+    if result.interface_result and result.interface_result.constraints:
+        c = result.interface_result.constraints
+        constraints_dict = {
+            "user_scale": c.user_scale,
+            "usage_pattern": c.usage_pattern,
+            "max_payload_mb": c.max_payload_mb,
+            "data_type": c.data_type,
+            "deployment_context": c.deployment_context,
+            "availability_requirement": c.availability_requirement,
+            "data_sensitivity": c.data_sensitivity,
+            "growth_expectation": c.growth_expectation,
+        }
+
+    return {
+        "project": project_meta,
+        "constraints": constraints_dict,
+        **report_dict,
+    }
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -94,6 +149,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Skip conversational interface (use default stress testing profile)",
+    )
+    parser.add_argument(
+        "--json-output",
+        action="store_true",
+        default=False,
+        help="Write structured JSON report to mycode-report.json in the project directory",
     )
     return parser
 
@@ -169,6 +230,22 @@ def main(argv: list[str] | None = None) -> int:
             print("\nWarnings:")
             for w in result.warnings:
                 print(f"  - {w}")
+
+    # JSON output
+    if args.json_output and result.report:
+        json_path = project / "mycode-report.json"
+        try:
+            json_report = _build_json_report(result, project)
+            json_path.write_text(
+                json.dumps(json_report, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+            print(f"\nJSON report written: {json_path}")
+        except Exception as exc:
+            print(
+                f"\nWarning: Could not write JSON report: {exc}",
+                file=sys.stderr,
+            )
 
     # Recording path
     if result.recording_path:

@@ -289,6 +289,70 @@ class DiagnosticReport:
 
         return "\n".join(sections)
 
+    def as_dict(self) -> dict:
+        """Serialize the report as a JSON-compatible dictionary.
+
+        Returns a structured dict suitable for ``json.dumps()``.  Every
+        ``Finding`` and ``DegradationPoint`` is fully expanded, including
+        grouped sub-items.
+        """
+
+        def _finding_dict(f: Finding) -> dict:
+            d: dict = {
+                "title": f.title,
+                "severity": f.severity,
+                "category": f.category,
+                "description": f.description,
+                "details": f.details,
+                "load_level": f._load_level,
+                "affected_dependencies": list(f.affected_dependencies),
+                "group_count": f.group_count,
+            }
+            if f.grouped_findings:
+                d["grouped_findings"] = [
+                    _finding_dict(gf) for gf in f.grouped_findings
+                ]
+            return d
+
+        def _degradation_dict(dp: DegradationPoint) -> dict:
+            d: dict = {
+                "scenario_name": dp.scenario_name,
+                "metric": dp.metric,
+                "steps": [
+                    {"label": label, "value": value}
+                    for label, value in dp.steps
+                ],
+                "breaking_point": dp.breaking_point,
+                "description": dp.description,
+                "group_count": dp.group_count,
+            }
+            if dp.grouped_points:
+                d["grouped_points"] = [
+                    _degradation_dict(gp) for gp in dp.grouped_points
+                ]
+            return d
+
+        return {
+            "summary": self.summary,
+            "plain_summary": self.plain_summary,
+            "statistics": {
+                "scenarios_run": self.scenarios_run,
+                "scenarios_passed": self.scenarios_passed,
+                "scenarios_failed": self.scenarios_failed,
+                "total_errors": self.total_errors,
+            },
+            "findings": [_finding_dict(f) for f in self.findings],
+            "incomplete_tests": [_finding_dict(f) for f in self.incomplete_tests],
+            "degradation_curves": [
+                _degradation_dict(dp) for dp in self.degradation_points
+            ],
+            "version_discrepancies": list(self.version_flags),
+            "unrecognized_dependencies": list(self.unrecognized_deps),
+            "operational_context": self.operational_context,
+            "model_used": self.model_used,
+            "token_usage": dict(self.token_usage),
+        }
+
 
 # ── Report Generator ──
 
