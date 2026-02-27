@@ -162,6 +162,12 @@
       }
     ]
   },
+  "corpus_stats": {
+    "tested_count": 5,
+    "failure_rate": 0.80,
+    "common_failure_category": "memory_profiling",
+    "last_updated": "2026-02-27"
+  },
   "stress_test_templates": [
     {
       "name": "concurrent_session_load",

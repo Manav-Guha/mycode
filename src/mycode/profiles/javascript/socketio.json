@@ -155,6 +155,12 @@
       }
     ]
   },
+  "corpus_stats": {
+    "tested_count": 3,
+    "failure_rate": 1.00,
+    "common_failure_category": "concurrent_execution",
+    "last_updated": "2026-02-27"
+  },
   "stress_test_templates": [
     {
       "name": "connection_scaling",

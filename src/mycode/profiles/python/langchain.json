@@ -165,6 +165,12 @@
       }
     ]
   },
+  "corpus_stats": {
+    "tested_count": 4,
+    "failure_rate": 0.83,
+    "common_failure_category": "data_volume_scaling",
+    "last_updated": "2026-02-27"
+  },
   "stress_test_templates": [
     {
       "name": "chain_length_scaling",

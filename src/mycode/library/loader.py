@@ -61,6 +61,7 @@ class DependencyProfile:
     stress_test_templates: list
     raw: dict = field(repr=False)
     node_stress_test_templates: list = field(default_factory=list)
+    corpus_stats: dict = field(default_factory=dict)
 
     @property
     def name(self) -> str:
@@ -332,6 +333,7 @@ class ComponentLibrary:
             stress_test_templates=raw["stress_test_templates"],
             node_stress_test_templates=raw.get("node_stress_test_templates", []),
             raw=raw,
+            corpus_stats=raw.get("corpus_stats", {}),
         )
 
 

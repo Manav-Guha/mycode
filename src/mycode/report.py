@@ -366,7 +366,7 @@ class ReportGenerator:
 
         # 3a. Apply constraint-driven severity classification
         if constraints is not None:
-            self._contextualise_findings(report, constraints)
+            self._contextualise_findings(report, constraints, profile_matches)
 
         # 3b. Group similar findings and degradation points to reduce noise
         report.findings = self._group_similar_findings(report.findings)
@@ -381,9 +381,14 @@ class ReportGenerator:
             report.findings, report.degradation_points,
         )
 
-        # 4. Sort findings by severity
+        # 4. Sort findings by severity (critical first)
         severity_order = {"critical": 0, "warning": 1, "info": 2}
         report.findings.sort(key=lambda f: severity_order.get(f.severity, 9))
+
+        # 4a. Sort degradation points by ratio (worst degradation first)
+        report.degradation_points.sort(
+            key=lambda dp: self._degradation_ratio(dp), reverse=True,
+        )
 
         # 4b. Generate plain-language summary for non-technical readers
         report.plain_summary = self._generate_plain_summary(
@@ -614,6 +619,15 @@ class ReportGenerator:
             if dp:
                 report.degradation_points.append(dp)
 
+    # Minimum absolute change (last - first) below which a ratio-based
+    # detection is suppressed.  Prevents reporting e.g. 0.05ms → 0.11ms
+    # as "2.2x degradation" when the real delta is negligible noise.
+    _MIN_MEANINGFUL_DELTA: dict[str, float] = {
+        "execution_time_ms": 50.0,   # 50 ms
+        "memory_peak_mb": 2.0,       # 2 MB
+        "error_count": 1.0,          # 1 error
+    }
+
     @staticmethod
     def _analyze_curve(
         scenario_name: str,
@@ -625,6 +639,10 @@ class ReportGenerator:
         Returns a DegradationPoint if degradation is detected, else None.
         Degradation is detected when the final value is >2x the first value,
         or any step shows a >3x jump from the previous step.
+
+        Returns None (no degradation) when the data is essentially flat —
+        i.e. the coefficient of variation is below 10 % — or when the
+        absolute change is below the per-metric noise threshold.
         """
         if len(steps) < 2:
             return None
@@ -632,6 +650,21 @@ class ReportGenerator:
         values = [v for _, v in steps]
         first = values[0]
         last = values[-1]
+
+        # ── Flatness gate ──
+        # If all values cluster within ~10 % of the mean, the data is
+        # measurement noise, not a degradation trend.
+        mean_val = sum(values) / len(values)
+        if mean_val > 0.001:
+            variance = sum((v - mean_val) ** 2 for v in values) / len(values)
+            cv = (variance ** 0.5) / mean_val
+            if cv < 0.10:
+                return None
+
+        # ── Minimum absolute delta gate ──
+        min_delta = ReportGenerator._MIN_MEANINGFUL_DELTA.get(metric, 0.0)
+        if abs(last - first) < min_delta:
+            return None
 
         # Skip if first value is essentially zero
         if first < 0.001:
@@ -695,6 +728,7 @@ class ReportGenerator:
     def _contextualise_findings(
         report: DiagnosticReport,
         constraints: OperationalConstraints,
+        profile_matches: Optional[list[ProfileMatch]] = None,
     ) -> None:
         """Classify finding severity relative to user-stated constraints.
 
@@ -706,9 +740,22 @@ class ReportGenerator:
 
         Also adds constraint context to finding descriptions so findings
         reference the user's stated intent (e.g. "You said 20 users").
+
+        When *profile_matches* is provided, findings for dependencies with
+        corpus_stats get an additional sentence referencing test-portfolio
+        failure rates.
         """
         user_scale = constraints.user_scale
         max_payload = constraints.max_payload_mb
+
+        # Build corpus_stats lookup from profile_matches
+        corpus_lookup: dict[str, dict] = {}
+        if profile_matches:
+            for pm in profile_matches:
+                if pm.profile and pm.profile.corpus_stats:
+                    corpus_lookup[pm.dependency_name.lower()] = (
+                        pm.profile.corpus_stats
+                    )
 
         for finding in report.findings:
             # Skip version/dep info findings — not capacity-related
@@ -731,8 +778,9 @@ class ReportGenerator:
                     finding.severity = "critical"
                     finding.description = (
                         f"You said {user_scale} users. "
-                        f"This issue occurs at {load_level} concurrent "
-                        f"sessions — within your stated capacity. "
+                        f"Under simulated concurrency, this issue appears "
+                        f"at {load_level} concurrent sessions — within "
+                        f"your stated capacity. "
                         f"{finding.description}"
                     )
                 elif ratio <= 3.0:
@@ -740,8 +788,9 @@ class ReportGenerator:
                     finding.severity = "warning"
                     finding.description = (
                         f"You said {user_scale} users. "
-                        f"This issue occurs at {load_level} concurrent "
-                        f"sessions ({ratio:.1f}x your stated capacity). "
+                        f"Under simulated concurrency, this issue appears "
+                        f"at {load_level} concurrent sessions "
+                        f"({ratio:.1f}x your stated capacity). "
                         f"{finding.description}"
                     )
                 else:
@@ -749,8 +798,9 @@ class ReportGenerator:
                     finding.severity = "info"
                     finding.description = (
                         f"You said {user_scale} users. "
-                        f"This issue occurs at {load_level} — "
-                        f"far beyond your stated capacity ({ratio:.0f}x). "
+                        f"Under simulated concurrency, this issue appears "
+                        f"at {load_level} — far beyond your stated "
+                        f"capacity ({ratio:.0f}x). "
                         f"{finding.description}"
                     )
             elif load_level is not None and not is_concurrency:
@@ -776,6 +826,21 @@ class ReportGenerator:
                     f"{finding.description}"
                 )
 
+        # Append corpus stats sentences when available
+        if corpus_lookup:
+            for finding in report.findings:
+                for dep_name in finding.affected_dependencies:
+                    stats = corpus_lookup.get(dep_name.lower())
+                    if stats and stats.get("tested_count", 0) >= 3:
+                        rate = stats["failure_rate"]
+                        count = stats["tested_count"]
+                        finding.description += (
+                            f" In myCode's test portfolio, {dep_name} "
+                            f"showed failures in {rate:.0%} of "
+                            f"{count} tested projects."
+                        )
+                        break  # one corpus sentence per finding
+
         # Add constraint summary to report operational_context
         if constraints.as_summary() != "No specific constraints provided":
             summary = constraints.as_summary()
@@ -793,7 +858,9 @@ class ReportGenerator:
         report: DiagnosticReport,
     ) -> None:
         """Flag version discrepancies from ingester and profile matches."""
-        # From ingester dependency info (skip devDependencies)
+        outdated: list[DependencyInfo] = []
+        missing: list[DependencyInfo] = []
+
         for dep in ingestion.dependencies:
             if dep.is_dev:
                 continue
@@ -802,32 +869,59 @@ class ReportGenerator:
                 if dep.latest_version:
                     msg += f", latest is {dep.latest_version}"
                 report.version_flags.append(msg)
-                report.findings.append(Finding(
-                    title=f"Outdated dependency: {dep.name}",
-                    severity="info",
-                    description=(
-                        f"{dep.name} is outdated. Installed version "
-                        f"{dep.installed_version} vs latest "
-                        f"{dep.latest_version or 'unknown'}. "
-                        f"Outdated dependencies may have known issues "
-                        f"that affect behavior under stress."
-                    ),
-                    affected_dependencies=[dep.name],
-                ))
+                outdated.append(dep)
             elif dep.is_missing:
                 report.version_flags.append(
                     f"{dep.name}: declared but not installed"
                 )
-                report.findings.append(Finding(
-                    title=f"Missing dependency: {dep.name}",
-                    severity="warning",
-                    description=(
-                        f"{dep.name} is declared in requirements but not "
-                        f"installed. This may cause import failures under "
-                        f"certain code paths."
-                    ),
-                    affected_dependencies=[dep.name],
-                ))
+                missing.append(dep)
+
+        # Consolidated outdated finding
+        if outdated:
+            details = [
+                f"{d.name} ({d.installed_version} \u2192 "
+                f"{d.latest_version or 'unknown'})"
+                for d in outdated[:5]
+            ]
+            n = len(outdated)
+            desc = ", ".join(details)
+            if n > 5:
+                desc += f", and {n - 5} more"
+            desc += (
+                ". Outdated dependencies may have known issues "
+                "that affect behavior under stress."
+            )
+            report.findings.append(Finding(
+                title=(
+                    f"{n} outdated "
+                    f"{'dependency' if n == 1 else 'dependencies'}"
+                ),
+                severity="info",
+                description=desc,
+                affected_dependencies=[d.name for d in outdated[:10]],
+            ))
+
+        # Consolidated missing finding
+        if missing:
+            names = [d.name for d in missing[:5]]
+            n = len(missing)
+            desc = ", ".join(names)
+            if n > 5:
+                desc += f", and {n - 5} more"
+            desc += (
+                f" {'is' if n == 1 else 'are'} declared in requirements "
+                "but not installed. This may cause import failures under "
+                "certain code paths."
+            )
+            report.findings.append(Finding(
+                title=(
+                    f"{n} missing "
+                    f"{'dependency' if n == 1 else 'dependencies'}"
+                ),
+                severity="warning",
+                description=desc,
+                affected_dependencies=[d.name for d in missing[:10]],
+            ))
 
         # From profile version_match
         for match in profile_matches:
@@ -849,18 +943,23 @@ class ReportGenerator:
                 report.unrecognized_deps.append(match.dependency_name)
 
         if report.unrecognized_deps:
+            n = len(report.unrecognized_deps)
+            shown = report.unrecognized_deps[:5]
+            desc = ", ".join(shown)
+            if n > 5:
+                desc += f", and {n - 5} more"
+            desc += (
+                f" — {'this dependency has' if n == 1 else 'these have'} "
+                "no profile in the component library, so generic stress "
+                "testing was applied. Results may be less targeted."
+            )
             report.findings.append(Finding(
                 title=(
-                    f"{len(report.unrecognized_deps)} unrecognized "
-                    f"dependency(ies)"
+                    f"{n} unrecognized "
+                    f"{'dependency' if n == 1 else 'dependencies'}"
                 ),
                 severity="info",
-                description=(
-                    f"These dependencies have no profile in the component "
-                    f"library: {', '.join(report.unrecognized_deps[:10])}"
-                    + ("..." if len(report.unrecognized_deps) > 10 else "")
-                    + ". Generic stress testing was applied."
-                ),
+                description=desc,
                 affected_dependencies=report.unrecognized_deps[:10],
             ))
 
@@ -919,8 +1018,11 @@ class ReportGenerator:
         # scenario because they contain richer curve data (start→end
         # values, breaking points).
 
-        # Build a list of (priority, scenario_name, translated_text)
-        candidates: list[tuple[int, str, str]] = []
+        # Build a list of (priority, severity_rank, scenario_name, translated)
+        # severity_rank ensures criticals sort before warnings within the
+        # same priority band.
+        _sev_order = {"critical": 0, "warning": 1, "info": 2}
+        candidates: list[tuple[int, int, str, str]] = []
 
         # Degradation points first — they have the richest data
         degradation_scenarios: set[str] = set()
@@ -934,7 +1036,8 @@ class ReportGenerator:
                 prio = 1
             else:
                 prio = 2
-            candidates.append((prio, dp.scenario_name, translated))
+            # Degradation points have no explicit severity; treat as critical
+            candidates.append((prio, 0, dp.scenario_name, translated))
 
         # Critical/warning findings — only for scenarios without
         # degradation points (which already have better data)
@@ -948,6 +1051,7 @@ class ReportGenerator:
                 continue
             translated = self._translate_finding(f, project_ref)
             if translated:
+                sev_rank = _sev_order.get(f.severity, 9)
                 # Resource cap hits get priority 0, other criticals 1, warnings 2
                 if "resource" in f.title.lower() or f.category == "edge_case_input":
                     prio = 0
@@ -955,14 +1059,14 @@ class ReportGenerator:
                     prio = 1
                 else:
                     prio = 2
-                candidates.append((prio, scenario_name, translated))
+                candidates.append((prio, sev_rank, scenario_name, translated))
 
-        # Sort by priority, then pick top 3 (one per scenario, no duplicate text)
-        candidates.sort(key=lambda c: c[0])
+        # Sort by priority, then severity rank; pick top 3 (one per scenario)
+        candidates.sort(key=lambda c: (c[0], c[1]))
         items: list[str] = []
         seen_scenarios: set[str] = set()
         seen_text: set[str] = set()
-        for _prio, scenario_name, translated in candidates:
+        for _prio, _sev, scenario_name, translated in candidates:
             if len(items) >= 3:
                 break
             if scenario_name in seen_scenarios:
@@ -1512,7 +1616,7 @@ class ReportGenerator:
 
     @staticmethod
     def _summarize_errors(sr: ScenarioResult) -> str:
-        """Summarize errors from a scenario result."""
+        """Summarize errors from a scenario result in plain language."""
         error_types: dict[str, int] = {}
         for step in sr.steps:
             for err in step.errors:
@@ -1520,9 +1624,17 @@ class ReportGenerator:
                 error_types[etype] = error_types.get(etype, 0) + 1
 
         if error_types:
-            parts = [f"{t}: {c}" for t, c in error_types.items()]
-            return "; ".join(parts[:5])
-        return f"{sr.total_errors} error(s)"
+            parts: list[str] = []
+            for etype, count in list(error_types.items())[:5]:
+                label = _human_error_type(etype)
+                if count == 1:
+                    parts.append(f"1 {label}")
+                else:
+                    parts.append(f"{count} {label}s")
+            return ", ".join(parts)
+        if sr.total_errors == 1:
+            return "1 error"
+        return f"{sr.total_errors} errors"
 
     @staticmethod
     def _summarize_cap_hits(sr: ScenarioResult) -> str:
@@ -1608,7 +1720,12 @@ class ReportGenerator:
                 if not placed:
                     clusters.append([f])
 
+            _sev_order = {"critical": 0, "warning": 1, "info": 2}
             for cluster in clusters:
+                # Promote the highest-severity finding to representative
+                # so that a critical finding is never hidden behind a
+                # warning or info finding that happened to enter first.
+                cluster.sort(key=lambda f: _sev_order.get(f.severity, 9))
                 if len(cluster) == 1:
                     result.append(cluster[0])
                 else:
@@ -1734,6 +1851,24 @@ class ReportGenerator:
 
 
 # ── Module Helpers ──
+
+
+def _human_error_type(etype: str) -> str:
+    """Convert a Python/JS exception type name to plain language.
+
+    ``MemoryError`` → ``out-of-memory error``,
+    ``TimeoutError`` → ``timeout``,
+    ``RuntimeError`` → ``runtime error``.
+    """
+    special = {
+        "MemoryError": "out-of-memory error",
+        "TimeoutError": "timeout",
+        "Unknown": "error",
+    }
+    if etype in special:
+        return special[etype]
+    # CamelCase → space-separated lowercase: "RuntimeError" → "runtime error"
+    return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", etype).lower()
 
 
 def _human_metric(metric: str) -> str:
@@ -1918,6 +2053,10 @@ def _describe_impact(metric: str, first_val: float, last_val: float) -> str:
 
     For memory: projects multi-user impact when peak is significant.
     """
+    # TODO(post-funding): Separate measured harness results from linear
+    # projections structurally.  Currently both appear inline in degradation
+    # descriptions (e.g. "if 10 users are active, that's 1200MB").  Future:
+    # distinct "measured" vs "projected" sections in DiagnosticReport.
     if metric == "execution_time_ms":
         first_desc = _human_time(first_val)
         last_desc = _human_time(last_val)

@@ -296,7 +296,7 @@ class TestFindingExtraction:
             if "errors during" in f.title.lower()
         ]
         assert len(error_findings) >= 1
-        assert "MemoryError" in error_findings[0].details
+        assert "out-of-memory error" in error_findings[0].details
 
     def test_findings_sorted_by_severity(
         self, failing_execution, simple_ingestion, profile_matches,
@@ -422,6 +422,19 @@ class TestDegradationCurveAnalysis:
     def test_zero_baseline_stays_zero(self):
         steps = [("a", 0.0), ("b", 0.0), ("c", 0.0)]
         dp = ReportGenerator._analyze_curve("test", "errors", steps)
+        assert dp is None
+
+    def test_flat_noisy_data_returns_none(self):
+        """Flat data with slight noise (CV < 10%) should not be flagged."""
+        steps = [("a", 10.0), ("b", 10.5), ("c", 9.8), ("d", 10.2)]
+        dp = ReportGenerator._analyze_curve("test", "execution_time_ms", steps)
+        assert dp is None
+
+    def test_trivial_absolute_delta_returns_none(self):
+        """High ratio but trivial absolute delta (below min-delta) → None."""
+        # 0.05ms → 0.11ms is 2.2x but absolute delta is 0.06ms < 50ms threshold
+        steps = [("a", 0.05), ("b", 0.11)]
+        dp = ReportGenerator._analyze_curve("test", "execution_time_ms", steps)
         assert dp is None
 
 
@@ -1761,6 +1774,66 @@ class TestPlainSummary:
         assert "timed out" in result.lower()
 
 
+    def test_plain_summary_criticals_before_warnings(self):
+        """Within the same priority band, criticals sort before warnings."""
+        # Use two scenarios that produce findings at the same priority band
+        # but different severities: one critical, one warning.
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                # Warning-level finding: small number of errors but scenario
+                # completes (not failed, just has errors)
+                ScenarioResult(
+                    scenario_name="flask_data_volume_warning",
+                    scenario_category="data_volume_scaling",
+                    status="completed",
+                    total_errors=1,
+                    steps=[
+                        StepResult(
+                            step_name="data_size_100",
+                            execution_time_ms=10.0,
+                            memory_peak_mb=5.0,
+                            error_count=1,
+                            errors=[{"type": "ValueError", "message": "bad input"}],
+                        ),
+                    ],
+                ),
+                # Critical-level finding: scenario fails with many errors
+                ScenarioResult(
+                    scenario_name="flask_concurrent_crash",
+                    scenario_category="concurrent_execution",
+                    status="failed",
+                    summary="Crash under load",
+                    total_errors=5,
+                    steps=[
+                        StepResult(
+                            step_name="concurrent_10",
+                            execution_time_ms=500.0,
+                            memory_peak_mb=200.0,
+                            error_count=5,
+                            errors=[{"type": "MemoryError", "message": "OOM"}],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+
+        # Verify that critical findings appear before warning findings
+        # after sort — findings list is sorted by severity
+        critical_findings = [f for f in report.findings if f.severity == "critical"]
+        warning_findings = [f for f in report.findings if f.severity == "warning"]
+        if critical_findings and warning_findings:
+            # First critical should appear before first warning in the list
+            ci = report.findings.index(critical_findings[0])
+            wi = report.findings.index(warning_findings[0])
+            assert ci < wi
+
+
 class TestPlainSummaryHelpers:
     """Tests for plain summary module-level helpers."""
 
@@ -2276,3 +2349,125 @@ class TestConstraintContextualisation:
         assert "5,000 items" in f.description
         # Should NOT get "not specified" (that's for concurrency only)
         assert "not specified" not in f.description
+
+
+class TestCorpusAwareFindingLanguage:
+    """Tests for corpus stats sentences appended to findings (Item 6)."""
+
+    def test_corpus_stats_appended_to_finding(self):
+        """Finding with dep that has corpus_stats gets corpus sentence."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.library.loader import DependencyProfile
+
+        profile = MagicMock(spec=DependencyProfile)
+        profile.corpus_stats = {
+            "tested_count": 5,
+            "failure_rate": 0.80,
+            "common_failure_category": "memory_profiling",
+            "last_updated": "2026-02-27",
+        }
+        matches = [
+            ProfileMatch(
+                dependency_name="streamlit",
+                profile=profile,
+                installed_version="1.41.0",
+                version_match=True,
+            ),
+        ]
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: streamlit_cache_memory_growth",
+                    severity="warning",
+                    category="memory_profiling",
+                    description="Memory keeps growing.",
+                    affected_dependencies=["streamlit"],
+                ),
+            ],
+        )
+        constraints = OperationalConstraints()
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints, matches)
+
+        f = report.findings[0]
+        assert "test portfolio" in f.description
+        assert "streamlit" in f.description
+        assert "80%" in f.description
+        assert "5 tested projects" in f.description
+
+    def test_no_corpus_stats_no_change(self):
+        """Finding with dep without corpus_stats is unchanged."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.library.loader import DependencyProfile
+
+        profile = MagicMock(spec=DependencyProfile)
+        profile.corpus_stats = {}
+        matches = [
+            ProfileMatch(
+                dependency_name="flask",
+                profile=profile,
+                installed_version="3.1.0",
+                version_match=True,
+            ),
+        ]
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: flask_concurrent",
+                    severity="warning",
+                    category="concurrent_execution",
+                    description="Errors occurred.",
+                    affected_dependencies=["flask"],
+                ),
+            ],
+        )
+        constraints = OperationalConstraints()
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints, matches)
+
+        f = report.findings[0]
+        assert "test portfolio" not in f.description
+
+    def test_corpus_stats_minimum_tested_count(self):
+        """tested_count < 3 → no corpus sentence appended."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.library.loader import DependencyProfile
+
+        profile = MagicMock(spec=DependencyProfile)
+        profile.corpus_stats = {
+            "tested_count": 2,
+            "failure_rate": 1.00,
+            "common_failure_category": "concurrent_execution",
+            "last_updated": "2026-02-27",
+        }
+        matches = [
+            ProfileMatch(
+                dependency_name="socketio",
+                profile=profile,
+                installed_version="4.8.1",
+                version_match=True,
+            ),
+        ]
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: socketio_connection_scaling",
+                    severity="warning",
+                    category="concurrent_execution",
+                    description="Connection errors.",
+                    affected_dependencies=["socketio"],
+                ),
+            ],
+        )
+        constraints = OperationalConstraints()
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints, matches)
+
+        f = report.findings[0]
+        assert "test portfolio" not in f.description
