@@ -31,6 +31,7 @@ from mycode.ingester import (
     IngestionResult,
     _is_version_outdated,
     _normalize_package_name,
+    _read_text_safe,
 )
 
 logger = logging.getLogger(__name__)
@@ -893,7 +894,7 @@ class JsProjectIngester:
         """
         deps: list[tuple[str, str, bool]] = []
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(_read_text_safe(path))
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to parse %s: %s", path, e)
             return deps
@@ -925,7 +926,7 @@ class JsProjectIngester:
             pkg_json = node_modules / name / "package.json"
             if pkg_json.is_file():
                 try:
-                    data = json.loads(pkg_json.read_text(encoding="utf-8"))
+                    data = json.loads(_read_text_safe(pkg_json))
                     version = data.get("version", "")
                     if version:
                         versions[name] = version
@@ -951,7 +952,7 @@ class JsProjectIngester:
         """Resolve dependency tree from package-lock.json."""
         tree: dict[str, list[str]] = {}
         try:
-            data = json.loads(lock_path.read_text(encoding="utf-8"))
+            data = json.loads(_read_text_safe(lock_path))
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to parse %s: %s", lock_path, e)
             return tree
@@ -987,7 +988,7 @@ class JsProjectIngester:
             pkg_json = node_modules / dep_name / "package.json"
             if pkg_json.is_file():
                 try:
-                    data = json.loads(pkg_json.read_text(encoding="utf-8"))
+                    data = json.loads(_read_text_safe(pkg_json))
                     tree[dep_name] = list(data.get("dependencies", {}).keys())
                 except (json.JSONDecodeError, OSError):
                     tree[dep_name] = []

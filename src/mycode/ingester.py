@@ -23,6 +23,27 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ── Encoding-safe file reading ──
+
+# BOM signatures for UTF-16 variants
+_UTF16_LE_BOM = b"\xff\xfe"
+_UTF16_BE_BOM = b"\xfe\xff"
+
+
+def _read_text_safe(path: Path) -> str:
+    """Read a text file, handling UTF-8, UTF-16 (BOM), and latin-1 gracefully.
+
+    Raises OSError if the file cannot be read at all.
+    """
+    raw = path.read_bytes()
+    # Detect UTF-16 BOM before trying UTF-8
+    if raw[:2] in (_UTF16_LE_BOM, _UTF16_BE_BOM):
+        return raw.decode("utf-16")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
+
 # Try tomllib (Python 3.11+) then tomli for pyproject.toml parsing
 try:
     import tomllib
@@ -678,8 +699,8 @@ class ProjectIngester:
         """Parse requirements.txt, returning (name, version_spec) tuples."""
         deps: list[tuple[str, str]] = []
         try:
-            content = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
+            content = _read_text_safe(path)
+        except OSError as e:
             logger.warning("Failed to read %s: %s", path, e)
             return deps
 
@@ -734,7 +755,7 @@ class ProjectIngester:
         """Parse setup.py using AST to extract install_requires."""
         deps: list[tuple[str, str]] = []
         try:
-            source = path.read_text(encoding="utf-8")
+            source = _read_text_safe(path)
             tree = ast.parse(source)
         except (OSError, SyntaxError) as e:
             logger.warning("Failed to parse %s: %s", path, e)
@@ -760,7 +781,8 @@ class ProjectIngester:
         deps: list[tuple[str, str]] = []
         config = configparser.ConfigParser()
         try:
-            config.read(str(path), encoding="utf-8")
+            text = _read_text_safe(path)
+            config.read_string(text, source=str(path))
         except (configparser.Error, OSError) as e:
             logger.warning("Failed to parse %s: %s", path, e)
             return deps

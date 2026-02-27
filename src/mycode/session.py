@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from mycode.ingester import _read_text_safe
+
 logger = logging.getLogger(__name__)
 
 # Directories and file patterns excluded when copying user's project
@@ -415,7 +417,7 @@ class SessionManager:
         """
         successful = 0
         try:
-            lines = req_path.read_text().splitlines()
+            lines = _read_text_safe(req_path).splitlines()
         except OSError as e:
             logger.warning("[PY-DEPS] Could not read %s: %s", req_path, e)
             return 0
