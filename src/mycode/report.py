@@ -358,6 +358,13 @@ class ReportGenerator:
             report.degradation_points,
         )
 
+        # 3c. Cross-type dedup: fold memory degradation points into findings
+        #      for the same scenario to avoid reporting the same memory
+        #      behavior twice (once as a finding, once as a degradation curve).
+        report.degradation_points = self._fold_memory_degradation_into_findings(
+            report.findings, report.degradation_points,
+        )
+
         # 4. Sort findings by severity
         severity_order = {"critical": 0, "warning": 1, "info": 2}
         report.findings.sort(key=lambda f: severity_order.get(f.severity, 9))
@@ -454,13 +461,18 @@ class ReportGenerator:
                 report.incomplete_tests.append(f)
                 continue
 
+            # Extract load level info from steps (for contextualisation)
+            load_detail = self._load_level_detail(sr)
+
             # Check for failures
             if sr.status == "failed":
+                desc = sr.summary or "Scenario failed during execution."
                 f = Finding(
                     title=f"Scenario failed: {sr.scenario_name}",
                     severity="critical",
                     category=sr.scenario_category,
-                    description=sr.summary or "Scenario failed during execution.",
+                    description=desc,
+                    details=load_detail.strip() if load_detail else "",
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
                 f._peak_memory_mb = sr_peak_memory
@@ -470,6 +482,9 @@ class ReportGenerator:
 
             # Check resource cap hits
             if sr.resource_cap_hit:
+                cap_detail = self._summarize_cap_hits(sr)
+                if load_detail:
+                    cap_detail = f"{cap_detail}{load_detail}"
                 f = Finding(
                     title=f"Resource limit hit: {sr.scenario_name}",
                     severity="critical",
@@ -479,7 +494,7 @@ class ReportGenerator:
                         f"This means the code exceeded safe operating limits "
                         f"under stress."
                     ),
-                    details=self._summarize_cap_hits(sr),
+                    details=cap_detail,
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
                 f._peak_memory_mb = sr_peak_memory
@@ -489,6 +504,9 @@ class ReportGenerator:
 
             # Check for errors
             if sr.total_errors > 0 and sr.status != "failed":
+                err_detail = self._summarize_errors(sr)
+                if load_detail:
+                    err_detail = f"{err_detail}{load_detail}"
                 f = Finding(
                     title=f"Errors during: {sr.scenario_name}",
                     severity="warning",
@@ -496,7 +514,7 @@ class ReportGenerator:
                     description=(
                         f"{sr.total_errors} error(s) occurred during this test."
                     ),
-                    details=self._summarize_errors(sr),
+                    details=err_detail,
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
                 f._peak_memory_mb = sr_peak_memory
@@ -513,6 +531,7 @@ class ReportGenerator:
                     description=(
                         f"Triggered: {', '.join(sr.failure_indicators_triggered)}"
                     ),
+                    details=load_detail.strip() if load_detail else "",
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
                 f._peak_memory_mb = sr_peak_memory
@@ -1389,6 +1408,82 @@ class ReportGenerator:
         return []
 
     @staticmethod
+    def _max_load_from_steps(sr: ScenarioResult) -> Optional[int]:
+        """Extract the highest concurrent load level reached in a scenario.
+
+        Parses step names for patterns like ``concurrent_N``,
+        ``wsgi_concurrent_N``, ``async_handlers_N`` etc.  Returns the
+        maximum N across all steps, or ``None`` if no load level found.
+        """
+        import re
+
+        max_level: Optional[int] = None
+        for step in sr.steps:
+            m = re.search(r"(?:concurrent|handlers|writers|sessions|users)[_\s](\d+)",
+                          step.step_name, re.IGNORECASE)
+            if m:
+                level = int(m.group(1))
+                if max_level is None or level > max_level:
+                    max_level = level
+        return max_level
+
+    @staticmethod
+    def _first_failing_load(sr: ScenarioResult) -> Optional[int]:
+        """Find the load level of the first step that failed or errored.
+
+        Returns the concurrent level from the step name if the step had
+        errors or hit a resource cap.  Returns ``None`` if no failing
+        step has a parseable load level.
+        """
+        import re
+
+        for step in sr.steps:
+            if step.error_count > 0 or step.resource_cap_hit:
+                m = re.search(
+                    r"(?:concurrent|handlers|writers|sessions|users)[_\s](\d+)",
+                    step.step_name, re.IGNORECASE,
+                )
+                if m:
+                    return int(m.group(1))
+        return None
+
+    @staticmethod
+    def _load_level_detail(sr: ScenarioResult) -> str:
+        """Build a details suffix with load level info from step names.
+
+        Returns a string like ``"at concurrent_50 (50 concurrent sessions)"``
+        or an empty string if no load level can be extracted.
+        """
+        import re
+
+        # Prefer the first failing step's load level
+        for step in sr.steps:
+            if step.error_count > 0 or step.resource_cap_hit:
+                m = re.search(
+                    r"(?:concurrent|handlers|writers|sessions|users)[_\s](\d+)",
+                    step.step_name, re.IGNORECASE,
+                )
+                if m:
+                    return f" at {step.step_name} ({m.group(1)} concurrent sessions)"
+
+        # Fallback: highest load level reached
+        max_level = None
+        max_step = ""
+        for step in sr.steps:
+            m = re.search(
+                r"(?:concurrent|handlers|writers|sessions|users)[_\s](\d+)",
+                step.step_name, re.IGNORECASE,
+            )
+            if m:
+                level = int(m.group(1))
+                if max_level is None or level > max_level:
+                    max_level = level
+                    max_step = step.step_name
+        if max_level is not None:
+            return f" at {max_step} ({max_level} concurrent sessions)"
+        return ""
+
+    @staticmethod
     def _summarize_errors(sr: ScenarioResult) -> str:
         """Summarize errors from a scenario result."""
         error_types: dict[str, int] = {}
@@ -1496,6 +1591,50 @@ class ReportGenerator:
                     result.append(representative)
 
         return result
+
+    @staticmethod
+    def _fold_memory_degradation_into_findings(
+        findings: list[Finding],
+        degradation_points: list[DegradationPoint],
+    ) -> list[DegradationPoint]:
+        """Remove memory degradation points that duplicate an existing finding.
+
+        When a scenario produces both a Finding (error/resource cap) and a
+        DegradationPoint for ``memory_peak_mb``, the report shows the same
+        component's memory behavior twice.  This folds the degradation
+        description into the finding and suppresses the duplicate point.
+
+        Returns the filtered list of degradation points.
+        """
+        # Build a lookup: scenario_name → Finding for findings whose
+        # category or title indicates memory involvement.
+        finding_by_scenario: dict[str, Finding] = {}
+        for f in findings:
+            # Extract scenario name from title patterns like
+            # "Errors during: <scenario>" or "Resource limit hit: <scenario>"
+            parts = f.title.split(": ", 1)
+            if len(parts) == 2:
+                scenario_name = parts[1]
+            else:
+                scenario_name = f.title
+            finding_by_scenario[scenario_name] = f
+
+        kept: list[DegradationPoint] = []
+        for dp in degradation_points:
+            if dp.metric != "memory_peak_mb":
+                kept.append(dp)
+                continue
+            matched = finding_by_scenario.get(dp.scenario_name)
+            if matched is None:
+                kept.append(dp)
+                continue
+            # Fold degradation description into the finding
+            if dp.description:
+                if matched.description:
+                    matched.description += f" {dp.description}"
+                else:
+                    matched.description = dp.description
+        return kept
 
     @staticmethod
     def _degradation_ratio(dp: DegradationPoint) -> float:
