@@ -1269,18 +1269,19 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
         max_payload = constraints.max_payload_mb
 
         for scenario in scenarios:
-            params = scenario.test_config.get("parameters", {})
+            # Ensure params dict exists in test_config so mutations persist
+            if "parameters" not in scenario.test_config:
+                scenario.test_config["parameters"] = {}
+            params = scenario.test_config["parameters"]
 
             # ── 1. Scale boundaries for concurrent tests ──
             if user_scale is not None and scenario.category in (
-                "concurrent_execution", "blocking_io", "gil_contention",
+                "concurrent_execution", "gil_contention",
                 "async_failures",
             ):
                 # Replace arbitrary concurrent ranges with stated capacity
                 scale_levels = _scale_levels(user_scale)
-                if "concurrent" in params:
-                    params["concurrent"] = scale_levels
-                # Also set as top-level for harness bodies that read it
+                params["concurrent"] = scale_levels
                 scenario.test_config["constraint_scale"] = scale_levels
                 scenario.test_config["user_stated_capacity"] = user_scale
 
@@ -1288,10 +1289,9 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             if max_payload is not None and scenario.category in (
                 "data_volume_scaling", "blocking_io",
             ):
-                if "data_sizes" in params:
-                    # Scale around max_payload: 0.5x, 1x, 1.5x, 2x, 3x
-                    base = int(max_payload * 1000)  # convert MB to abstract items
-                    params["data_sizes"] = _data_scale_levels(base)
+                # Scale around max_payload: 0.5x, 1x, 1.5x, 2x, 3x
+                base = int(max_payload * 1000)  # convert MB to abstract items
+                params["data_sizes"] = _data_scale_levels(base)
                 scenario.test_config["constraint_max_payload_mb"] = max_payload
 
             # ── 3. Template relevance filtering ──
