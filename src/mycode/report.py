@@ -32,26 +32,19 @@ from mycode.scenario import LLMBackend, LLMConfig, LLMError, LLMResponse
 
 logger = logging.getLogger(__name__)
 
-# Regex matching step names that encode a load level, e.g.
-# "concurrent_20", "api_concurrency_50", "wsgi_concurrent_30",
-# "async_handlers_10", "sqlite_writers_5", "async_load_100",
-# "sync_threadpool_8", "sessions_50", "users_100",
-# "state_cycles_1000", "batch_500", "data_size_1000",
-# "io_size_1048576", "gil_threads_4".
-_LOAD_LEVEL_RE = re.compile(
-    r"(?:concurren(?:t|cy)|handlers|writers|sessions|users|"
-    r"async_load|sync_threadpool|state_cycles|batch|"
-    r"data_size|io_size|gil_threads)[_\s](\d+)",
-    re.IGNORECASE,
-)
+# Generic regex: extract the trailing number from any word_N step name.
+# Matches the last ``word_DIGITS`` fragment so it works regardless of
+# naming convention (concurrent_50, compute_10000, io_size_1048576, …).
+_STEP_LEVEL_RE = re.compile(r"(\w+?)_(\d+)(?:\s|$|:)")
 
-# Subset: only concurrency-type patterns whose numeric value can be
-# meaningfully compared against user_scale (i.e. "number of users").
-_CONCURRENCY_LEVEL_RE = re.compile(
-    r"(?:concurren(?:t|cy)|handlers|writers|sessions|users|"
-    r"async_load|sync_threadpool|gil_threads)[_\s](\d+)",
-    re.IGNORECASE,
-)
+# Scenario categories whose load level represents a concurrency/user count
+# and can meaningfully be compared against user_scale.
+_CONCURRENCY_CATEGORIES = frozenset({
+    "concurrent_execution",
+    "blocking_io",
+    "gil_contention",
+    "async_failures",
+})
 
 
 # ── Exceptions ──
@@ -762,7 +755,10 @@ class ReportGenerator:
                     )
             elif load_level is not None and not is_concurrency:
                 # Data-size metric — display the load level, no ratio
-                step_desc = _describe_step_from_finding(finding)
+                combined = f"{finding.title} {finding.details}"
+                m = _STEP_LEVEL_RE.search(combined)
+                step_name = m.group(0).rstrip(": ") if m else ""
+                step_desc = _describe_step(step_name) if step_name else ""
                 if step_desc:
                     finding.description = (
                         f"This issue occurs at {step_desc}. "
@@ -1451,63 +1447,67 @@ class ReportGenerator:
 
     @staticmethod
     def _max_load_from_steps(sr: ScenarioResult) -> Optional[int]:
-        """Extract the highest concurrent load level reached in a scenario.
+        """Extract the highest load level reached across all steps.
 
-        Parses step names for patterns like ``concurrent_N``,
-        ``api_concurrency_N``, ``wsgi_concurrent_N``, ``async_handlers_N``,
-        ``async_load_N``, ``sqlite_writers_N``, etc.  Returns the maximum N
-        across all steps, or ``None`` if no load level found.
+        Parses the trailing ``_N`` from any step name (e.g.
+        ``concurrent_50``, ``compute_10000``).  Returns the maximum N
+        across all steps, or ``None`` if no numeric suffix found.
         """
         max_level: Optional[int] = None
         for step in sr.steps:
-            m = _LOAD_LEVEL_RE.search(step.step_name)
-            if m:
-                level = int(m.group(1))
-                if max_level is None or level > max_level:
-                    max_level = level
+            level = _step_level(step.step_name)
+            if level is not None and (max_level is None or level > max_level):
+                max_level = level
         return max_level
 
     @staticmethod
     def _first_failing_load(sr: ScenarioResult) -> Optional[int]:
         """Find the load level of the first step that failed or errored.
 
-        Returns the concurrent level from the step name if the step had
+        Returns the numeric suffix from the step name if the step had
         errors or hit a resource cap.  Returns ``None`` if no failing
         step has a parseable load level.
         """
         for step in sr.steps:
             if step.error_count > 0 or step.resource_cap_hit:
-                m = _LOAD_LEVEL_RE.search(step.step_name)
-                if m:
-                    return int(m.group(1))
+                level = _step_level(step.step_name)
+                if level is not None:
+                    return level
         return None
 
     @staticmethod
     def _load_level_detail(sr: ScenarioResult) -> str:
         """Build a details suffix with load level info from step names.
 
-        Returns a string like ``" at api_concurrency_50 (50 concurrent sessions)"``
+        Returns a string like ``" at api_concurrency_50 (50 concurrent API calls)"``
         or an empty string if no load level can be extracted.
         """
+        def _fmt(step_name: str) -> str:
+            desc = _describe_step(step_name)
+            if desc:
+                return f" at {step_name} ({desc})"
+            level = _step_level(step_name)
+            if level is not None:
+                return f" at {step_name} (load level {level:,})"
+            return ""
+
         # Prefer the first failing step's load level
         for step in sr.steps:
             if step.error_count > 0 or step.resource_cap_hit:
-                m = _LOAD_LEVEL_RE.search(step.step_name)
-                if m:
-                    return f" at {step.step_name} ({m.group(1)} concurrent sessions)"
+                detail = _fmt(step.step_name)
+                if detail:
+                    return detail
 
         # Fallback: highest load level reached
         max_level = None
         max_step = ""
         for step in sr.steps:
-            m = _LOAD_LEVEL_RE.search(step.step_name)
-            if m:
-                level = int(m.group(1))
-                if max_level is None or level > max_level:
-                    max_level = level
-                    max_step = step.step_name
-        if max_level is not None:
-            return f" at {max_step} ({max_level} concurrent sessions)"
+            level = _step_level(step.step_name)
+            if level is not None and (max_level is None or level > max_level):
+                max_level = level
+                max_step = step.step_name
+        if max_step:
+            return _fmt(max_step)
         return ""
 
     @staticmethod
@@ -1903,6 +1903,10 @@ def _describe_step(step_name: str) -> str:
     if m:
         return f"{int(m.group(1))} parallel threads"
 
+    m = re.match(r"compute_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} computation cycles"
+
     return ""
 
 
@@ -2002,62 +2006,60 @@ def _describe_errors(f: "Finding") -> str:
     return f"{count} errors occurred"
 
 
+# Step name prefixes that are repetition counters, not load levels.
+_ITERATION_PREFIXES = frozenset({"iteration", "repeat", "run", "attempt", "try"})
+
+
+def _step_level(step_name: str) -> Optional[int]:
+    """Extract the trailing numeric level from a step name.
+
+    Matches any ``word_DIGITS`` pattern (e.g. ``concurrent_50``,
+    ``compute_10000``, ``io_size_1048576``).  Returns ``None`` if:
+    - the step name has no trailing number,
+    - the prefix is a repetition counter (``iteration_N``, ``repeat_N``, …),
+    - the level is 0.
+    """
+    m = re.match(r"(.+)_(\d+)$", step_name)
+    if not m:
+        return None
+    prefix = m.group(1).rsplit("_", 1)[-1].lower()
+    if prefix in _ITERATION_PREFIXES:
+        return None
+    val = int(m.group(2))
+    return val if val > 0 else None
+
+
 def _extract_load_level(finding: "Finding") -> tuple[Optional[int], bool]:
     """Extract the load level at which a finding occurred.
 
-    Returns ``(level, is_concurrency)`` where *is_concurrency* is ``True``
-    when the level represents a concurrency/user count (comparable to
-    ``user_scale``) and ``False`` when it represents a data-size metric
-    (``data_size_N``, ``io_size_N``, ``batch_N``, ``state_cycles_N``)
-    that should be displayed but not compared against user scale.
+    Returns ``(level, is_concurrency)``.  *is_concurrency* is determined
+    by the finding's **category** (not the step name prefix):
+    categories in ``_CONCURRENCY_CATEGORIES`` are concurrency-type and
+    comparable to ``user_scale``; everything else is data-size-type.
 
-    Checks the ``_load_level`` field first (set when the finding is created
-    from a ScenarioResult), then falls back to regex on title/details.
     Returns ``(None, False)`` if no load level can be determined.
     """
-    combined = f"{finding.title} {finding.details}"
-
-    def _classify(level: int, text: str) -> tuple[int, bool]:
-        """Return (level, True) if text contains a concurrency pattern."""
-        if _CONCURRENCY_LEVEL_RE.search(text):
-            return (level, True)
-        # Fallback: "N concurrent" / "N sessions" / "N users" in prose
-        if re.search(r"(?:^|[^\w])%d\s+(?:concurrent|sessions?|users?)" % level,
-                      text, re.IGNORECASE):
-            return (level, True)
-        return (level, False)
+    is_concurrency = finding.category in _CONCURRENCY_CATEGORIES
 
     # Preferred: pre-extracted from ScenarioResult steps
-    if finding._load_level is not None:
-        return _classify(finding._load_level, combined)
+    if finding._load_level is not None and finding._load_level > 0:
+        return (finding._load_level, is_concurrency)
 
-    # Pattern: step names embedded in title/details
-    m = _LOAD_LEVEL_RE.search(combined)
-    if m:
-        return _classify(int(m.group(1)), combined)
+    combined = f"{finding.title} {finding.details}"
 
-    # Pattern: "N concurrent" or "N sessions" or "N users"
+    # Look for any word_N pattern in the combined text
+    m = _STEP_LEVEL_RE.search(combined)
+    if m and int(m.group(2)) > 0:
+        prefix = m.group(1).rsplit("_", 1)[-1].lower()
+        if prefix not in _ITERATION_PREFIXES:
+            return (int(m.group(2)), is_concurrency)
+
+    # Prose fallback: "N concurrent" or "N sessions" or "N users"
     m = re.search(r"(\d+)\s+(?:concurrent|sessions?|users?)", combined, re.IGNORECASE)
     if m:
         return (int(m.group(1)), True)
 
     return (None, False)
-
-
-def _describe_step_from_finding(finding: "Finding") -> str:
-    """Extract a step name from a finding and describe it in user terms.
-
-    Searches the finding title and details for a ``_LOAD_LEVEL_RE`` match,
-    reconstructs the step name fragment, and passes it through
-    ``_describe_step()``.  Returns an empty string if no step name is
-    found or ``_describe_step`` cannot translate it.
-    """
-    combined = f"{finding.title} {finding.details}"
-    m = _LOAD_LEVEL_RE.search(combined)
-    if not m:
-        return ""
-    # The full match text is the step-name fragment (e.g. "state_cycles_1000")
-    return _describe_step(m.group(0))
 
 
 def _extract_project_ref(operational_intent: str) -> str:
