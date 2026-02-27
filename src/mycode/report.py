@@ -18,6 +18,7 @@ LLM-dependent component (one of three).
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -30,6 +31,27 @@ from mycode.library.loader import ProfileMatch
 from mycode.scenario import LLMBackend, LLMConfig, LLMError, LLMResponse
 
 logger = logging.getLogger(__name__)
+
+# Regex matching step names that encode a load level, e.g.
+# "concurrent_20", "api_concurrency_50", "wsgi_concurrent_30",
+# "async_handlers_10", "sqlite_writers_5", "async_load_100",
+# "sync_threadpool_8", "sessions_50", "users_100",
+# "state_cycles_1000", "batch_500", "data_size_1000",
+# "io_size_1048576", "gil_threads_4".
+_LOAD_LEVEL_RE = re.compile(
+    r"(?:concurren(?:t|cy)|handlers|writers|sessions|users|"
+    r"async_load|sync_threadpool|state_cycles|batch|"
+    r"data_size|io_size|gil_threads)[_\s](\d+)",
+    re.IGNORECASE,
+)
+
+# Subset: only concurrency-type patterns whose numeric value can be
+# meaningfully compared against user_scale (i.e. "number of users").
+_CONCURRENCY_LEVEL_RE = re.compile(
+    r"(?:concurren(?:t|cy)|handlers|writers|sessions|users|"
+    r"async_load|sync_threadpool|gil_threads)[_\s](\d+)",
+    re.IGNORECASE,
+)
 
 
 # ── Exceptions ──
@@ -71,6 +93,7 @@ class Finding:
     _peak_memory_mb: float = 0.0
     _execution_time_ms: float = 0.0
     _error_count: int = 0
+    _load_level: Optional[int] = None
 
 
 @dataclass
@@ -463,6 +486,7 @@ class ReportGenerator:
 
             # Extract load level info from steps (for contextualisation)
             load_detail = self._load_level_detail(sr)
+            failing_load = self._first_failing_load(sr)
 
             # Check for failures
             if sr.status == "failed":
@@ -478,6 +502,7 @@ class ReportGenerator:
                 f._peak_memory_mb = sr_peak_memory
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
+                f._load_level = failing_load
                 report.findings.append(f)
 
             # Check resource cap hits
@@ -500,6 +525,7 @@ class ReportGenerator:
                 f._peak_memory_mb = sr_peak_memory
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
+                f._load_level = failing_load
                 report.findings.append(f)
 
             # Check for errors
@@ -520,6 +546,7 @@ class ReportGenerator:
                 f._peak_memory_mb = sr_peak_memory
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
+                f._load_level = failing_load
                 report.findings.append(f)
 
             # Check failure indicators
@@ -537,6 +564,7 @@ class ReportGenerator:
                 f._peak_memory_mb = sr_peak_memory
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
+                f._load_level = failing_load
                 report.findings.append(f)
 
             # Detect degradation curves
@@ -699,9 +727,10 @@ class ReportGenerator:
                 continue
 
             # Try to extract the load level from the scenario name or details
-            load_level = _extract_load_level(finding)
+            load_level, is_concurrency = _extract_load_level(finding)
 
-            if user_scale is not None and load_level is not None:
+            if load_level is not None and is_concurrency and user_scale is not None:
+                # Concurrency metric — compare against user-stated scale
                 ratio = load_level / user_scale if user_scale > 0 else float("inf")
 
                 if ratio <= 1.0:
@@ -729,6 +758,19 @@ class ReportGenerator:
                         f"You said {user_scale} users. "
                         f"This issue occurs at {load_level} — "
                         f"far beyond your stated capacity ({ratio:.0f}x). "
+                        f"{finding.description}"
+                    )
+            elif load_level is not None and not is_concurrency:
+                # Data-size metric — display the load level, no ratio
+                step_desc = _describe_step_from_finding(finding)
+                if step_desc:
+                    finding.description = (
+                        f"This issue occurs at {step_desc}. "
+                        f"{finding.description}"
+                    )
+                else:
+                    finding.description = (
+                        f"This issue occurs at load level {load_level:,}. "
                         f"{finding.description}"
                     )
             elif user_scale is None and finding.severity in ("critical", "warning"):
@@ -1412,15 +1454,13 @@ class ReportGenerator:
         """Extract the highest concurrent load level reached in a scenario.
 
         Parses step names for patterns like ``concurrent_N``,
-        ``wsgi_concurrent_N``, ``async_handlers_N`` etc.  Returns the
-        maximum N across all steps, or ``None`` if no load level found.
+        ``api_concurrency_N``, ``wsgi_concurrent_N``, ``async_handlers_N``,
+        ``async_load_N``, ``sqlite_writers_N``, etc.  Returns the maximum N
+        across all steps, or ``None`` if no load level found.
         """
-        import re
-
         max_level: Optional[int] = None
         for step in sr.steps:
-            m = re.search(r"(?:concurrent|handlers|writers|sessions|users)[_\s](\d+)",
-                          step.step_name, re.IGNORECASE)
+            m = _LOAD_LEVEL_RE.search(step.step_name)
             if m:
                 level = int(m.group(1))
                 if max_level is None or level > max_level:
@@ -1435,14 +1475,9 @@ class ReportGenerator:
         errors or hit a resource cap.  Returns ``None`` if no failing
         step has a parseable load level.
         """
-        import re
-
         for step in sr.steps:
             if step.error_count > 0 or step.resource_cap_hit:
-                m = re.search(
-                    r"(?:concurrent|handlers|writers|sessions|users)[_\s](\d+)",
-                    step.step_name, re.IGNORECASE,
-                )
+                m = _LOAD_LEVEL_RE.search(step.step_name)
                 if m:
                     return int(m.group(1))
         return None
@@ -1451,18 +1486,13 @@ class ReportGenerator:
     def _load_level_detail(sr: ScenarioResult) -> str:
         """Build a details suffix with load level info from step names.
 
-        Returns a string like ``"at concurrent_50 (50 concurrent sessions)"``
+        Returns a string like ``" at api_concurrency_50 (50 concurrent sessions)"``
         or an empty string if no load level can be extracted.
         """
-        import re
-
         # Prefer the first failing step's load level
         for step in sr.steps:
             if step.error_count > 0 or step.resource_cap_hit:
-                m = re.search(
-                    r"(?:concurrent|handlers|writers|sessions|users)[_\s](\d+)",
-                    step.step_name, re.IGNORECASE,
-                )
+                m = _LOAD_LEVEL_RE.search(step.step_name)
                 if m:
                     return f" at {step.step_name} ({m.group(1)} concurrent sessions)"
 
@@ -1470,10 +1500,7 @@ class ReportGenerator:
         max_level = None
         max_step = ""
         for step in sr.steps:
-            m = re.search(
-                r"(?:concurrent|handlers|writers|sessions|users)[_\s](\d+)",
-                step.step_name, re.IGNORECASE,
-            )
+            m = _LOAD_LEVEL_RE.search(step.step_name)
             if m:
                 level = int(m.group(1))
                 if max_level is None or level > max_level:
@@ -1823,8 +1850,6 @@ def _describe_step(step_name: str) -> str:
     Returns an empty string if the step name can't be meaningfully
     translated (e.g. edge cases, generic iterations).
     """
-    import re
-
     m = re.match(r"data_size_(\d+)", step_name)
     if m:
         return f"{int(m.group(1)):,} items"
@@ -1832,6 +1857,34 @@ def _describe_step(step_name: str) -> str:
     m = re.match(r"concurrent_(\d+)", step_name)
     if m:
         return f"{int(m.group(1)):,} simultaneous users"
+
+    m = re.match(r"api_concurrency_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} concurrent API calls"
+
+    m = re.match(r"wsgi_concurrent_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} concurrent requests"
+
+    m = re.match(r"async_handlers_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} async handlers"
+
+    m = re.match(r"async_load_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} concurrent promises"
+
+    m = re.match(r"sync_threadpool_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} threads in pool"
+
+    m = re.match(r"sqlite_writers_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} concurrent writers"
+
+    m = re.match(r"state_cycles_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} state mutation cycles"
 
     m = re.match(r"batch_(\d+)", step_name)
     if m:
@@ -1949,28 +2002,62 @@ def _describe_errors(f: "Finding") -> str:
     return f"{count} errors occurred"
 
 
-def _extract_load_level(finding: "Finding") -> Optional[int]:
-    """Extract the concurrent load level at which a finding occurred.
+def _extract_load_level(finding: "Finding") -> tuple[Optional[int], bool]:
+    """Extract the load level at which a finding occurred.
 
-    Looks for patterns like ``concurrent_N`` in the finding title/details,
-    or ``user_stated_capacity`` metadata.  Returns ``None`` if no load
-    level can be determined.
+    Returns ``(level, is_concurrency)`` where *is_concurrency* is ``True``
+    when the level represents a concurrency/user count (comparable to
+    ``user_scale``) and ``False`` when it represents a data-size metric
+    (``data_size_N``, ``io_size_N``, ``batch_N``, ``state_cycles_N``)
+    that should be displayed but not compared against user scale.
+
+    Checks the ``_load_level`` field first (set when the finding is created
+    from a ScenarioResult), then falls back to regex on title/details.
+    Returns ``(None, False)`` if no load level can be determined.
     """
-    import re
-
     combined = f"{finding.title} {finding.details}"
 
-    # Pattern: "concurrent_N" in step names
-    m = re.search(r"concurrent[_\s](\d+)", combined, re.IGNORECASE)
+    def _classify(level: int, text: str) -> tuple[int, bool]:
+        """Return (level, True) if text contains a concurrency pattern."""
+        if _CONCURRENCY_LEVEL_RE.search(text):
+            return (level, True)
+        # Fallback: "N concurrent" / "N sessions" / "N users" in prose
+        if re.search(r"(?:^|[^\w])%d\s+(?:concurrent|sessions?|users?)" % level,
+                      text, re.IGNORECASE):
+            return (level, True)
+        return (level, False)
+
+    # Preferred: pre-extracted from ScenarioResult steps
+    if finding._load_level is not None:
+        return _classify(finding._load_level, combined)
+
+    # Pattern: step names embedded in title/details
+    m = _LOAD_LEVEL_RE.search(combined)
     if m:
-        return int(m.group(1))
+        return _classify(int(m.group(1)), combined)
 
     # Pattern: "N concurrent" or "N sessions" or "N users"
     m = re.search(r"(\d+)\s+(?:concurrent|sessions?|users?)", combined, re.IGNORECASE)
     if m:
-        return int(m.group(1))
+        return (int(m.group(1)), True)
 
-    return None
+    return (None, False)
+
+
+def _describe_step_from_finding(finding: "Finding") -> str:
+    """Extract a step name from a finding and describe it in user terms.
+
+    Searches the finding title and details for a ``_LOAD_LEVEL_RE`` match,
+    reconstructs the step name fragment, and passes it through
+    ``_describe_step()``.  Returns an empty string if no step name is
+    found or ``_describe_step`` cannot translate it.
+    """
+    combined = f"{finding.title} {finding.details}"
+    m = _LOAD_LEVEL_RE.search(combined)
+    if not m:
+        return ""
+    # The full match text is the step-name fragment (e.g. "state_cycles_1000")
+    return _describe_step(m.group(0))
 
 
 def _extract_project_ref(operational_intent: str) -> str:
@@ -1983,8 +2070,6 @@ def _extract_project_ref(operational_intent: str) -> str:
     newline, comma, or semicolon and strips parenthetical framework
     references like "(Flask)".
     """
-    import re
-
     text = operational_intent.strip()
     if not text:
         return "project"

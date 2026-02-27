@@ -2091,3 +2091,188 @@ class TestConstraintContextualisation:
         # Should have contextualised findings
         assert report.scenarios_run == 1
         assert "20" in report.operational_context
+
+    def test_data_size_finding_no_ratio(self):
+        """data_size findings describe load level without user-scale ratio."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: pandas_data_volume_scaling",
+                    severity="warning",
+                    category="data_volume_scaling",
+                    description="2 errors occurred during this test.",
+                    details="data_size_10000: MemoryError",
+                ),
+            ],
+        )
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        f = report.findings[0]
+        # Should NOT mention "You said 20 users" or compute a ratio
+        assert "You said" not in f.description
+        assert "your stated capacity" not in f.description
+        # Should describe the load level in user terms
+        assert "10,000 items" in f.description
+        # Severity should be unchanged (no ratio reclassification)
+        assert f.severity == "warning"
+
+    def test_state_cycles_finding_no_ratio(self):
+        """state_cycles findings describe load level without user-scale ratio."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Resource limit hit: react_state_management",
+                    severity="critical",
+                    category="memory_profiling",
+                    description="Resource cap hit.",
+                    details="state_cycles_1000: heap out of memory",
+                ),
+            ],
+        )
+        constraints = OperationalConstraints(user_scale=50)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        f = report.findings[0]
+        assert "You said" not in f.description
+        assert "1,000 state mutation cycles" in f.description
+        assert f.severity == "critical"
+
+    def test_io_size_finding_no_ratio(self):
+        """io_size findings display size in human units, no user-scale ratio."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: file_upload_scaling",
+                    severity="warning",
+                    category="data_volume_scaling",
+                    description="Errors at large payload.",
+                    details="io_size_1048576: timeout",
+                ),
+            ],
+        )
+        constraints = OperationalConstraints(user_scale=10)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        f = report.findings[0]
+        assert "You said" not in f.description
+        assert "MB of data" in f.description
+        assert f.severity == "warning"
+
+    def test_batch_finding_no_ratio(self):
+        """batch_N findings describe load level without user-scale ratio."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: batch_processing",
+                    severity="warning",
+                    category="data_volume_scaling",
+                    description="Slow at scale.",
+                    details="batch_500: degraded",
+                ),
+            ],
+        )
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        f = report.findings[0]
+        assert "You said" not in f.description
+        assert "batch 500" in f.description
+
+    def test_concurrent_finding_still_gets_ratio(self):
+        """Concurrency findings still get the ratio against user_scale."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: flask_api_concurrency_test",
+                    severity="warning",
+                    category="concurrent_execution",
+                    description="3 errors occurred.",
+                    details="api_concurrency_50: TimeoutError",
+                ),
+            ],
+        )
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        f = report.findings[0]
+        assert "You said 20 users" in f.description
+        assert "2.5x" in f.description
+        assert f.severity == "warning"
+
+    def test_gil_threads_finding_gets_ratio(self):
+        """gil_threads is a concurrency metric and should get user-scale ratio."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: gil_contention",
+                    severity="warning",
+                    category="concurrent_execution",
+                    description="GIL contention.",
+                    details="gil_threads_10: lock wait",
+                ),
+            ],
+        )
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        f = report.findings[0]
+        assert "You said 20 users" in f.description
+        assert f.severity == "critical"  # 10/20 ≤ 1.0 → critical
+
+    def test_data_size_finding_no_user_scale(self):
+        """data_size finding with no user_scale still describes the load level."""
+        from mycode.constraints import OperationalConstraints
+
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Errors during: data_volume_test",
+                    severity="warning",
+                    category="data_volume_scaling",
+                    description="Errors at scale.",
+                    details="data_size_5000: MemoryError",
+                ),
+            ],
+        )
+        constraints = OperationalConstraints()  # no user_scale
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+
+        f = report.findings[0]
+        # Should still get the descriptive text
+        assert "5,000 items" in f.description
+        # Should NOT get "not specified" (that's for concurrency only)
+        assert "not specified" not in f.description
