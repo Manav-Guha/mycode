@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from mycode.constraints import OperationalConstraints
+from mycode.discovery import DiscoveryEngine
 from mycode.engine import ExecutionEngine, ExecutionEngineResult
 from mycode.ingester import IngestionResult, ProjectIngester
 from mycode.interface import (
@@ -177,6 +178,7 @@ class PipelineResult:
     interface_result: Optional[InterfaceResult] = None
     report: Optional[DiagnosticReport] = None
     recording_path: Optional[Path] = None
+    discovery_paths: list[Path] = field(default_factory=list)
     total_duration_ms: float = 0.0
     warnings: list[str] = field(default_factory=list)
 
@@ -393,6 +395,14 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             # Record execution
             if result.execution is not None:
                 _safe_record(recorder.record_execution, result.execution)
+
+            # ── Discovery Logging (no consent required) ──
+            if result.execution is not None:
+                _safe_record(
+                    _run_discovery_logging,
+                    result.execution, approved, matches, constraints,
+                    language, result,
+                )
 
             # ── Stage 9: Report Generation ──
             if result.execution is not None:
@@ -865,3 +875,33 @@ def _safe_save(recorder: InteractionRecorder, result: PipelineResult) -> None:
         result.recording_path = recorder.save()
     except Exception as exc:
         logger.debug("Recorder save failed (non-blocking): %s", exc)
+
+
+def _run_discovery_logging(
+    execution: ExecutionEngineResult,
+    approved: list[StressTestScenario],
+    matches: list[ProfileMatch],
+    constraints: Optional[OperationalConstraints],
+    language: str,
+    result: PipelineResult,
+) -> None:
+    """Run discovery analysis and save any findings.
+
+    Called via ``_safe_record`` — all exceptions are swallowed by the
+    caller so this never blocks the pipeline.
+    """
+    engine = DiscoveryEngine()
+    scenarios = ScenarioGeneratorResult(scenarios=approved)
+    discoveries = engine.analyse(
+        execution, scenarios, matches, constraints, language,
+    )
+    if discoveries:
+        paths = engine.save(discoveries)
+        result.discovery_paths = paths
+        result.warnings.append(
+            f"Discovery engine: {len(discoveries)} novel pattern(s) logged "
+            f"to ~/.mycode/discoveries/"
+        )
+        logger.info("Discovery engine: %d candidate(s) saved", len(discoveries))
+    else:
+        logger.debug("Discovery engine: no novel patterns detected")
