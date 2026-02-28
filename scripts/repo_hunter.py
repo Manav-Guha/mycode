@@ -79,15 +79,17 @@ def _api_get(url: str, token: str | None, delay: float) -> dict | None:
             data = json.loads(resp.read().decode())
             return data
     except urllib.error.HTTPError as exc:
-        if exc.code == 403:
+        if exc.code in (403, 429):
             # Rate limit hit — read reset header and wait
             reset = exc.headers.get("X-RateLimit-Reset")
             if reset:
                 wait = max(int(reset) - int(time.time()), 1)
-                logger.warning("Rate limited. Waiting %ds …", wait)
+                logger.warning("Rate limited (%d). Waiting %ds …", exc.code, wait)
                 time.sleep(wait + 1)
                 return _api_get(url, token, delay)  # retry once
-            logger.warning("403 Forbidden (no reset header): %s", url)
+            logger.warning("%d (no reset header): %s", exc.code, url)
+        elif exc.code == 404:
+            logger.debug("Not found: %s", url)
         elif exc.code == 422:
             logger.warning("Unprocessable query: %s", url)
         else:
