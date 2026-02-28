@@ -125,20 +125,16 @@ def _extract_failure_signatures(report: dict) -> list[str]:
 
 def _extract_unrecognized_deps(report: dict) -> list[str]:
     """Pull unrecognized dependency names from a mycode JSON report."""
-    deps: list[str] = []
-    for dep in report.get("dependencies", {}).get("unrecognized", []):
-        if isinstance(dep, str):
-            deps.append(dep)
-        elif isinstance(dep, dict):
-            deps.append(dep.get("name", str(dep)))
-    return deps
+    # Top-level list of strings: "unrecognized_dependencies": ["plotly", "yfinance", ...]
+    return [d for d in report.get("unrecognized_dependencies", []) if isinstance(d, str)]
 
 
 def _extract_dep_failures(report: dict) -> list[str]:
     """Pull dependency names associated with failures."""
     deps: list[str] = []
     for finding in report.get("findings", []):
-        for dep in finding.get("dependencies_involved", []):
+        # Field is "affected_dependencies": ["pandas", "streamlit", ...]
+        for dep in finding.get("affected_dependencies", []):
             if isinstance(dep, str):
                 deps.append(dep.split("==")[0])
     return deps
