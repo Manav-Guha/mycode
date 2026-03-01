@@ -232,6 +232,20 @@ def _extract_dep_failures(report: dict) -> list[str]:
     return deps
 
 
+def _has_generic_stress_failure(report: dict) -> bool:
+    """Check whether generic stress testing triggered runtime failures.
+
+    Returns True if any finding for ``unrecognized_deps_generic_stress`` has a
+    severity beyond "info" (i.e. an actual failure, not just "could not test").
+    """
+    for finding in report.get("findings", []):
+        title = finding.get("title", "")
+        severity = finding.get("severity", "")
+        if "unrecognized_deps_generic_stress" in title and severity not in ("info", ""):
+            return True
+    return False
+
+
 # ── XLSX Report ──
 
 
@@ -396,13 +410,14 @@ def _generate_xlsx_report(summary: dict, results_dir: Path) -> None:
 
     # ── Sheet 4: Unrecognised Dependencies ──
     ws4 = wb.create_sheet("Unrecognised Dependencies")
-    write_header(ws4, ["Rank", "Dependency", "Repo Count"])
+    write_header(ws4, ["Rank", "Dependency", "Repo Count", "Generic Stress Failures"])
 
     for i, entry in enumerate(summary.get("top_unrecognized_dependencies", []), 1):
         row = i + 1
         ws4.cell(row=row, column=1, value=i)
         ws4.cell(row=row, column=2, value=entry.get("dependency", ""))
         ws4.cell(row=row, column=3, value=entry.get("count", 0))
+        ws4.cell(row=row, column=4, value=entry.get("generic_stress_failures", 0))
 
     auto_width(ws4)
 
@@ -440,6 +455,7 @@ def mine(
     all_failure_sigs: Counter = Counter()
     all_unrecognized_deps: Counter = Counter()
     all_dep_failures: Counter = Counter()
+    all_generic_stress_deps: Counter = Counter()
     repo_results: list[dict] = []
 
     for i, repo in enumerate(repos, 1):
@@ -531,6 +547,9 @@ def mine(
             unrec = _extract_unrecognized_deps(report)
             all_unrecognized_deps.update(unrec)
 
+            if unrec and _has_generic_stress_failure(report):
+                all_generic_stress_deps.update(unrec)
+
             dep_fails = _extract_dep_failures(report)
             all_dep_failures.update(dep_fails)
 
@@ -564,7 +583,8 @@ def mine(
             for sig, count in all_failure_sigs.most_common(20)
         ],
         "top_unrecognized_dependencies": [
-            {"dependency": dep, "count": count}
+            {"dependency": dep, "count": count,
+             "generic_stress_failures": all_generic_stress_deps.get(dep, 0)}
             for dep, count in all_unrecognized_deps.most_common(20)
         ],
         "failure_rate_by_dependency": [
