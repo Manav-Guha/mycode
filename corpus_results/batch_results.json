@@ -1,0 +1,1876 @@
+{
+  "timestamp": "2026-03-01T19:26:26+0400",
+  "total_repos": 200,
+  "repos_tested": 172,
+  "repos_failed": 28,
+  "clone_errors": 1,
+  "mycode_errors": 27,
+  "repos": [
+    {
+      "repo_url": "https://github.com/2vivien/NoteMate",
+      "name": "2vivien__NoteMate",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 62
+    },
+    {
+      "repo_url": "https://github.com/Aadarsh-Sharma-7197/Kreovix",
+      "name": "Aadarsh-Sharma-7197__Kreovix",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Adithya-vinayak-saji/climate-anomaly-dashboard",
+      "name": "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 11
+    },
+    {
+      "repo_url": "https://github.com/Aditya-dom/Hyperliquid_vault_analysis",
+      "name": "Aditya-dom__Hyperliquid_vault_analysis",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/AdrienDBe/streamlit_app",
+      "name": "AdrienDBe__streamlit_app",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Alienistaxxx/My-project",
+      "name": "Alienistaxxx__My-project",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/AlisAleksanyan/BI_reporting",
+      "name": "AlisAleksanyan__BI_reporting",
+      "status": "success",
+      "error": null,
+      "findings_count": 18,
+      "discovery_count": 26
+    },
+    {
+      "repo_url": "https://github.com/Anil-sai0418/portfolio",
+      "name": "Anil-sai0418__portfolio",
+      "status": "success",
+      "error": null,
+      "findings_count": 2,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Anuththara99/ai-dev-portfolio",
+      "name": "Anuththara99__ai-dev-portfolio",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Ashmitcodez/gpa-predictor-web-app",
+      "name": "Ashmitcodez__gpa-predictor-web-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Barto1994/AI-Personal-Study-Tracker",
+      "name": "Barto1994__AI-Personal-Study-Tracker",
+      "status": "success",
+      "error": null,
+      "findings_count": 16,
+      "discovery_count": 12
+    },
+    {
+      "repo_url": "https://github.com/Bh1v1niG/Hackathon_DQ-Elevare",
+      "name": "Bh1v1niG__Hackathon_DQ-Elevare",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/CeeJay1241/Movie-Recomendation-System",
+      "name": "CeeJay1241__Movie-Recomendation-System",
+      "status": "success",
+      "error": null,
+      "findings_count": 16,
+      "discovery_count": 20
+    },
+    {
+      "repo_url": "https://github.com/CodeoC-ai/pilot-stats-app",
+      "name": "CodeoC-ai__pilot-stats-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 1
+    },
+    {
+      "repo_url": "https://github.com/CyborgX-hash/Genai_Midterm",
+      "name": "CyborgX-hash__Genai_Midterm",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 7
+    },
+    {
+      "repo_url": "https://github.com/Darvin-V/AI_Study_Buddy",
+      "name": "Darvin-V__AI_Study_Buddy",
+      "status": "success",
+      "error": null,
+      "findings_count": 4,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Deepakr136/Real-time-finger-counter-application",
+      "name": "Deepakr136__Real-time-finger-counter-application",
+      "status": "success",
+      "error": null,
+      "findings_count": 11,
+      "discovery_count": 9
+    },
+    {
+      "repo_url": "https://github.com/DevByAsfiya/Voyage-Analytics-Integrating-MLOps-in-Travel",
+      "name": "DevByAsfiya__Voyage-Analytics-Integrating-MLOps-in-Travel",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 11
+    },
+    {
+      "repo_url": "https://github.com/Developers-LLC/collab-code-editor",
+      "name": "Developers-LLC__collab-code-editor",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Dhusyanth-R-S/Digit_Recognizer_Machine_Learning",
+      "name": "Dhusyanth-R-S__Digit_Recognizer_Machine_Learning",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/Drake9098/FFmpeg_web_app",
+      "name": "Drake9098__FFmpeg_web_app",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/DukeDeSouth/OpenLoom",
+      "name": "DukeDeSouth__OpenLoom",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Eddy3D-Dev/Plot-OpenFOAM-Residuals-Streamlit",
+      "name": "Eddy3D-Dev__Plot-OpenFOAM-Residuals-Streamlit",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/EmptyEviil/Community-Price-Tracker",
+      "name": "EmptyEviil__Community-Price-Tracker",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 7
+    },
+    {
+      "repo_url": "https://github.com/EvaHaiHai/email-spam-detector",
+      "name": "EvaHaiHai__email-spam-detector",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 11
+    },
+    {
+      "repo_url": "https://github.com/FlashZkd/causal-app",
+      "name": "FlashZkd__causal-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 3
+    },
+    {
+      "repo_url": "https://github.com/FreeportMarkets/AnalyticsDashboard",
+      "name": "FreeportMarkets__AnalyticsDashboard",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/FurkAlb/Global-Power-Plant-Analysis",
+      "name": "FurkAlb__Global-Power-Plant-Analysis",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/Gewoi/streamlitLangApp",
+      "name": "Gewoi__streamlitLangApp",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/Gossterxhunter/AIML_TITANIC_PROJECT",
+      "name": "Gossterxhunter__AIML_TITANIC_PROJECT",
+      "status": "success",
+      "error": null,
+      "findings_count": 8,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/Hussa-Almusayab/Deepfake-Detection-App",
+      "name": "Hussa-Almusayab__Deepfake-Detection-App",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/IanSkelskey/collab-code",
+      "name": "IanSkelskey__collab-code",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/ImSudhakar07/RivalReview-Evals",
+      "name": "ImSudhakar07__RivalReview-Evals",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 33
+    },
+    {
+      "repo_url": "https://github.com/Innovative-Sam/stock-price-prediction",
+      "name": "Innovative-Sam__stock-price-prediction",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/JAY-ASHAR/streamlit_app.py",
+      "name": "JAY-ASHAR__streamlit_app.py",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/JBaptisteAll/France_Adventure_Planner",
+      "name": "JBaptisteAll__France_Adventure_Planner",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/Jaswanth-ak/AI-Salary-Predictor",
+      "name": "Jaswanth-ak__AI-Salary-Predictor",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Jks2467/loan-approval-streamlit",
+      "name": "Jks2467__loan-approval-streamlit",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 11
+    },
+    {
+      "repo_url": "https://github.com/LUMI2049/deepfake-detection-streamlit",
+      "name": "LUMI2049__deepfake-detection-streamlit",
+      "status": "success",
+      "error": null,
+      "findings_count": 8,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/Lazizbek1120/Football-streamlit-app",
+      "name": "Lazizbek1120__Football-streamlit-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 16,
+      "discovery_count": 12
+    },
+    {
+      "repo_url": "https://github.com/Lostovayne/Complete-Cursor-Clone-Next16",
+      "name": "Lostovayne__Complete-Cursor-Clone-Next16",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 242
+    },
+    {
+      "repo_url": "https://github.com/MalkAle/German-Cars-Price-Prediction",
+      "name": "MalkAle__German-Cars-Price-Prediction",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Mallikabhatia23/mumbai-house-price-prediction-ml",
+      "name": "Mallikabhatia23__mumbai-house-price-prediction-ml",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/MirshaMorningstar/US-Accidents-Dashboard",
+      "name": "MirshaMorningstar__US-Accidents-Dashboard",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/Muh-BenitoDwiki27/crypto-dashboard-app",
+      "name": "Muh-BenitoDwiki27__crypto-dashboard-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 182
+    },
+    {
+      "repo_url": "https://github.com/Naveena-Sri13/Sentiment_Analysis_web_app",
+      "name": "Naveena-Sri13__Sentiment_Analysis_web_app",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 3
+    },
+    {
+      "repo_url": "https://github.com/NdeyeDibe/animal-scraping-app",
+      "name": "NdeyeDibe__animal-scraping-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Nolhan42789/AI-Studio",
+      "name": "Nolhan42789__AI-Studio",
+      "status": "success",
+      "error": null,
+      "findings_count": 8,
+      "discovery_count": 10
+    },
+    {
+      "repo_url": "https://github.com/Nyrrine/hand-scroller",
+      "name": "Nyrrine__hand-scroller",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/OXHILALI1/Semantic-Keyword-Builder",
+      "name": "OXHILALI1__Semantic-Keyword-Builder",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 1
+    },
+    {
+      "repo_url": "https://github.com/OmamaHassan/Weather-App---Streamlit",
+      "name": "OmamaHassan__Weather-App---Streamlit",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 1
+    },
+    {
+      "repo_url": "https://github.com/PeteHass94/parkrun-app",
+      "name": "PeteHass94__parkrun-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 16,
+      "discovery_count": 13
+    },
+    {
+      "repo_url": "https://github.com/PossumXI/possum-ai-tutor",
+      "name": "PossumXI__possum-ai-tutor",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 312
+    },
+    {
+      "repo_url": "https://github.com/RicardoMBorges/MVA_course",
+      "name": "RicardoMBorges__MVA_course",
+      "status": "success",
+      "error": null,
+      "findings_count": 17,
+      "discovery_count": 9
+    },
+    {
+      "repo_url": "https://github.com/Rizzwannndev/Thirty-Six-Studio-Web",
+      "name": "Rizzwannndev__Thirty-Six-Studio-Web",
+      "status": "success",
+      "error": null,
+      "findings_count": 1,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/RohanMuppa/brightspace-mcp-server",
+      "name": "RohanMuppa__brightspace-mcp-server",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Rushit-Mehta/kuyan",
+      "name": "Rushit-Mehta__kuyan",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 13
+    },
+    {
+      "repo_url": "https://github.com/SathvikHegade/InsurePredict",
+      "name": "SathvikHegade__InsurePredict",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/Shabana2002/YOLO26n-Streamlit-App",
+      "name": "Shabana2002__YOLO26n-Streamlit-App",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/Shivangg21/TimeLSTM",
+      "name": "Shivangg21__TimeLSTM",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Shiwang12369/Streamlit-Webmap-app",
+      "name": "Shiwang12369__Streamlit-Webmap-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/SiddharthanSingaravel/bpl-cron",
+      "name": "SiddharthanSingaravel__bpl-cron",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 18
+    },
+    {
+      "repo_url": "https://github.com/SirinBaba92/sportwetten-analyse",
+      "name": "SirinBaba92__sportwetten-analyse",
+      "status": "success",
+      "error": null,
+      "findings_count": 20,
+      "discovery_count": 17
+    },
+    {
+      "repo_url": "https://github.com/Srija-Ghosh-05/StudentFitAI",
+      "name": "Srija-Ghosh-05__StudentFitAI",
+      "status": "success",
+      "error": null,
+      "findings_count": 4,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/StealthPanther/next-gen-scroll-animation",
+      "name": "StealthPanther__next-gen-scroll-animation",
+      "status": "success",
+      "error": null,
+      "findings_count": 1,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/Strikezor/SDMaker",
+      "name": "Strikezor__SDMaker",
+      "status": "success",
+      "error": null,
+      "findings_count": 24,
+      "discovery_count": 70
+    },
+    {
+      "repo_url": "https://github.com/Suitakut/X-ray-Fracture-Detection-and-Segmentation-App",
+      "name": "Suitakut__X-ray-Fracture-Detection-and-Segmentation-App",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/TechBloom-ai/swaggbot",
+      "name": "TechBloom-ai__swaggbot",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/ThimiraSadeesha/my-portfolio",
+      "name": "ThimiraSadeesha__my-portfolio",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 212
+    },
+    {
+      "repo_url": "https://github.com/VIVPM/multi-crew-leads-dashboard",
+      "name": "VIVPM__multi-crew-leads-dashboard",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/Vansh7206/ecommerce-rfm-analysis",
+      "name": "Vansh7206__ecommerce-rfm-analysis",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 19
+    },
+    {
+      "repo_url": "https://github.com/VanshChauhan04/Quizer",
+      "name": "VanshChauhan04__Quizer",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/VanshPatawari0605/Hybrid-Movie-Recommendation-System",
+      "name": "VanshPatawari0605__Hybrid-Movie-Recommendation-System",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/Vinayak-Bajoria/israel-iran-war-crude-tracker",
+      "name": "Vinayak-Bajoria__israel-iran-war-crude-tracker",
+      "status": "success",
+      "error": null,
+      "findings_count": 17,
+      "discovery_count": 13
+    },
+    {
+      "repo_url": "https://github.com/ViniciusGomezz/obesidade_fiap_app",
+      "name": "ViniciusGomezz__obesidade_fiap_app",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/ViswaBai/sea-level-app",
+      "name": "ViswaBai__sea-level-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/VoidRay-X/Heart-Attack-prediction",
+      "name": "VoidRay-X__Heart-Attack-prediction",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/WILSON220374/TECNIC",
+      "name": "WILSON220374__TECNIC",
+      "status": "success",
+      "error": null,
+      "findings_count": 19,
+      "discovery_count": 6
+    },
+    {
+      "repo_url": "https://github.com/YeeshanMalik/kt-velocity-dashboard",
+      "name": "YeeshanMalik__kt-velocity-dashboard",
+      "status": "success",
+      "error": null,
+      "findings_count": 15,
+      "discovery_count": 9
+    },
+    {
+      "repo_url": "https://github.com/YsnJbr/HazSnap",
+      "name": "YsnJbr__HazSnap",
+      "status": "success",
+      "error": null,
+      "findings_count": 19,
+      "discovery_count": 26
+    },
+    {
+      "repo_url": "https://github.com/Zerbo505/security_with_file_uploads",
+      "name": "Zerbo505__security_with_file_uploads",
+      "status": "success",
+      "error": null,
+      "findings_count": 8,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/aboGrabawy/sentiment-ai-suite",
+      "name": "aboGrabawy__sentiment-ai-suite",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/adambenmouloud/job-hunting-ai-helper",
+      "name": "adambenmouloud__job-hunting-ai-helper",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 17
+    },
+    {
+      "repo_url": "https://github.com/adimStrong/ads-monitoring",
+      "name": "adimStrong__ads-monitoring",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/altairis-labs/flight-price-prediction-app",
+      "name": "altairis-labs__flight-price-prediction-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/ameyagit25/Quest_AI_Assistant",
+      "name": "ameyagit25__Quest_AI_Assistant",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 12
+    },
+    {
+      "repo_url": "https://github.com/anantbhardwaj828/cursor-free-vip",
+      "name": "anantbhardwaj828__cursor-free-vip",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/androsdraco/alcohol_sales",
+      "name": "androsdraco__alcohol_sales",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/ankycheng/ImageToMultiColorSTL",
+      "name": "ankycheng__ImageToMultiColorSTL",
+      "status": "success",
+      "error": null,
+      "findings_count": 11,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/arham11999/streamlit-app",
+      "name": "arham11999__streamlit-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/arnaldomariano/rijksmuseum-explorer-submission",
+      "name": "arnaldomariano__rijksmuseum-explorer-submission",
+      "status": "success",
+      "error": null,
+      "findings_count": 8,
+      "discovery_count": 11
+    },
+    {
+      "repo_url": "https://github.com/asd526/ShowImageWeb",
+      "name": "asd526__ShowImageWeb",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 32
+    },
+    {
+      "repo_url": "https://github.com/blacktalenthubs/oya-ai-workflows",
+      "name": "blacktalenthubs__oya-ai-workflows",
+      "status": "success",
+      "error": null,
+      "findings_count": 16,
+      "discovery_count": 57
+    },
+    {
+      "repo_url": "https://github.com/bocchinofr/app_streamlit",
+      "name": "bocchinofr__app_streamlit",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/bugbrew/Sync-Space",
+      "name": "bugbrew__Sync-Space",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/carlmalouf/AAFCElectronicRolls",
+      "name": "carlmalouf__AAFCElectronicRolls",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/chi777/snop-monte-carlo",
+      "name": "chi777__snop-monte-carlo",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 8
+    },
+    {
+      "repo_url": "https://github.com/chiranjibsahoo29/Insurance_Premium_Prediction",
+      "name": "chiranjibsahoo29__Insurance_Premium_Prediction",
+      "status": "success",
+      "error": null,
+      "findings_count": 18,
+      "discovery_count": 36
+    },
+    {
+      "repo_url": "https://github.com/chris-jelly/de-streamlit-sales-analytics",
+      "name": "chris-jelly__de-streamlit-sales-analytics",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 6
+    },
+    {
+      "repo_url": "https://github.com/cutewizzy11/Heart-Attack-Risk-Predictor",
+      "name": "cutewizzy11__Heart-Attack-Risk-Predictor",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/cwilharm/pdf-to-anki-cards",
+      "name": "cwilharm__pdf-to-anki-cards",
+      "status": "success",
+      "error": null,
+      "findings_count": 17,
+      "discovery_count": 22
+    },
+    {
+      "repo_url": "https://github.com/darxonxz/mandiapp",
+      "name": "darxonxz__mandiapp",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/darylalim/embedding-pipeline",
+      "name": "darylalim__embedding-pipeline",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/dawoodkhan92/WW2---Cursor--opus-4.6-",
+      "name": "dawoodkhan92__WW2---Cursor--opus-4.6-",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/ddoro1701/Assignment_01_Advanced_ML",
+      "name": "ddoro1701__Assignment_01_Advanced_ML",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/devmedeiros/cotai",
+      "name": "devmedeiros__cotai",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/dgrifka/dtw-streamlit-app",
+      "name": "dgrifka__dtw-streamlit-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 3
+    },
+    {
+      "repo_url": "https://github.com/diegoprudencios/portfolio-tracker-study",
+      "name": "diegoprudencios__portfolio-tracker-study",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 180
+    },
+    {
+      "repo_url": "https://github.com/digital-twin-retriever/streamlit-app",
+      "name": "digital-twin-retriever__streamlit-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 9
+    },
+    {
+      "repo_url": "https://github.com/drflinn1/stock-analyzer-app",
+      "name": "drflinn1__stock-analyzer-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 17,
+      "discovery_count": 26
+    },
+    {
+      "repo_url": "https://github.com/dzakaiem/harmony-energy-data-pipeline",
+      "name": "dzakaiem__harmony-energy-data-pipeline",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 11
+    },
+    {
+      "repo_url": "https://github.com/eomwoosik7/my-streamlit-app",
+      "name": "eomwoosik7__my-streamlit-app",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/esawewW/Books_Recommender_System",
+      "name": "esawewW__Books_Recommender_System",
+      "status": "success",
+      "error": null,
+      "findings_count": 15,
+      "discovery_count": 10
+    },
+    {
+      "repo_url": "https://github.com/facusabino/power-analysis-app",
+      "name": "facusabino__power-analysis-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 15,
+      "discovery_count": 7
+    },
+    {
+      "repo_url": "https://github.com/fatikani/project-st",
+      "name": "fatikani__project-st",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/fisher2132/therapeutic-trigger-tracker",
+      "name": "fisher2132__therapeutic-trigger-tracker",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 1
+    },
+    {
+      "repo_url": "https://github.com/fl65inc/tmap_app",
+      "name": "fl65inc__tmap_app",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 8
+    },
+    {
+      "repo_url": "https://github.com/gabrielvicino/IntensivaCalculator",
+      "name": "gabrielvicino__IntensivaCalculator",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 17
+    },
+    {
+      "repo_url": "https://github.com/gauthamkun/Appointment-Booking-Assistant",
+      "name": "gauthamkun__Appointment-Booking-Assistant",
+      "status": "success",
+      "error": null,
+      "findings_count": 15,
+      "discovery_count": 15
+    },
+    {
+      "repo_url": "https://github.com/gitchrisqueen/cpcc_task_automation",
+      "name": "gitchrisqueen__cpcc_task_automation",
+      "status": "success",
+      "error": null,
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/hadimercer/IncidentOps_PMI_Hub",
+      "name": "hadimercer__IncidentOps_PMI_Hub",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/heisenberg421/PriceSense_AI",
+      "name": "heisenberg421__PriceSense_AI",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/hemisus/ai-projects-streamlit-app",
+      "name": "hemisus__ai-projects-streamlit-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/ingo-stallknecht/swiss-commute-housing",
+      "name": "ingo-stallknecht__swiss-commute-housing",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 8
+    },
+    {
+      "repo_url": "https://github.com/jakubjanb/fragrantica-app",
+      "name": "jakubjanb__fragrantica-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 18
+    },
+    {
+      "repo_url": "https://github.com/jasonscribd/csv-comment-parser",
+      "name": "jasonscribd__csv-comment-parser",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 3
+    },
+    {
+      "repo_url": "https://github.com/jhanvijoshi3/end-to-end-customer-segmentation",
+      "name": "jhanvijoshi3__end-to-end-customer-segmentation",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/jhoanvasquez/back-fastapi-hardcoregames",
+      "name": "jhoanvasquez__back-fastapi-hardcoregames",
+      "status": "success",
+      "error": null,
+      "findings_count": 8,
+      "discovery_count": 9
+    },
+    {
+      "repo_url": "https://github.com/jonnevuorela/streamlit-sentiment-app",
+      "name": "jonnevuorela__streamlit-sentiment-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/jyoti-creative-cards/jyoti-cards-stock-management-streamlit-app",
+      "name": "jyoti-creative-cards__jyoti-cards-stock-management-streamlit-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/ka7299-cyber/V135streamlit_app.py",
+      "name": "ka7299-cyber__V135streamlit_app.py",
+      "status": "success",
+      "error": null,
+      "findings_count": 2,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/kitswas/fdroid-metrics-dashboard",
+      "name": "kitswas__fdroid-metrics-dashboard",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 14
+    },
+    {
+      "repo_url": "https://github.com/kjw26/wood-loss-app",
+      "name": "kjw26__wood-loss-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 1
+    },
+    {
+      "repo_url": "https://github.com/kmfxea/kmfx-empire-dashboard-2026",
+      "name": "kmfxea__kmfx-empire-dashboard-2026",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/kruts/Fake-Review-Detector",
+      "name": "kruts__Fake-Review-Detector",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/lanvien/jade-tier-app",
+      "name": "lanvien__jade-tier-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/lokeshpuma/AdSnap-Studio",
+      "name": "lokeshpuma__AdSnap-Studio",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/marcosbarbosa/NotaFacil-App",
+      "name": "marcosbarbosa__NotaFacil-App",
+      "status": "success",
+      "error": null,
+      "findings_count": 17,
+      "discovery_count": 33
+    },
+    {
+      "repo_url": "https://github.com/marianocirone94-prog/scoutingapp",
+      "name": "marianocirone94-prog__scoutingapp",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/maxk92/streamlit-rating-app",
+      "name": "maxk92__streamlit-rating-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 5
+    },
+    {
+      "repo_url": "https://github.com/mdasif-me/aetherpad",
+      "name": "mdasif-me__aetherpad",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 242
+    },
+    {
+      "repo_url": "https://github.com/media-stack/gb2b-lead-finder",
+      "name": "media-stack__gb2b-lead-finder",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/mjhall223-lang/AI-MedReg-Engine",
+      "name": "mjhall223-lang__AI-MedReg-Engine",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/mmalahi00/Adsorption-Analysis-app",
+      "name": "mmalahi00__Adsorption-Analysis-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 11
+    },
+    {
+      "repo_url": "https://github.com/mohd-abdul-razzaque/streamlit-bedrock-app",
+      "name": "mohd-abdul-razzaque__streamlit-bedrock-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 19,
+      "discovery_count": 28
+    },
+    {
+      "repo_url": "https://github.com/mosmduali/cv-website",
+      "name": "mosmduali__cv-website",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/mpgentleman/NCAAModelStreamlit",
+      "name": "mpgentleman__NCAAModelStreamlit",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/mylamour/up",
+      "name": "mylamour__up",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/naqashb7/stroke_prediction_app",
+      "name": "naqashb7__stroke_prediction_app",
+      "status": "success",
+      "error": null,
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/naveenpoddar/CursorScript",
+      "name": "naveenpoddar__CursorScript",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 92
+    },
+    {
+      "repo_url": "https://github.com/nilayjain12/harry-potter-chatbot-rag-and-tools",
+      "name": "nilayjain12__harry-potter-chatbot-rag-and-tools",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/nileshipad4-dotcom/crypto-streamlit-app",
+      "name": "nileshipad4-dotcom__crypto-streamlit-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 17,
+      "discovery_count": 13
+    },
+    {
+      "repo_url": "https://github.com/norris543/Login-multi-auth",
+      "name": "norris543__Login-multi-auth",
+      "status": "success",
+      "error": null,
+      "findings_count": 2,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/nourddinetaqi/Pneumonia-HybridCNN",
+      "name": "nourddinetaqi__Pneumonia-HybridCNN",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/numlauf-dev/cursor-stock-demo",
+      "name": "numlauf-dev__cursor-stock-demo",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/oyewolejerry2016/Customer_Churn_Prediction",
+      "name": "oyewolejerry2016__Customer_Churn_Prediction",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/parthreddy123/oil-dashboard",
+      "name": "parthreddy123__oil-dashboard",
+      "status": "success",
+      "error": null,
+      "findings_count": 15,
+      "discovery_count": 35
+    },
+    {
+      "repo_url": "https://github.com/pawachai/qrcode-generator",
+      "name": "pawachai__qrcode-generator",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 3
+    },
+    {
+      "repo_url": "https://github.com/perlathebian/job-application-assistant",
+      "name": "perlathebian__job-application-assistant",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/picc-ai/ar-email-automation",
+      "name": "picc-ai__ar-email-automation",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/prudhvi1519/Prudhvi-Portfolio",
+      "name": "prudhvi1519__Prudhvi-Portfolio",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/qianwan/mono-pilot",
+      "name": "qianwan__mono-pilot",
+      "status": "success",
+      "error": null,
+      "findings_count": 4,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/rafaelt0/App",
+      "name": "rafaelt0__App",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/rajusanganiraju-collab/streamlit-app",
+      "name": "rajusanganiraju-collab__streamlit-app",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/raqibzzz/AudioVisual",
+      "name": "raqibzzz__AudioVisual",
+      "status": "success",
+      "error": null,
+      "findings_count": 2,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/raulsedano2410/ai-coding-agents-next",
+      "name": "raulsedano2410__ai-coding-agents-next",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/rdjverse/CancerGuardian",
+      "name": "rdjverse__CancerGuardian",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 6
+    },
+    {
+      "repo_url": "https://github.com/red40maxxer/torent",
+      "name": "red40maxxer__torent",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 9
+    },
+    {
+      "repo_url": "https://github.com/rikimatsumoto/app-zetetic",
+      "name": "rikimatsumoto__app-zetetic",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/rohithtr284-lgtm/credit-card-default-prediction-app",
+      "name": "rohithtr284-lgtm__credit-card-default-prediction-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/ronii8/heart_disease_detector",
+      "name": "ronii8__heart_disease_detector",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/rsabra2-lgtm/Web-based-GIS-Application-for-Spatial-and-Attribute-Join",
+      "name": "rsabra2-lgtm__Web-based-GIS-Application-for-Spatial-and-Attribute-Join",
+      "status": "success",
+      "error": null,
+      "findings_count": 4,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/runinbk/kevindev",
+      "name": "runinbk__kevindev",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 242
+    },
+    {
+      "repo_url": "https://github.com/samshad/rag-app-frontend",
+      "name": "samshad__rag-app-frontend",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/samub6/Servidor_api_agente_de_pdf",
+      "name": "samub6__Servidor_api_agente_de_pdf",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 3
+    },
+    {
+      "repo_url": "https://github.com/savita102/CreditWise-Loan-Approval-System",
+      "name": "savita102__CreditWise-Loan-Approval-System",
+      "status": "success",
+      "error": null,
+      "findings_count": 8,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/sepesports/streamlit-app",
+      "name": "sepesports__streamlit-app",
+      "status": "success",
+      "error": null,
+      "findings_count": 4,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/shailendrasahu668/DataWhiz",
+      "name": "shailendrasahu668__DataWhiz",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/smksamir/SearchMCP",
+      "name": "smksamir__SearchMCP",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/sogeki-o/whisper-youtube-summarizer-groq",
+      "name": "sogeki-o__whisper-youtube-summarizer-groq",
+      "status": "success",
+      "error": null,
+      "findings_count": 9,
+      "discovery_count": 12
+    },
+    {
+      "repo_url": "https://github.com/soumyajitbasantia/attrition-predictor",
+      "name": "soumyajitbasantia__attrition-predictor",
+      "status": "success",
+      "error": null,
+      "findings_count": 10,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/sparshpatil13412/nlp-spam-filter",
+      "name": "sparshpatil13412__nlp-spam-filter",
+      "status": "success",
+      "error": null,
+      "findings_count": 11,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/streamlit/streamlit",
+      "name": "streamlit__streamlit",
+      "status": "clone_error",
+      "error": "Failed to clone",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/sureshk4217/Eye-Controlled-Mouse",
+      "name": "sureshk4217__Eye-Controlled-Mouse",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/tashin666/streamlit-space-explorer",
+      "name": "tashin666__streamlit-space-explorer",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 13
+    },
+    {
+      "repo_url": "https://github.com/theo3-hash/Multiple-Disease-Prediction-WebApp",
+      "name": "theo3-hash__Multiple-Disease-Prediction-WebApp",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/thinker84/Real-Time-stock-price-prediction-and-market-analysis-using-Machine-Learning",
+      "name": "thinker84__Real-Time-stock-price-prediction-and-market-analysis-using-Machine-Learning",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/toshimitsunoji/streamlit_app",
+      "name": "toshimitsunoji__streamlit_app",
+      "status": "success",
+      "error": null,
+      "findings_count": 11,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/tyzclj-bot/zdfpcl",
+      "name": "tyzclj-bot__zdfpcl",
+      "status": "mycode_error",
+      "error": "mycode timed out",
+      "findings_count": 0,
+      "discovery_count": 0
+    },
+    {
+      "repo_url": "https://github.com/vanessa-chc/LingoBuddy",
+      "name": "vanessa-chc__LingoBuddy",
+      "status": "success",
+      "error": null,
+      "findings_count": 7,
+      "discovery_count": 152
+    },
+    {
+      "repo_url": "https://github.com/vineet-phoenix/Web-Sentiment-Analyzer",
+      "name": "vineet-phoenix__Web-Sentiment-Analyzer",
+      "status": "success",
+      "error": null,
+      "findings_count": 2,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/vivz-dev/AI_Artwork_Catalog_PDF_Generator",
+      "name": "vivz-dev__AI_Artwork_Catalog_PDF_Generator",
+      "status": "success",
+      "error": null,
+      "findings_count": 4,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/vmegea/OLAP",
+      "name": "vmegea__OLAP",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 17
+    },
+    {
+      "repo_url": "https://github.com/vraj2010/CodeSync",
+      "name": "vraj2010__CodeSync",
+      "status": "success",
+      "error": null,
+      "findings_count": 6,
+      "discovery_count": 11
+    },
+    {
+      "repo_url": "https://github.com/wassim-mouloud/salary-predictor",
+      "name": "wassim-mouloud__salary-predictor",
+      "status": "success",
+      "error": null,
+      "findings_count": 13,
+      "discovery_count": 4
+    },
+    {
+      "repo_url": "https://github.com/witharyank/news-summarizer",
+      "name": "witharyank__news-summarizer",
+      "status": "success",
+      "error": null,
+      "findings_count": 12,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/x04z/WhoisApp",
+      "name": "x04z__WhoisApp",
+      "status": "success",
+      "error": null,
+      "findings_count": 15,
+      "discovery_count": 17
+    },
+    {
+      "repo_url": "https://github.com/yama-jan/stlouis-weather-predictor",
+      "name": "yama-jan__stlouis-weather-predictor",
+      "status": "success",
+      "error": null,
+      "findings_count": 3,
+      "discovery_count": 2
+    },
+    {
+      "repo_url": "https://github.com/yojovane/smart-threshold-fraud-detection",
+      "name": "yojovane__smart-threshold-fraud-detection",
+      "status": "success",
+      "error": null,
+      "findings_count": 14,
+      "discovery_count": 7
+    },
+    {
+      "repo_url": "https://github.com/ytdjthhjr/Fake-News-detection-knowledge-graph",
+      "name": "ytdjthhjr__Fake-News-detection-knowledge-graph",
+      "status": "success",
+      "error": null,
+      "findings_count": 5,
+      "discovery_count": 2
+    }
+  ],
+  "top_failure_signatures": [
+    {
+      "signature": "warning:memory_profiling:Failure indicators triggered: streamlit_cache_memory_growth",
+      "count": 133
+    },
+    {
+      "signature": "critical:data_volume_scaling:Scenario failed: pandas_iterrows_vs_vectorized",
+      "count": 61
+    },
+    {
+      "signature": "critical:data_volume_scaling:Scenario failed: pandas_merge_memory_stress",
+      "count": 53
+    },
+    {
+      "signature": "critical:memory_profiling:Scenario failed: pandas_memory_profiling_over_time",
+      "count": 46
+    },
+    {
+      "signature": "critical:edge_case_input:Scenario failed: pandas_edge_case_dtypes",
+      "count": 46
+    },
+    {
+      "signature": "critical:data_volume_scaling:Scenario failed: numpy_matrix_operation_scaling",
+      "count": 44
+    },
+    {
+      "signature": "critical:data_volume_scaling:Scenario failed: pandas_data_volume_scaling",
+      "count": 42
+    },
+    {
+      "signature": "warning:data_volume_scaling:Errors during: pandas_data_volume_scaling",
+      "count": 41
+    },
+    {
+      "signature": "critical:data_volume_scaling:Scenario failed: unrecognized_deps_generic_stress",
+      "count": 38
+    },
+    {
+      "signature": "critical:data_volume_scaling:Resource limit hit: pandas_data_volume_scaling",
+      "count": 33
+    },
+    {
+      "signature": "warning:edge_case_input:Failure indicators triggered: pandas_memory_error_on_operations_check",
+      "count": 33
+    },
+    {
+      "signature": "warning::2 missing dependencies",
+      "count": 30
+    },
+    {
+      "signature": "critical:data_volume_scaling:Scenario failed: requests_large_download_memory",
+      "count": 29
+    },
+    {
+      "signature": "warning:data_volume_scaling:Errors during: numpy_array_size_scaling",
+      "count": 27
+    },
+    {
+      "signature": "warning::3 missing dependencies",
+      "count": 27
+    },
+    {
+      "signature": "info::3 unrecognized dependencies",
+      "count": 26
+    },
+    {
+      "signature": "info::2 unrecognized dependencies",
+      "count": 25
+    },
+    {
+      "signature": "critical:edge_case_input:Scenario failed: numpy_dtype_edge_cases",
+      "count": 24
+    },
+    {
+      "signature": "critical:blocking_io:Scenario failed: requests_timeout_behavior",
+      "count": 24
+    },
+    {
+      "signature": "critical:memory_profiling:Scenario failed: numpy_repeated_allocation_memory",
+      "count": 23
+    }
+  ],
+  "top_unrecognized_dependencies": [
+    {
+      "dependency": "plotly",
+      "count": 49,
+      "generic_stress_failures": 6
+    },
+    {
+      "dependency": "matplotlib",
+      "count": 45,
+      "generic_stress_failures": 9
+    },
+    {
+      "dependency": "scikit-learn",
+      "count": 45,
+      "generic_stress_failures": 11
+    },
+    {
+      "dependency": "pillow",
+      "count": 31,
+      "generic_stress_failures": 8
+    },
+    {
+      "dependency": "python-dotenv",
+      "count": 28,
+      "generic_stress_failures": 4
+    },
+    {
+      "dependency": "joblib",
+      "count": 23,
+      "generic_stress_failures": 9
+    },
+    {
+      "dependency": "altair",
+      "count": 19,
+      "generic_stress_failures": 0
+    },
+    {
+      "dependency": "scipy",
+      "count": 19,
+      "generic_stress_failures": 2
+    },
+    {
+      "dependency": "seaborn",
+      "count": 18,
+      "generic_stress_failures": 4
+    },
+    {
+      "dependency": "pyarrow",
+      "count": 18,
+      "generic_stress_failures": 0
+    },
+    {
+      "dependency": "python-dateutil",
+      "count": 18,
+      "generic_stress_failures": 2
+    },
+    {
+      "dependency": "openpyxl",
+      "count": 17,
+      "generic_stress_failures": 3
+    },
+    {
+      "dependency": "protobuf",
+      "count": 16,
+      "generic_stress_failures": 0
+    },
+    {
+      "dependency": "certifi",
+      "count": 15,
+      "generic_stress_failures": 0
+    },
+    {
+      "dependency": "click",
+      "count": 15,
+      "generic_stress_failures": 1
+    },
+    {
+      "dependency": "idna",
+      "count": 15,
+      "generic_stress_failures": 0
+    },
+    {
+      "dependency": "jinja2",
+      "count": 15,
+      "generic_stress_failures": 2
+    },
+    {
+      "dependency": "pydeck",
+      "count": 15,
+      "generic_stress_failures": 0
+    },
+    {
+      "dependency": "lucide-react",
+      "count": 14,
+      "generic_stress_failures": 11
+    },
+    {
+      "dependency": "charset-normalizer",
+      "count": 14,
+      "generic_stress_failures": 0
+    }
+  ],
+  "failure_rate_by_dependency": [
+    {
+      "dependency": "pandas",
+      "failure_count": 463
+    },
+    {
+      "dependency": "numpy",
+      "failure_count": 229
+    },
+    {
+      "dependency": "requests",
+      "failure_count": 140
+    },
+    {
+      "dependency": "streamlit",
+      "failure_count": 133
+    },
+    {
+      "dependency": "plotly",
+      "failure_count": 92
+    },
+    {
+      "dependency": "scikit-learn",
+      "failure_count": 85
+    },
+    {
+      "dependency": "matplotlib",
+      "failure_count": 80
+    },
+    {
+      "dependency": "python-dotenv",
+      "failure_count": 50
+    },
+    {
+      "dependency": "joblib",
+      "failure_count": 42
+    },
+    {
+      "dependency": "nextjs",
+      "failure_count": 41
+    },
+    {
+      "dependency": "openai",
+      "failure_count": 38
+    },
+    {
+      "dependency": "seaborn",
+      "failure_count": 32
+    },
+    {
+      "dependency": "sqlalchemy",
+      "failure_count": 32
+    },
+    {
+      "dependency": "openpyxl",
+      "failure_count": 30
+    },
+    {
+      "dependency": "scipy",
+      "failure_count": 25
+    },
+    {
+      "dependency": "supabase",
+      "failure_count": 25
+    },
+    {
+      "dependency": "colorama",
+      "failure_count": 21
+    },
+    {
+      "dependency": "beautifulsoup4",
+      "failure_count": 20
+    },
+    {
+      "dependency": "altair",
+      "failure_count": 19
+    },
+    {
+      "dependency": "httpx",
+      "failure_count": 19
+    }
+  ]
+}
