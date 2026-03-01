@@ -13,6 +13,7 @@ Usage:
     python scripts/batch_mine.py --input repos.json           # custom input
     python scripts/batch_mine.py --max-repos 10               # limit
     python scripts/batch_mine.py --results-dir ./my_results   # custom output
+    python scripts/batch_mine.py --timeout 900                # 15-min timeout for slow repos
 
 No third-party dependencies — stdlib only.
 """
@@ -35,8 +36,8 @@ logger = logging.getLogger("batch_mine")
 # ── Constants ──
 
 _DISCOVERIES_DIR = Path.home() / ".mycode" / "discoveries"
-_CLONE_TIMEOUT = 120   # seconds
-_MYCODE_TIMEOUT = 300  # seconds
+_CLONE_TIMEOUT = 120          # seconds
+_DEFAULT_MYCODE_TIMEOUT = 300  # seconds
 
 
 # ── Helpers ──
@@ -146,7 +147,7 @@ def _collect_new_discoveries(before: set[str]) -> list[Path]:
     ]
 
 
-def _run_mycode(project_path: Path) -> tuple[int, str, str]:
+def _run_mycode(project_path: Path, timeout: int = _DEFAULT_MYCODE_TIMEOUT) -> tuple[int, str, str]:
     """Run mycode CLI against a project. Returns (returncode, stdout, stderr).
 
     Uses ``start_new_session=True`` so that mycode and ALL its child processes
@@ -171,7 +172,7 @@ def _run_mycode(project_path: Path) -> tuple[int, str, str]:
             text=True,
             start_new_session=True,
         )
-        stdout, stderr = proc.communicate(timeout=_MYCODE_TIMEOUT)
+        stdout, stderr = proc.communicate(timeout=timeout)
         return proc.returncode, stdout, stderr
     except subprocess.TimeoutExpired:
         if proc is not None:
@@ -237,6 +238,7 @@ def mine(
     input_path: Path,
     results_dir: Path,
     max_repos: int,
+    timeout: int = _DEFAULT_MYCODE_TIMEOUT,
 ) -> dict:
     """Run the full batch mining pipeline. Returns aggregate summary dict."""
     # Load repo manifest
@@ -297,7 +299,7 @@ def mine(
             disc_before = _snapshot_discoveries()
 
             # Run mycode
-            returncode, stdout, stderr = _run_mycode(clone_dest)
+            returncode, stdout, stderr = _run_mycode(clone_dest, timeout=timeout)
 
             # Collect JSON report
             report_path = clone_dest / "mycode-report.json"
@@ -421,6 +423,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Max repos to process, 0 = all (default: 0)",
     )
     parser.add_argument(
+        "--timeout", "-t",
+        type=int,
+        default=_DEFAULT_MYCODE_TIMEOUT,
+        help=f"Per-repo mycode timeout in seconds (default: {_DEFAULT_MYCODE_TIMEOUT})",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -443,6 +451,7 @@ def main(argv: list[str] | None = None) -> None:
         input_path=input_path,
         results_dir=Path(args.results_dir),
         max_repos=args.max_repos,
+        timeout=args.timeout,
     )
 
     tested = summary["repos_tested"]
