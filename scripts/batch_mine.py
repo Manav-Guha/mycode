@@ -21,6 +21,7 @@ import argparse
 import json
 import logging
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -41,21 +42,90 @@ _MYCODE_TIMEOUT = 300  # seconds
 # ── Helpers ──
 
 
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill the entire process group rooted at *proc*.
+
+    Mirrors session.py's ``_kill_process_tree``.  Because we launch children
+    with ``start_new_session=True``, the child's PID is the process-group
+    leader.  ``os.killpg`` sends the signal to every process in that group,
+    so grandchild harness processes are killed too — not just the immediate
+    child.
+    """
+    if proc is None or proc.poll() is not None:
+        return
+
+    pgid = None
+    try:
+        pgid = os.getpgid(proc.pid)
+    except OSError:
+        pass
+
+    # 1. SIGTERM the group (graceful — lets mycode's cleanup handlers run).
+    #    mycode's SIGTERM handler calls _kill_process_tree on harness children,
+    #    which itself takes up to ~6s (SIGTERM 3s + SIGKILL 3s).  Give 10s grace
+    #    so mycode can finish cleaning up before we escalate to SIGKILL.
+    if pgid is not None and pgid > 0:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except OSError:
+            pass
+    else:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+
+    try:
+        proc.wait(timeout=10)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    # 2. SIGKILL the group (forceful)
+    if pgid is not None and pgid > 0:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            pass
+    else:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        logger.warning("Process %d did not exit after SIGKILL", proc.pid)
+
+
 def _clone_repo(clone_url: str, dest: Path) -> bool:
     """Shallow-clone a repo. Returns True on success."""
+    proc = None
     try:
-        subprocess.run(
+        proc = subprocess.Popen(
             ["git", "clone", "--depth", "1", "--single-branch", clone_url, str(dest)],
-            capture_output=True,
-            timeout=_CLONE_TIMEOUT,
-            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
         )
+        _, stderr = proc.communicate(timeout=_CLONE_TIMEOUT)
+        if proc.returncode != 0:
+            logger.warning(
+                "Clone failed: %s — %s",
+                clone_url,
+                stderr.decode(errors="replace")[:200],
+            )
+            return False
         return True
     except subprocess.TimeoutExpired:
-        logger.warning("Clone timed out: %s", clone_url)
+        _kill_process_group(proc)
+        logger.warning("Clone timed out after %ds: %s", _CLONE_TIMEOUT, clone_url)
         return False
-    except subprocess.CalledProcessError as exc:
-        logger.warning("Clone failed: %s — %s", clone_url, exc.stderr.decode(errors="replace")[:200])
+    except OSError as exc:
+        if proc is not None:
+            _kill_process_group(proc)
+        logger.warning("Clone failed: %s — %s", clone_url, str(exc)[:200])
         return False
 
 
@@ -77,7 +147,13 @@ def _collect_new_discoveries(before: set[str]) -> list[Path]:
 
 
 def _run_mycode(project_path: Path) -> tuple[int, str, str]:
-    """Run mycode CLI against a project. Returns (returncode, stdout, stderr)."""
+    """Run mycode CLI against a project. Returns (returncode, stdout, stderr).
+
+    Uses ``start_new_session=True`` so that mycode and ALL its child processes
+    (harness subprocesses spawned by the execution engine) share a single
+    process group.  On timeout we kill the entire group with ``os.killpg``,
+    preventing orphaned harness processes from surviving the timeout.
+    """
     cmd = [
         sys.executable, "-m", "mycode",
         str(project_path),
@@ -86,17 +162,31 @@ def _run_mycode(project_path: Path) -> tuple[int, str, str]:
         "--json-output",
         "--skip-version-check",
     ]
+    proc = None
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
-            timeout=_MYCODE_TIMEOUT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
+            start_new_session=True,
         )
-        return proc.returncode, proc.stdout, proc.stderr
+        stdout, stderr = proc.communicate(timeout=_MYCODE_TIMEOUT)
+        return proc.returncode, stdout, stderr
     except subprocess.TimeoutExpired:
-        return -1, "", "mycode timed out"
+        if proc is not None:
+            _kill_process_group(proc)
+            # Drain any remaining buffered pipe data after killing the group
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, OSError, ValueError):
+                stdout, stderr = "", ""
+        else:
+            stdout, stderr = "", ""
+        return -1, stdout or "", stderr + "\nmycode timed out" if stderr else "mycode timed out"
     except Exception as exc:
+        if proc is not None:
+            _kill_process_group(proc)
         return -1, "", str(exc)
 
 
@@ -174,6 +264,7 @@ def mine(
         clone_url = repo.get("clone_url", "")
         name = _safe_name(repo_url)
 
+        repo_start = time.monotonic()
         logger.info("[%d/%d] Processing %s …", i, total, repo_url)
         repo_result_dir = results_dir / name
         repo_result_dir.mkdir(parents=True, exist_ok=True)
@@ -195,10 +286,11 @@ def mine(
             if not _clone_repo(clone_url, clone_dest):
                 entry["status"] = "clone_error"
                 entry["error"] = "Failed to clone"
+                entry["elapsed_seconds"] = round(time.monotonic() - repo_start, 1)
                 clone_errors += 1
                 failed += 1
                 repo_results.append(entry)
-                logger.warning("  SKIP — clone failed")
+                logger.warning("  SKIP — clone failed (%.1fs)", entry["elapsed_seconds"])
                 continue
 
             # Snapshot discoveries before run
@@ -261,9 +353,11 @@ def mine(
 
             repo_results.append(entry)
 
+            elapsed = time.monotonic() - repo_start
+            entry["elapsed_seconds"] = round(elapsed, 1)
             logger.info(
-                "  %s — %d findings, %d discoveries",
-                entry["status"], entry["findings_count"], entry["discovery_count"],
+                "  %s — %d findings, %d discoveries (%.1fs)",
+                entry["status"], entry["findings_count"], entry["discovery_count"], elapsed,
             )
 
         finally:
