@@ -22,6 +22,7 @@ from mycode.session import (
     SessionResult,
     VenvCreationError,
     _is_process_running,
+    _IS_WINDOWS,
 )
 
 
@@ -75,7 +76,8 @@ def _reset_session_class_state():
     yield
     # Restore default signal handlers if tests left them modified
     signal.signal(signal.SIGINT, signal.default_int_handler)
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    if not _IS_WINDOWS:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
     SessionManager._active_sessions = []
     SessionManager._signal_handlers_installed = False
     SessionManager._original_sigint = None
@@ -666,13 +668,15 @@ class TestSignalHandling:
 
         assert SessionManager._signal_handlers_installed is True
         assert signal.getsignal(signal.SIGINT) == SessionManager._signal_handler
-        assert signal.getsignal(signal.SIGTERM) == SessionManager._signal_handler
+        if not _IS_WINDOWS:
+            assert signal.getsignal(signal.SIGTERM) == SessionManager._signal_handler
 
         sm._unregister_session()
 
     def test_signal_handlers_restored_on_unregister(self, sample_project):
         original_sigint = signal.getsignal(signal.SIGINT)
-        original_sigterm = signal.getsignal(signal.SIGTERM)
+        if not _IS_WINDOWS:
+            original_sigterm = signal.getsignal(signal.SIGTERM)
 
         sm = SessionManager(sample_project)
         sm._register_session()
@@ -680,7 +684,8 @@ class TestSignalHandling:
 
         assert SessionManager._signal_handlers_installed is False
         assert signal.getsignal(signal.SIGINT) == original_sigint
-        assert signal.getsignal(signal.SIGTERM) == original_sigterm
+        if not _IS_WINDOWS:
+            assert signal.getsignal(signal.SIGTERM) == original_sigterm
 
     def test_multiple_sessions_all_registered(self, sample_project):
         sm1 = SessionManager(sample_project)

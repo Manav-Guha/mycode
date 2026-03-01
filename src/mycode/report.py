@@ -289,6 +289,184 @@ class DiagnosticReport:
 
         return "\n".join(sections)
 
+    def as_markdown(self, project_name: str = "", date: str = "") -> str:
+        """Render the report as a clean markdown file for non-technical users.
+
+        No terminal formatting codes, no raw log output. Designed to be
+        readable by a vibe coder who wants to know what's wrong and what
+        to do about it.
+        """
+        import datetime as _dt
+
+        if not date:
+            date = _dt.date.today().isoformat()
+        if not project_name:
+            project_name = "Your Project"
+
+        lines: list[str] = []
+
+        # Title
+        lines.append(f"# myCode Report: {project_name}")
+        lines.append("")
+        lines.append(f"**Date:** {date}")
+        lines.append("")
+
+        # Summary score
+        total = self.scenarios_run
+        passed = self.scenarios_passed
+        failed = self.scenarios_failed
+        critical_count = sum(
+            1 for f in self.findings if f.severity == "critical"
+        )
+        warning_count = sum(
+            1 for f in self.findings if f.severity == "warning"
+        )
+        info_count = sum(
+            1 for f in self.findings if f.severity == "info"
+        )
+
+        if total == 0:
+            score_label = "No tests ran"
+        elif critical_count > 0:
+            score_label = "Needs attention"
+        elif warning_count > 0:
+            score_label = "Mostly healthy"
+        else:
+            score_label = "Looking good"
+
+        lines.append(f"**Overall:** {score_label}")
+        lines.append("")
+        lines.append(
+            f"myCode ran **{total}** stress tests against your project. "
+            f"**{passed}** passed cleanly"
+            + (f", **{failed}** found issues." if failed else ".")
+        )
+        lines.append("")
+
+        # Plain-language summary
+        if self.plain_summary:
+            lines.append("## Summary")
+            lines.append("")
+            lines.append(self.plain_summary)
+            lines.append("")
+        elif self.summary:
+            lines.append("## Summary")
+            lines.append("")
+            lines.append(self.summary)
+            lines.append("")
+
+        # Findings grouped by severity
+        if self.findings:
+            # Critical findings
+            criticals = [f for f in self.findings if f.severity == "critical"]
+            warnings = [f for f in self.findings if f.severity == "warning"]
+            infos = [f for f in self.findings if f.severity == "info"]
+
+            if criticals:
+                lines.append("## Critical Issues")
+                lines.append("")
+                lines.append(
+                    "These problems will likely cause failures for your "
+                    "users under normal conditions. You should address "
+                    "them before deploying."
+                )
+                lines.append("")
+                for f in criticals:
+                    _render_finding(lines, f)
+
+            if warnings:
+                lines.append("## Warnings")
+                lines.append("")
+                lines.append(
+                    "These aren't breaking yet, but they could become "
+                    "problems as your project grows or usage increases."
+                )
+                lines.append("")
+                for f in warnings:
+                    _render_finding(lines, f)
+
+            if infos:
+                lines.append("## Notes")
+                lines.append("")
+                lines.append(
+                    "Minor observations worth knowing about."
+                )
+                lines.append("")
+                for f in infos:
+                    _render_finding(lines, f)
+        elif total > 0:
+            lines.append("## Findings")
+            lines.append("")
+            lines.append(
+                "All stress tests completed cleanly. No errors, resource "
+                "limit hits, or degradation detected under the conditions "
+                "tested."
+            )
+            lines.append("")
+
+        # Degradation curves (simplified for non-technical readers)
+        if self.degradation_points:
+            lines.append("## Performance Under Load")
+            lines.append("")
+            for dp in self.degradation_points:
+                name = dp.scenario_name
+                if dp.group_count > 1:
+                    name += f" (and {dp.group_count - 1} similar)"
+                lines.append(f"**{name}**")
+                lines.append("")
+                if dp.description:
+                    lines.append(dp.description)
+                    lines.append("")
+                if dp.steps:
+                    lines.append("| Load Level | Measurement |")
+                    lines.append("|---|---|")
+                    for label, value in dp.steps:
+                        lines.append(f"| {label} | {value:.2f} |")
+                    lines.append("")
+                if dp.breaking_point:
+                    lines.append(
+                        f"Breaking point: **{dp.breaking_point}**"
+                    )
+                    lines.append("")
+
+        # Version discrepancies
+        if self.version_flags:
+            lines.append("## Outdated Dependencies")
+            lines.append("")
+            lines.append(
+                "These dependencies have newer versions available. "
+                "Updating may fix known bugs or security issues."
+            )
+            lines.append("")
+            for vf in self.version_flags:
+                lines.append(f"- {vf}")
+            lines.append("")
+
+        # Unrecognized deps
+        if self.unrecognized_deps:
+            lines.append("## Unrecognized Dependencies")
+            lines.append("")
+            lines.append(
+                "myCode doesn't have detailed profiles for these "
+                "dependencies yet. Generic stress testing was applied, "
+                "which may not catch all issues."
+            )
+            lines.append("")
+            for dep in self.unrecognized_deps:
+                lines.append(f"- {dep}")
+            lines.append("")
+
+        # Footer
+        lines.append("---")
+        lines.append("")
+        lines.append(
+            "*myCode diagnoses — it does not prescribe. "
+            "Interpret these results in your own context.*"
+        )
+        lines.append("")
+
+        return "\n".join(lines)
+
     def as_dict(self) -> dict:
         """Serialize the report as a JSON-compatible dictionary.
 
@@ -352,6 +530,26 @@ class DiagnosticReport:
             "model_used": self.model_used,
             "token_usage": dict(self.token_usage),
         }
+
+
+def _render_finding(lines: list[str], f: "Finding") -> None:
+    """Render a single Finding as markdown bullet points."""
+    title = f.title
+    if f.group_count > 1:
+        title += f" (and {f.group_count - 1} similar)"
+    lines.append(f"### {title}")
+    lines.append("")
+    if f.description:
+        lines.append(f.description)
+        lines.append("")
+    if f.details:
+        lines.append(f"> {f.details}")
+        lines.append("")
+    if f.affected_dependencies:
+        lines.append(
+            f"**Related dependencies:** {', '.join(f.affected_dependencies)}"
+        )
+        lines.append("")
 
 
 # ── Report Generator ──

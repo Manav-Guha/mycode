@@ -35,6 +35,8 @@ from pathlib import Path
 
 logger = logging.getLogger("batch_mine")
 
+_IS_WINDOWS = sys.platform == "win32"
+
 # ── Constants ──
 
 _DISCOVERIES_DIR = Path.home() / ".mycode" / "discoveries"
@@ -46,17 +48,27 @@ _DEFAULT_MYCODE_TIMEOUT = 300  # seconds
 
 
 def _kill_process_group(proc: subprocess.Popen) -> None:
-    """Kill the entire process group rooted at *proc*.
+    """Kill the entire process tree rooted at *proc*.
 
-    Mirrors session.py's ``_kill_process_tree``.  Because we launch children
-    with ``start_new_session=True``, the child's PID is the process-group
-    leader.  ``os.killpg`` sends the signal to every process in that group,
-    so grandchild harness processes are killed too — not just the immediate
-    child.
+    Mirrors session.py's ``_kill_process_tree``.
+
+    On POSIX: we launch children with ``start_new_session=True`` so
+    ``os.killpg`` kills the entire process group (SIGTERM then SIGKILL).
+
+    On Windows: we launch children with ``CREATE_NEW_PROCESS_GROUP`` and
+    use ``taskkill /T /F /PID`` to kill the entire process tree.
     """
     if proc is None or proc.poll() is not None:
         return
 
+    if _IS_WINDOWS:
+        _kill_process_group_win32(proc)
+    else:
+        _kill_process_group_posix(proc)
+
+
+def _kill_process_group_posix(proc: subprocess.Popen) -> None:
+    """POSIX: SIGTERM the process group, then SIGKILL if needed."""
     pgid = None
     try:
         pgid = os.getpgid(proc.pid)
@@ -102,15 +114,54 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
         logger.warning("Process %d did not exit after SIGKILL", proc.pid)
 
 
+def _kill_process_group_win32(proc: subprocess.Popen) -> None:
+    """Windows: use taskkill /T /F to kill the entire process tree."""
+    # 1. Graceful: terminate the root process
+    try:
+        proc.terminate()
+    except OSError:
+        pass
+
+    try:
+        proc.wait(timeout=10)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    # 2. Forceful: taskkill /T (tree) /F (force) /PID
+    try:
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "Process %d did not exit after taskkill /T /F", proc.pid
+        )
+
+
 def _clone_repo(clone_url: str, dest: Path) -> bool:
     """Shallow-clone a repo. Returns True on success."""
     proc = None
     try:
+        popen_kwargs: dict = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
+        if _IS_WINDOWS:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             ["git", "clone", "--depth", "1", "--single-branch", clone_url, str(dest)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
+            **popen_kwargs,
         )
         _, stderr = proc.communicate(timeout=_CLONE_TIMEOUT)
         if proc.returncode != 0:
@@ -152,10 +203,12 @@ def _collect_new_discoveries(before: set[str]) -> list[Path]:
 def _run_mycode(project_path: Path, timeout: int = _DEFAULT_MYCODE_TIMEOUT) -> tuple[int, str, str]:
     """Run mycode CLI against a project. Returns (returncode, stdout, stderr).
 
-    Uses ``start_new_session=True`` so that mycode and ALL its child processes
-    (harness subprocesses spawned by the execution engine) share a single
-    process group.  On timeout we kill the entire group with ``os.killpg``,
-    preventing orphaned harness processes from surviving the timeout.
+    On POSIX: uses ``start_new_session=True`` so that mycode and ALL its child
+    processes share a single process group.  On timeout we kill the entire group
+    with ``os.killpg``.
+
+    On Windows: uses ``CREATE_NEW_PROCESS_GROUP`` and ``taskkill /T /F`` for
+    tree-wide termination on timeout.
     """
     cmd = [
         sys.executable, "-m", "mycode",
@@ -167,13 +220,16 @@ def _run_mycode(project_path: Path, timeout: int = _DEFAULT_MYCODE_TIMEOUT) -> t
     ]
     proc = None
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
+        popen_kwargs: dict = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+        }
+        if _IS_WINDOWS:
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+        proc = subprocess.Popen(cmd, **popen_kwargs)
         stdout, stderr = proc.communicate(timeout=timeout)
         return proc.returncode, stdout, stderr
     except subprocess.TimeoutExpired:

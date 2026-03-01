@@ -27,6 +27,8 @@ from mycode.ingester import _read_text_safe
 
 logger = logging.getLogger(__name__)
 
+_IS_WINDOWS = sys.platform == "win32"
+
 # Directories and file patterns excluded when copying user's project
 COPY_EXCLUDE_PATTERNS = {
     ".git",
@@ -221,8 +223,8 @@ class SessionManager:
             # orphan cleanup on next startup rather than risk deleting
             # files out from under a running process.
             logger.error(
-                "Subprocess did not exit after SIGKILL; leaving workspace "
-                "intact for orphan cleanup: %s", self.workspace_dir,
+                "Subprocess did not exit after forced termination; leaving "
+                "workspace intact for orphan cleanup: %s", self.workspace_dir,
             )
         elif self.workspace_dir and self.workspace_dir.exists():
             try:
@@ -568,16 +570,21 @@ class SessionManager:
 
         proc = None
         try:
-            proc = subprocess.Popen(
-                resolved_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=str(self.project_copy_dir),
-                env=env,
-                preexec_fn=self._make_preexec_fn(),
-                start_new_session=True,
-            )
+            popen_kwargs: dict = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.PIPE,
+                "text": True,
+                "cwd": str(self.project_copy_dir),
+                "env": env,
+            }
+            if _IS_WINDOWS:
+                popen_kwargs["creationflags"] = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+            else:
+                popen_kwargs["preexec_fn"] = self._make_preexec_fn()
+                popen_kwargs["start_new_session"] = True
+            proc = subprocess.Popen(resolved_command, **popen_kwargs)
             self._active_process = proc
             stdout, stderr = proc.communicate(timeout=timeout)
             self._active_process = None
@@ -614,18 +621,26 @@ class SessionManager:
     def _kill_process_tree(proc: subprocess.Popen) -> bool:
         """Kill the entire process tree rooted at *proc*.
 
-        Because we launch children with ``start_new_session=True``, every child
-        and grandchild shares the same process-group ID (the child's PID).
-        ``os.killpg`` sends a signal to every process in that group, so
-        timeouts and signals clean up the whole tree — not just the immediate
-        child.
+        On POSIX: we launch children with ``start_new_session=True`` so every
+        child and grandchild shares the same process-group ID (the child's
+        PID).  ``os.killpg`` sends a signal to every process in that group.
+
+        On Windows: we launch children with ``CREATE_NEW_PROCESS_GROUP``, then
+        use ``taskkill /T /F /PID`` to kill the entire process tree.
 
         Returns True if the process was confirmed dead, False if it may
-        still be running after SIGKILL.
+        still be running.
         """
         if proc is None or proc.poll() is not None:
             return True  # already exited
 
+        if _IS_WINDOWS:
+            return SessionManager._kill_process_tree_win32(proc)
+        return SessionManager._kill_process_tree_posix(proc)
+
+    @staticmethod
+    def _kill_process_tree_posix(proc: subprocess.Popen) -> bool:
+        """POSIX: SIGTERM the process group, then SIGKILL if needed."""
         pgid: Optional[int] = None
         try:
             pgid = os.getpgid(proc.pid)
@@ -668,6 +683,41 @@ class SessionManager:
             return True
         except subprocess.TimeoutExpired:
             logger.warning("Process %d did not exit after SIGKILL", proc.pid)
+            return False
+
+    @staticmethod
+    def _kill_process_tree_win32(proc: subprocess.Popen) -> bool:
+        """Windows: use taskkill /T /F to kill the entire process tree."""
+        # 1. Graceful: terminate the root process
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+
+        try:
+            proc.wait(timeout=3)
+            return True
+        except subprocess.TimeoutExpired:
+            pass
+
+        # 2. Forceful: taskkill /T (tree) /F (force) /PID
+        try:
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+        try:
+            proc.wait(timeout=3)
+            return True
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Process %d did not exit after taskkill /T /F", proc.pid
+            )
             return False
 
     def _make_preexec_fn(self):
@@ -755,11 +805,17 @@ class SessionManager:
 
     @classmethod
     def _install_signal_handlers(cls):
-        """Install signal handlers that trigger cleanup on interrupt."""
+        """Install signal handlers that trigger cleanup on interrupt.
+
+        On Windows only SIGINT (Ctrl+C) is reliably supported; SIGTERM
+        cannot be caught via ``signal.signal``.  We install SIGTERM only
+        on POSIX systems.
+        """
         cls._original_sigint = signal.getsignal(signal.SIGINT)
-        cls._original_sigterm = signal.getsignal(signal.SIGTERM)
         signal.signal(signal.SIGINT, cls._signal_handler)
-        signal.signal(signal.SIGTERM, cls._signal_handler)
+        if not _IS_WINDOWS:
+            cls._original_sigterm = signal.getsignal(signal.SIGTERM)
+            signal.signal(signal.SIGTERM, cls._signal_handler)
         cls._signal_handlers_installed = True
 
     @classmethod
@@ -768,7 +824,7 @@ class SessionManager:
         if cls._signal_handlers_installed:
             if cls._original_sigint is not None:
                 signal.signal(signal.SIGINT, cls._original_sigint)
-            if cls._original_sigterm is not None:
+            if not _IS_WINDOWS and cls._original_sigterm is not None:
                 signal.signal(signal.SIGTERM, cls._original_sigterm)
             cls._signal_handlers_installed = False
             cls._original_sigint = None
@@ -861,9 +917,15 @@ class SessionManager:
 
 
 def _is_process_running(pid: int) -> bool:
-    """Check if a process with the given PID is still running."""
+    """Check if a process with the given PID is still running.
+
+    On POSIX: uses ``os.kill(pid, 0)`` (signal 0 is a no-op existence check).
+    On Windows: uses ``ctypes`` to call ``OpenProcess`` + ``GetExitCodeProcess``.
+    """
     if pid <= 0:
         return False
+    if _IS_WINDOWS:
+        return _is_process_running_win32(pid)
     try:
         os.kill(pid, 0)
         return True
@@ -871,3 +933,29 @@ def _is_process_running(pid: int) -> bool:
         return False
     except PermissionError:
         return True  # process exists but we can't signal it
+
+
+def _is_process_running_win32(pid: int) -> bool:
+    """Windows implementation: query the process via the Win32 API."""
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+
+        handle = kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid,
+        )
+        if not handle:
+            return False
+        try:
+            exit_code = ctypes.wintypes.DWORD()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return exit_code.value == STILL_ACTIVE
+            return False
+        finally:
+            kernel32.CloseHandle(handle)
+    except (OSError, AttributeError, ValueError):
+        return False

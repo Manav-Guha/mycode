@@ -156,6 +156,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Write structured JSON report to mycode-report.json in the project directory",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        default=False,
+        help="Write a clean markdown report (mycode-report.md) to the project directory",
+    )
     return parser
 
 
@@ -244,6 +250,21 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             print(
                 f"\nWarning: Could not write JSON report: {exc}",
+                file=sys.stderr,
+            )
+
+    # Markdown report
+    if args.report and result.report:
+        md_path = project / "mycode-report.md"
+        try:
+            md_content = result.report.as_markdown(
+                project_name=project.name,
+            )
+            md_path.write_text(md_content, encoding="utf-8")
+            print(f"\nMarkdown report written: {md_path}")
+        except Exception as exc:
+            print(
+                f"\nWarning: Could not write markdown report: {exc}",
                 file=sys.stderr,
             )
 
