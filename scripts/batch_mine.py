@@ -14,8 +14,9 @@ Usage:
     python scripts/batch_mine.py --max-repos 10               # limit
     python scripts/batch_mine.py --results-dir ./my_results   # custom output
     python scripts/batch_mine.py --timeout 900                # 15-min timeout for slow repos
+    python scripts/batch_mine.py --report                     # also generate batch_report.xlsx
 
-No third-party dependencies — stdlib only.
+No third-party dependencies — stdlib only (openpyxl optional for --report).
 """
 
 import argparse
@@ -231,6 +232,186 @@ def _extract_dep_failures(report: dict) -> list[str]:
     return deps
 
 
+# ── XLSX Report ──
+
+
+def _get_profiled_dep_names() -> set[str]:
+    """Load all profile file-stem names from the component library."""
+    try:
+        from mycode.library.loader import ComponentLibrary
+        library = ComponentLibrary()
+        names: set[str] = set()
+        for lang in ("python", "javascript"):
+            names.update(library.list_profiles(lang))
+        return names
+    except Exception as exc:
+        logger.warning("Could not load component library profiles: %s", exc)
+        return set()
+
+
+def _is_dep_profiled(dep_name: str, profiled_names: set[str]) -> bool:
+    """Check whether a dependency has a profile, using alias normalisation."""
+    try:
+        from mycode.library.loader import _normalize_dep_name
+    except ImportError:
+        return dep_name.lower() in profiled_names
+
+    norm_py = _normalize_dep_name(dep_name.lower(), "python")
+    norm_js = _normalize_dep_name(dep_name.lower(), "javascript")
+    return norm_py in profiled_names or norm_js in profiled_names
+
+
+def _generate_xlsx_report(summary: dict, results_dir: Path) -> None:
+    """Generate a formatted xlsx report from batch results.
+
+    Requires openpyxl.  Skips with a warning if not installed.
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        logger.warning(
+            "openpyxl not installed — skipping xlsx report. "
+            "Install with: pip install openpyxl"
+        )
+        return
+
+    # ── Styles ──
+    header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+    severity_fills = {
+        "critical": PatternFill(start_color="D32F2F", end_color="D32F2F", fill_type="solid"),
+        "high": PatternFill(start_color="F57C00", end_color="F57C00", fill_type="solid"),
+        "medium": PatternFill(start_color="FDD835", end_color="FDD835", fill_type="solid"),
+        "low": PatternFill(start_color="66BB6A", end_color="66BB6A", fill_type="solid"),
+        "info": PatternFill(start_color="90CAF9", end_color="90CAF9", fill_type="solid"),
+    }
+    severity_fonts = {
+        "critical": Font(color="FFFFFF", bold=True),
+        "high": Font(color="FFFFFF", bold=True),
+        "medium": Font(color="000000"),
+        "low": Font(color="000000"),
+        "info": Font(color="000000"),
+    }
+
+    def write_header(ws, headers):
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center")
+
+    def auto_width(ws):
+        for col_cells in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col_cells[0].column)
+            for cell in col_cells:
+                if cell.value is not None:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = min(max_len + 3, 60)
+
+    profiled_names = _get_profiled_dep_names()
+
+    wb = Workbook()
+
+    # ── Sheet 1: Summary ──
+    ws = wb.active
+    ws.title = "Summary"
+    write_header(ws, ["Metric", "Value"])
+
+    total = summary.get("total_repos", 0)
+    tested = summary.get("repos_tested", 0)
+    failed = summary.get("repos_failed", 0)
+    clone_errs = summary.get("clone_errors", 0)
+    timeout_errs = sum(
+        1 for r in summary.get("repos", [])
+        if r.get("status") == "mycode_error"
+        and "timed out" in (r.get("error") or "").lower()
+    )
+    success_rate = f"{tested / total * 100:.1f}%" if total > 0 else "N/A"
+
+    for i, (metric, value) in enumerate([
+        ("Total repos", total),
+        ("Tested", tested),
+        ("Failed", failed),
+        ("Success rate", success_rate),
+        ("Clone errors", clone_errs),
+        ("Timeout errors", timeout_errs),
+    ], 2):
+        ws.cell(row=i, column=1, value=metric)
+        ws.cell(row=i, column=2, value=value)
+
+    auto_width(ws)
+
+    # ── Sheet 2: Failures by Dependency ──
+    ws2 = wb.create_sheet("Failures by Dependency")
+    write_header(ws2, ["Rank", "Dependency", "Failure Count", "Status", "% of Total Failures"])
+
+    dep_failures = summary.get("failure_rate_by_dependency", [])
+    total_dep_failures = sum(d.get("failure_count", 0) for d in dep_failures)
+
+    for i, entry in enumerate(dep_failures, 1):
+        dep = entry.get("dependency", "")
+        count = entry.get("failure_count", 0)
+        status = "Profiled" if _is_dep_profiled(dep, profiled_names) else "Unrecognised"
+        pct = f"{count / total_dep_failures * 100:.1f}%" if total_dep_failures > 0 else "0%"
+
+        row = i + 1
+        ws2.cell(row=row, column=1, value=i)
+        ws2.cell(row=row, column=2, value=dep)
+        ws2.cell(row=row, column=3, value=count)
+        ws2.cell(row=row, column=4, value=status)
+        ws2.cell(row=row, column=5, value=pct)
+
+    auto_width(ws2)
+
+    # ── Sheet 3: Failure Signatures ──
+    ws3 = wb.create_sheet("Failure Signatures")
+    write_header(ws3, ["Rank", "Signature", "Category", "Severity", "Count"])
+
+    for i, entry in enumerate(summary.get("top_failure_signatures", []), 1):
+        raw_sig = entry.get("signature", "")
+        count = entry.get("count", 0)
+
+        # Parse "severity:category:title" format
+        parts = raw_sig.split(":", 2)
+        severity = parts[0] if len(parts) >= 1 else ""
+        category = parts[1] if len(parts) >= 2 else ""
+        title = parts[2] if len(parts) >= 3 else raw_sig
+
+        row = i + 1
+        ws3.cell(row=row, column=1, value=i)
+        ws3.cell(row=row, column=2, value=title)
+        ws3.cell(row=row, column=3, value=category)
+        sev_cell = ws3.cell(row=row, column=4, value=severity)
+        ws3.cell(row=row, column=5, value=count)
+
+        sev_lower = severity.lower()
+        if sev_lower in severity_fills:
+            sev_cell.fill = severity_fills[sev_lower]
+            sev_cell.font = severity_fonts[sev_lower]
+
+    auto_width(ws3)
+
+    # ── Sheet 4: Unrecognised Dependencies ──
+    ws4 = wb.create_sheet("Unrecognised Dependencies")
+    write_header(ws4, ["Rank", "Dependency", "Repo Count"])
+
+    for i, entry in enumerate(summary.get("top_unrecognized_dependencies", []), 1):
+        row = i + 1
+        ws4.cell(row=row, column=1, value=i)
+        ws4.cell(row=row, column=2, value=entry.get("dependency", ""))
+        ws4.cell(row=row, column=3, value=entry.get("count", 0))
+
+    auto_width(ws4)
+
+    # ── Save ──
+    xlsx_path = results_dir / "batch_report.xlsx"
+    wb.save(str(xlsx_path))
+    logger.info("Wrote xlsx report to %s", xlsx_path)
+
+
 # ── Main Logic ──
 
 
@@ -429,6 +610,11 @@ def main(argv: list[str] | None = None) -> None:
         help=f"Per-repo mycode timeout in seconds (default: {_DEFAULT_MYCODE_TIMEOUT})",
     )
     parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Generate batch_report.xlsx alongside batch_results.json (requires openpyxl)",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -453,6 +639,9 @@ def main(argv: list[str] | None = None) -> None:
         max_repos=args.max_repos,
         timeout=args.timeout,
     )
+
+    if args.report:
+        _generate_xlsx_report(summary, Path(args.results_dir))
 
     tested = summary["repos_tested"]
     failed = summary["repos_failed"]
