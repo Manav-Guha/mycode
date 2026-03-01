@@ -15,6 +15,7 @@ Usage:
     python scripts/batch_mine.py --results-dir ./my_results   # custom output
     python scripts/batch_mine.py --timeout 900                # 15-min timeout for slow repos
     python scripts/batch_mine.py --report                     # also generate batch_report.xlsx
+    python scripts/batch_mine.py --report-only                # regenerate reports from existing results
 
 No third-party dependencies — stdlib only (openpyxl optional for --report).
 """
@@ -427,6 +428,126 @@ def _generate_xlsx_report(summary: dict, results_dir: Path) -> None:
     logger.info("Wrote xlsx report to %s", xlsx_path)
 
 
+# ── Rebuild from existing results ──
+
+
+def _rebuild_summary(results_dir: Path) -> dict:
+    """Rebuild aggregate summary by re-scanning per-repo result directories.
+
+    Preserves per-repo metadata (repo_url, status, error, elapsed_seconds)
+    from an existing ``batch_results.json`` if present, while recomputing all
+    aggregate stats from the actual ``mycode-report.json`` files.  This lets
+    us regenerate reports after changing extraction logic without re-mining.
+    """
+    # Load existing per-repo metadata if available
+    existing_path = results_dir / "batch_results.json"
+    entries_by_name: dict[str, dict] = {}
+    if existing_path.is_file():
+        try:
+            data = json.loads(existing_path.read_text())
+            for r in data.get("repos", []):
+                name = r.get("name")
+                if name:
+                    entries_by_name[name] = r
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Re-scan per-repo directories
+    all_failure_sigs: Counter = Counter()
+    all_unrecognized_deps: Counter = Counter()
+    all_dep_failures: Counter = Counter()
+    all_generic_stress_deps: Counter = Counter()
+
+    seen_names: set[str] = set()
+    final_entries: list[dict] = []
+
+    for repo_dir in sorted(results_dir.iterdir()):
+        if not repo_dir.is_dir():
+            continue
+        name = repo_dir.name
+        seen_names.add(name)
+
+        # Load report
+        report: dict = {}
+        report_path = repo_dir / "mycode-report.json"
+        if report_path.is_file():
+            try:
+                report = json.loads(report_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Use existing metadata or infer from directory contents
+        if name in entries_by_name:
+            entry = entries_by_name[name].copy()
+        else:
+            entry = {
+                "repo_url": "",
+                "name": name,
+                "status": "success" if report else "mycode_error",
+                "error": None,
+            }
+
+        # Always refresh counts from actual files
+        entry["findings_count"] = len(report.get("findings", []))
+        disc_dir = repo_dir / "discoveries"
+        entry["discovery_count"] = (
+            len([f for f in disc_dir.iterdir() if f.suffix == ".json"])
+            if disc_dir.is_dir() else 0
+        )
+
+        # Extract aggregates from report
+        all_failure_sigs.update(_extract_failure_signatures(report))
+
+        unrec = _extract_unrecognized_deps(report)
+        all_unrecognized_deps.update(unrec)
+
+        if unrec and _has_generic_stress_failure(report):
+            all_generic_stress_deps.update(unrec)
+
+        all_dep_failures.update(_extract_dep_failures(report))
+
+        final_entries.append(entry)
+
+    # Include entries from batch_results.json that no longer have directories
+    # (e.g. clone errors where the empty dir was cleaned up)
+    for name, entry in entries_by_name.items():
+        if name not in seen_names:
+            final_entries.append(entry)
+
+    # Compute totals from per-repo statuses
+    total = len(final_entries)
+    passed = sum(
+        1 for e in final_entries
+        if e.get("status") in ("success", "completed_with_errors")
+    )
+    failed = total - passed
+    clone_errors = sum(1 for e in final_entries if e.get("status") == "clone_error")
+    mycode_errors = sum(1 for e in final_entries if e.get("status") == "mycode_error")
+
+    return {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "total_repos": total,
+        "repos_tested": passed,
+        "repos_failed": failed,
+        "clone_errors": clone_errors,
+        "mycode_errors": mycode_errors,
+        "repos": final_entries,
+        "top_failure_signatures": [
+            {"signature": sig, "count": count}
+            for sig, count in all_failure_sigs.most_common(20)
+        ],
+        "top_unrecognized_dependencies": [
+            {"dependency": dep, "count": count,
+             "generic_stress_failures": all_generic_stress_deps.get(dep, 0)}
+            for dep, count in all_unrecognized_deps.most_common(20)
+        ],
+        "failure_rate_by_dependency": [
+            {"dependency": dep, "failure_count": count}
+            for dep, count in all_dep_failures.most_common(20)
+        ],
+    }
+
+
 # ── Main Logic ──
 
 
@@ -635,6 +756,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Generate batch_report.xlsx alongside batch_results.json (requires openpyxl)",
     )
     parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Skip mining; regenerate reports from existing results directory",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -648,6 +774,30 @@ def main(argv: list[str] | None = None) -> None:
         datefmt="%H:%M:%S",
     )
 
+    results_dir = Path(args.results_dir)
+
+    # ── Report-only mode: skip mining, rebuild from existing results ──
+    if args.report_only:
+        if not results_dir.is_dir():
+            print(f"Error: results directory not found: {results_dir}", file=sys.stderr)
+            sys.exit(1)
+
+        summary = _rebuild_summary(results_dir)
+
+        summary_path = results_dir / "batch_results.json"
+        summary_path.write_text(json.dumps(summary, indent=2) + "\n")
+        logger.info("Wrote aggregate summary to %s", summary_path)
+
+        _generate_xlsx_report(summary, results_dir)
+
+        tested = summary["repos_tested"]
+        failed = summary["repos_failed"]
+        total = summary["total_repos"]
+        print(f"\nRebuilt from {total} repos ({tested} tested, {failed} failed).")
+        print(f"Results in {args.results_dir}/")
+        return
+
+    # ── Normal mining mode ──
     input_path = Path(args.input)
     if not input_path.is_file():
         print(f"Error: input file not found: {input_path}", file=sys.stderr)
@@ -655,13 +805,13 @@ def main(argv: list[str] | None = None) -> None:
 
     summary = mine(
         input_path=input_path,
-        results_dir=Path(args.results_dir),
+        results_dir=results_dir,
         max_repos=args.max_repos,
         timeout=args.timeout,
     )
 
     if args.report:
-        _generate_xlsx_report(summary, Path(args.results_dir))
+        _generate_xlsx_report(summary, results_dir)
 
     tested = summary["repos_tested"]
     failed = summary["repos_failed"]
