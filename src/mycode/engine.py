@@ -43,6 +43,89 @@ _JS_CATEGORIES = frozenset({
 })
 
 
+# ── Harness Validation ──
+
+
+def _validate_harness(content: str, runner: str) -> str:
+    """Validate harness script syntax before execution.
+
+    Args:
+        content: The harness script source code.
+        runner: "python" or "node".
+
+    Returns:
+        Empty string if valid, or an error description if invalid.
+    """
+    if runner == "python":
+        return _validate_python_harness(content)
+    if runner == "node":
+        return _validate_js_harness(content)
+    return ""
+
+
+def _validate_python_harness(content: str) -> str:
+    """Validate Python harness syntax using ast.parse."""
+    import ast as _ast
+
+    try:
+        _ast.parse(content)
+        return ""
+    except SyntaxError as exc:
+        line_info = f" (line {exc.lineno})" if exc.lineno else ""
+        return f"Python syntax error{line_info}: {exc.msg}"
+
+
+def _validate_js_harness(content: str) -> str:
+    """Validate JavaScript harness syntax with bracket balance check.
+
+    Checks that braces {}, brackets [], and parentheses () are balanced.
+    This catches the most common harness generation failures (unclosed
+    blocks, missing brackets) without requiring a full JS parser.
+    """
+    # Strip string literals and comments to avoid false positives
+    stripped = _strip_js_strings_and_comments(content)
+
+    stack: list[str] = []
+    openers = {"(": ")", "[": "]", "{": "}"}
+    closers = {")", "]", "}"}
+
+    for i, ch in enumerate(stripped):
+        if ch in openers:
+            stack.append(openers[ch])
+        elif ch in closers:
+            if not stack:
+                # Find approximate line number
+                line = content[:i].count("\n") + 1
+                return f"Unexpected '{ch}' at line {line}"
+            expected = stack.pop()
+            if ch != expected:
+                line = content[:i].count("\n") + 1
+                return (
+                    f"Mismatched bracket at line {line}: "
+                    f"expected '{expected}', found '{ch}'"
+                )
+
+    if stack:
+        return f"Unclosed bracket(s): {len(stack)} still open at end of script"
+
+    return ""
+
+
+def _strip_js_strings_and_comments(content: str) -> str:
+    """Strip JS string literals and comments, preserving bracket characters outside them."""
+    import re as _re
+
+    # Replace string contents and comments with spaces (preserving length for line counting)
+    # Order matters: template literals, then strings, then comments
+    # This is simplified — handles common cases, not all edge cases
+    result = _re.sub(r'`[^`]*`', lambda m: ' ' * len(m.group()), content)
+    result = _re.sub(r'"(?:[^"\\]|\\.)*"', lambda m: ' ' * len(m.group()), result)
+    result = _re.sub(r"'(?:[^'\\]|\\.)*'", lambda m: ' ' * len(m.group()), result)
+    result = _re.sub(r'//[^\n]*', lambda m: ' ' * len(m.group()), result)
+    result = _re.sub(r'/\*.*?\*/', lambda m: ' ' * len(m.group()), result, flags=_re.DOTALL)
+    return result
+
+
 # ── Data Classes ──
 
 
@@ -269,6 +352,41 @@ class ExecutionEngine:
                 harness_content, harness_config, scenario.name,
             )
             runner = "python"
+
+        # Validate harness syntax before execution
+        validation_error = _validate_harness(harness_content, runner)
+        if validation_error:
+            total_ms = (time.perf_counter() - start) * 1000
+            # Clean up harness files
+            for path in (harness_path, config_path):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            return ScenarioResult(
+                scenario_name=scenario.name,
+                scenario_category=scenario.category,
+                status="failed",
+                total_execution_time_ms=round(total_ms, 2),
+                summary=(
+                    f"Harness generation failure (myCode limitation, "
+                    f"not a problem with your code): {validation_error}"
+                ),
+                steps=[StepResult(
+                    step_name="harness_validation",
+                    error_count=1,
+                    errors=[{
+                        "type": "HarnessGenerationError",
+                        "message": (
+                            f"myCode could not generate a valid test "
+                            f"script for scenario '{scenario.name}'. "
+                            f"This is a myCode limitation, not a problem "
+                            f"with your project. {validation_error}"
+                        ),
+                    }],
+                )],
+                total_errors=1,
+            )
 
         # Build command — for Node.js, cap V8 heap to match resource caps
         if runner == "node":

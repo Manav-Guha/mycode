@@ -26,7 +26,13 @@ import sys
 from pathlib import Path
 
 from mycode.interface import TerminalIO
-from mycode.pipeline import PipelineConfig, PipelineResult, run_pipeline
+from mycode.pipeline import (
+    PipelineConfig,
+    PipelineResult,
+    check_llm_report_allowance,
+    decrement_llm_report_counter,
+    run_pipeline,
+)
 from mycode.scenario import LLMConfig
 
 
@@ -185,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Build LLM config — flag takes precedence, then env var
     api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
+    is_byok = bool(args.api_key)  # User explicitly provided --api-key
     llm_config = None
     if api_key:
         kwargs: dict = {"api_key": api_key}
@@ -196,6 +203,21 @@ def main(argv: list[str] | None = None) -> int:
 
     # Offline mode: explicit flag or no API key available
     offline = args.offline or (api_key is None)
+
+    # Three free LLM reports — only for non-BYOK users
+    if not offline and not is_byok:
+        remaining = check_llm_report_allowance()
+        if remaining <= 0:
+            print(
+                "You've used your 3 free AI-powered analyses. "
+                "Run with --offline for template-based analysis, "
+                "or add your own API key with --api-key."
+            )
+            offline = True
+        else:
+            decrement_llm_report_counter()
+            if remaining == 1:
+                print("This is your last free AI-powered analysis.")
 
     # Build pipeline config
     non_interactive = args.non_interactive or not sys.stdin.isatty()

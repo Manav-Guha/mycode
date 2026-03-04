@@ -24,7 +24,13 @@ from mycode.pipeline import (
     PipelineError,
     PipelineResult,
     StageResult,
+    _CONFIG_PATH,
+    _LLM_REPORTS_INITIAL,
+    _read_config,
     _run_library_matching,
+    _write_config,
+    check_llm_report_allowance,
+    decrement_llm_report_counter,
     detect_language,
     run_pipeline,
 )
@@ -867,3 +873,129 @@ class TestCLI:
         f.write_text("x")
         exit_code = main([str(f)])
         assert exit_code == 1
+
+
+# ── LLM Report Counter Tests ──
+
+
+class TestLLMReportCounter:
+    """Tests for the three free LLM reports counter mechanism."""
+
+    def test_initial_allowance_when_no_config(self, tmp_path):
+        """Returns initial allowance when config file doesn't exist."""
+        fake_path = tmp_path / "config.json"
+        with patch("mycode.pipeline._CONFIG_PATH", fake_path):
+            assert check_llm_report_allowance() == _LLM_REPORTS_INITIAL
+
+    def test_decrement_creates_config(self, tmp_path):
+        """First decrement creates the config file."""
+        fake_dir = tmp_path / ".mycode"
+        fake_path = fake_dir / "config.json"
+        with (
+            patch("mycode.pipeline._CONFIG_PATH", fake_path),
+            patch("mycode.pipeline._CONFIG_DIR", fake_dir),
+        ):
+            remaining = decrement_llm_report_counter()
+            assert remaining == _LLM_REPORTS_INITIAL - 1
+            assert fake_path.exists()
+
+    def test_decrement_sequence(self, tmp_path):
+        """Counter decrements correctly through 3, 2, 1, 0."""
+        fake_dir = tmp_path / ".mycode"
+        fake_path = fake_dir / "config.json"
+        with (
+            patch("mycode.pipeline._CONFIG_PATH", fake_path),
+            patch("mycode.pipeline._CONFIG_DIR", fake_dir),
+        ):
+            assert decrement_llm_report_counter() == 2
+            assert decrement_llm_report_counter() == 1
+            assert decrement_llm_report_counter() == 0
+            # Should not go below 0
+            assert decrement_llm_report_counter() == 0
+            assert check_llm_report_allowance() == 0
+
+    def test_read_config_with_existing_data(self, tmp_path):
+        """Reads existing config correctly."""
+        fake_dir = tmp_path / ".mycode"
+        fake_path = fake_dir / "config.json"
+        with (
+            patch("mycode.pipeline._CONFIG_PATH", fake_path),
+            patch("mycode.pipeline._CONFIG_DIR", fake_dir),
+        ):
+            _write_config({"llm_reports_remaining": 1, "other": "data"})
+            assert check_llm_report_allowance() == 1
+
+    def test_corrupted_config_returns_default(self, tmp_path):
+        """Corrupted config file returns initial allowance."""
+        fake_dir = tmp_path / ".mycode"
+        fake_dir.mkdir(parents=True)
+        fake_path = fake_dir / "config.json"
+        fake_path.write_text("not json!", encoding="utf-8")
+        with patch("mycode.pipeline._CONFIG_PATH", fake_path):
+            assert check_llm_report_allowance() == _LLM_REPORTS_INITIAL
+
+    def test_write_preserves_other_keys(self, tmp_path):
+        """Writing config preserves non-counter keys."""
+        fake_dir = tmp_path / ".mycode"
+        fake_path = fake_dir / "config.json"
+        with (
+            patch("mycode.pipeline._CONFIG_PATH", fake_path),
+            patch("mycode.pipeline._CONFIG_DIR", fake_dir),
+        ):
+            _write_config({"llm_reports_remaining": 3, "user_pref": "dark"})
+            decrement_llm_report_counter()
+            data = _read_config()
+            assert data["llm_reports_remaining"] == 2
+            assert data["user_pref"] == "dark"
+
+    def test_cli_byok_bypasses_counter(self, tmp_path):
+        """BYOK users (--api-key) are not affected by the counter."""
+        from mycode.cli import main
+
+        # Set counter to 0
+        fake_dir = tmp_path / ".mycode"
+        fake_path = fake_dir / "config.json"
+        with (
+            patch("mycode.pipeline._CONFIG_PATH", fake_path),
+            patch("mycode.pipeline._CONFIG_DIR", fake_dir),
+        ):
+            _write_config({"llm_reports_remaining": 0})
+
+            # Create a minimal project
+            proj = tmp_path / "proj"
+            proj.mkdir()
+            (proj / "app.py").write_text("x = 1\n")
+
+            # With --api-key, should NOT be blocked (even though counter is 0)
+            with patch("mycode.cli.run_pipeline") as mock_run:
+                mock_run.return_value = PipelineResult()
+                main([str(proj), "--api-key", "my-key", "--offline"])
+                # If we got here, the counter didn't block us
+
+    def test_cli_env_key_checks_counter(self, tmp_path, capsys):
+        """Non-BYOK users (env var key) check the counter."""
+        from mycode.cli import main
+        import os
+
+        fake_dir = tmp_path / ".mycode"
+        fake_path = fake_dir / "config.json"
+        with (
+            patch("mycode.pipeline._CONFIG_PATH", fake_path),
+            patch("mycode.pipeline._CONFIG_DIR", fake_dir),
+            patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}),
+        ):
+            _write_config({"llm_reports_remaining": 0})
+
+            proj = tmp_path / "proj"
+            proj.mkdir()
+            (proj / "app.py").write_text("x = 1\n")
+
+            # Should be forced offline and show the message
+            with patch("mycode.cli.run_pipeline") as mock_run:
+                mock_run.return_value = PipelineResult()
+                main([str(proj)])
+                captured = capsys.readouterr()
+                assert "3 free" in captured.out
+                # Should have been called with offline=True
+                call_config = mock_run.call_args[0][0]
+                assert call_config.offline is True

@@ -62,6 +62,8 @@ from mycode.pipeline import (
     PipelineError,
     PipelineResult,
     StageResult,
+    check_llm_report_allowance,
+    decrement_llm_report_counter,
     detect_language,
     run_pipeline,
 )

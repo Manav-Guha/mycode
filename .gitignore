@@ -211,3 +211,9 @@ __marimo__/
 .claude/
 simulation_results.*
 token_simulation.py
+corpus_results/
+corpus_results_retry/
+corpus_results_timeout/
+discovered_repos.json
+failed_repos.json
+timeout_repos.json

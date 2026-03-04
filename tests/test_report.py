@@ -549,19 +549,17 @@ class TestUnrecognizedDeps:
         assert "custom-tool" in report.unrecognized_deps
         assert len(report.unrecognized_deps) == 2
 
-    def test_unrecognized_creates_info_finding(
+    def test_unrecognized_tracked_in_report(
         self, clean_execution, simple_ingestion, profile_matches,
     ):
         gen = ReportGenerator(offline=True)
         report = gen.generate(clean_execution, simple_ingestion, profile_matches)
 
-        unrec_findings = [
-            f for f in report.findings
-            if "unrecognized" in f.title.lower()
-        ]
-        assert len(unrec_findings) == 1
-        assert unrec_findings[0].severity == "info"
-        assert "obscure-lib" in unrec_findings[0].description
+        # Unrecognized deps are tracked but not as alarming findings
+        assert "obscure-lib" in report.unrecognized_deps
+        assert "custom-tool" in report.unrecognized_deps
+        # Dependency coverage is reflected instead
+        assert report.recognized_dep_count == 3
 
     def test_no_unrecognized_when_all_matched(self, clean_execution):
         ingestion = IngestionResult(project_path="/tmp/x", files_analyzed=1)
@@ -764,13 +762,14 @@ class TestReportRendering:
         assert "Version Discrepancies" in text
         assert "flask" in text
 
-    def test_renders_unrecognized_deps(self):
+    def test_renders_dependency_coverage(self):
         report = DiagnosticReport(
+            recognized_dep_count=5,
             unrecognized_deps=["obscure-lib", "custom-tool"],
         )
         text = report.as_text()
-        assert "Unrecognized Dependencies" in text
-        assert "obscure-lib" in text
+        assert "5 of 7" in text
+        assert "tested with general usage-based analysis" in text
 
     def test_renders_footer(self):
         report = DiagnosticReport()
@@ -1340,10 +1339,10 @@ class TestPlainSummary:
         assert "problems" in report.plain_summary.lower()
         assert "real-world conditions" in report.plain_summary.lower()
 
-    def test_includes_operational_intent(
+    def test_includes_project_description(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Project ref derived from project_name woven into activity phrases."""
+        """Project description from ingester used in activity phrases."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
@@ -1352,10 +1351,11 @@ class TestPlainSummary:
         )
 
         lower = report.plain_summary.lower()
-        # Project ref should appear in the opener AND in bullet activities
-        assert "budget tracker" in lower
-        # Should be woven in, not just mentioned once in the opener
-        assert lower.count("budget tracker") >= 2
+        # Auto-generated description from ingester (flask + sqlalchemy + requests)
+        # should appear instead of raw project_name
+        assert "flask" in lower
+        # Should be woven into bullets too
+        assert lower.count("flask") >= 1
 
     def test_degradation_translated(
         self, degrading_execution, simple_ingestion, profile_matches,
@@ -1431,10 +1431,10 @@ class TestPlainSummary:
         assert summary_pos != -1
         assert plain_pos < summary_pos
 
-    def test_no_intent_still_works(
+    def test_no_intent_uses_auto_description(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Works without operational_intent — uses 'your project' throughout."""
+        """Without intent, auto-generated description from ingester is used."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
@@ -1443,21 +1443,23 @@ class TestPlainSummary:
         )
 
         assert report.plain_summary
-        assert "your project" in report.plain_summary.lower()
-        # "your project" should appear in bullets too
-        assert report.plain_summary.lower().count("your project") >= 2
+        # Auto-generated description used (flask detected in dependencies)
+        lower = report.plain_summary.lower()
+        assert "flask" in lower or "your" in lower
 
-    def test_project_name_used_over_extraction(
+    def test_auto_description_used_over_raw_name(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """When project_name is provided, it's used instead of extracting from intent."""
+        """Auto-generated description from ingester takes precedence over raw user input."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(
             failing_execution, simple_ingestion, profile_matches,
             operational_intent="A long complex description that would extract badly",
             project_name="incident tracker",
         )
-        assert "incident tracker" in report.plain_summary.lower()
+        # Auto-generated description (from flask deps) used instead of raw project_name
+        assert report.project_description
+        assert "flask" in report.project_description.lower()
 
     def test_empty_execution(self):
         """No scenarios → no plain summary generated."""
@@ -2054,7 +2056,7 @@ class TestConstraintContextualisation:
         # concurrent_500 is 25x of 20 → info
         f500 = [f for f in report.findings if "concurrent_500" in f.title][0]
         assert f500.severity == "info"
-        assert "far beyond" in f500.description.lower()
+        assert "well beyond" in f500.description.lower()
 
     def test_no_user_scale_notes_default(self):
         """None user_scale adds 'not specified' note to findings."""

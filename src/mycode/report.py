@@ -123,11 +123,14 @@ class DiagnosticReport:
         degradation_points: Where performance degraded under load.
         version_flags: Version discrepancy warnings.
         unrecognized_deps: Dependencies without profiles.
+        recognized_dep_count: Count of dependencies with targeted profiles.
         scenarios_run: Total scenarios executed.
         scenarios_passed: Scenarios with no critical findings.
         scenarios_failed: Scenarios with errors or resource cap hits.
         total_errors: Total error count across all scenarios.
         operational_context: The user's stated intent, for framing.
+        project_description: Auto-generated description from ingester analysis.
+        confidence_note: Note about sandbox limitations affecting accuracy.
         model_used: Which LLM produced the narrative (or "offline").
         token_usage: LLM token consumption.
     """
@@ -139,11 +142,14 @@ class DiagnosticReport:
     degradation_points: list[DegradationPoint] = field(default_factory=list)
     version_flags: list[str] = field(default_factory=list)
     unrecognized_deps: list[str] = field(default_factory=list)
+    recognized_dep_count: int = 0
     scenarios_run: int = 0
     scenarios_passed: int = 0
     scenarios_failed: int = 0
     total_errors: int = 0
     operational_context: str = ""
+    project_description: str = ""
+    confidence_note: str = ""
     model_used: str = "offline"
     token_usage: dict = field(
         default_factory=lambda: {"input_tokens": 0, "output_tokens": 0}
@@ -175,7 +181,26 @@ class DiagnosticReport:
         if self.total_errors:
             sections.append(f"Total errors captured: {self.total_errors}")
 
-        # Findings
+        # Confidence note
+        if self.confidence_note:
+            sections.append(f"\n{self.confidence_note}")
+
+        # Dependency coverage
+        total_deps = self.recognized_dep_count + len(self.unrecognized_deps)
+        if total_deps > 0 and self.unrecognized_deps:
+            sections.append(
+                f"\nmyCode tested {self.recognized_dep_count} of "
+                f"{total_deps} dependencies with targeted scenarios. "
+                f"{len(self.unrecognized_deps)} "
+                f"{'dependency was' if len(self.unrecognized_deps) == 1 else 'dependencies were'} "
+                f"tested with general usage-based analysis."
+            )
+
+        # Findings — split by severity context
+        criticals = [f for f in self.findings if f.severity == "critical"]
+        warnings = [f for f in self.findings if f.severity == "warning"]
+        infos = [f for f in self.findings if f.severity == "info"]
+
         if not self.findings and self.scenarios_run:
             sections.append("\n" + "-" * 40)
             sections.append("  Findings")
@@ -185,36 +210,33 @@ class DiagnosticReport:
                 "No errors, resource limit hits, or degradation detected "
                 "under the conditions tested."
             )
-        elif self.findings:
-            sections.append("\n" + "-" * 40)
-            sections.append("  Findings")
-            sections.append("-" * 40)
-            for f in self.findings:
-                marker = {
-                    "critical": "[!!]",
-                    "warning": "[! ]",
-                    "info": "[  ]",
-                }.get(f.severity, "[  ]")
-                title = f.title
-                if f.group_count > 1:
-                    title += f" (and {f.group_count - 1} similar)"
-                sections.append(f"\n{marker} {title}")
-                if f.description:
-                    sections.append(f"    {f.description}")
-                if f.details:
-                    sections.append(f"    Details: {f.details}")
-                if f.grouped_findings:
-                    names = []
-                    for gf in f.grouped_findings:
-                        # Extract the scenario name from the grouped finding title
-                        parts = gf.title.split(": ", 1)
-                        names.append(parts[1] if len(parts) > 1 else gf.title)
-                    shown = names[:5]
-                    extra = len(names) - 5
-                    also_line = ", ".join(shown)
-                    if extra > 0:
-                        also_line += f" +{extra} more"
-                    sections.append(f"    Also: {also_line}")
+        else:
+            if criticals:
+                sections.append("\n" + "-" * 40)
+                sections.append(
+                    "  Fix Before Launch"
+                )
+                sections.append("-" * 40)
+                for f in criticals:
+                    self._render_text_finding(sections, f)
+
+            if warnings:
+                sections.append("\n" + "-" * 40)
+                sections.append(
+                    "  Worth Investigating"
+                )
+                sections.append("-" * 40)
+                for f in warnings:
+                    self._render_text_finding(sections, f)
+
+            if infos:
+                sections.append("\n" + "-" * 40)
+                sections.append(
+                    "  Good to Know"
+                )
+                sections.append("-" * 40)
+                for f in infos:
+                    self._render_text_finding(sections, f)
 
         # Incomplete tests (environment issues, not real failures)
         if self.incomplete_tests:
@@ -267,18 +289,6 @@ class DiagnosticReport:
             for vf in self.version_flags:
                 sections.append(f"  - {vf}")
 
-        # Unrecognized deps
-        if self.unrecognized_deps:
-            sections.append("\n" + "-" * 40)
-            sections.append("  Unrecognized Dependencies")
-            sections.append("-" * 40)
-            sections.append(
-                "  The following dependencies have no profile in the component "
-                "library. Generic stress testing was applied."
-            )
-            for dep in self.unrecognized_deps:
-                sections.append(f"  - {dep}")
-
         # Footer
         sections.append("\n" + "=" * 60)
         sections.append(
@@ -288,6 +298,34 @@ class DiagnosticReport:
         sections.append("=" * 60)
 
         return "\n".join(sections)
+
+    @staticmethod
+    def _render_text_finding(sections: list[str], f: "Finding") -> None:
+        """Render a single finding for plain text output."""
+        marker = {
+            "critical": "[!!]",
+            "warning": "[! ]",
+            "info": "[  ]",
+        }.get(f.severity, "[  ]")
+        title = f.title
+        if f.group_count > 1:
+            title += f" (and {f.group_count - 1} similar)"
+        sections.append(f"\n{marker} {title}")
+        if f.description:
+            sections.append(f"    {f.description}")
+        if f.details:
+            sections.append(f"    Details: {f.details}")
+        if f.grouped_findings:
+            names = []
+            for gf in f.grouped_findings:
+                parts = gf.title.split(": ", 1)
+                names.append(parts[1] if len(parts) > 1 else gf.title)
+            shown = names[:5]
+            extra = len(names) - 5
+            also_line = ", ".join(shown)
+            if extra > 0:
+                also_line += f" +{extra} more"
+            sections.append(f"    Also: {also_line}")
 
     def as_markdown(self, project_name: str = "", date: str = "") -> str:
         """Render the report as a clean markdown file for non-technical users.
@@ -300,13 +338,14 @@ class DiagnosticReport:
 
         if not date:
             date = _dt.date.today().isoformat()
-        if not project_name:
-            project_name = "Your Project"
+
+        # Use auto-generated description, then fall back to project_name
+        display_name = self.project_description or project_name or "Your Project"
 
         lines: list[str] = []
 
         # Title
-        lines.append(f"# myCode Report: {project_name}")
+        lines.append(f"# myCode Report: {display_name}")
         lines.append("")
         lines.append(f"**Date:** {date}")
         lines.append("")
@@ -320,9 +359,6 @@ class DiagnosticReport:
         )
         warning_count = sum(
             1 for f in self.findings if f.severity == "warning"
-        )
-        info_count = sum(
-            1 for f in self.findings if f.severity == "info"
         )
 
         if total == 0:
@@ -343,6 +379,23 @@ class DiagnosticReport:
         )
         lines.append("")
 
+        # Confidence note
+        if self.confidence_note:
+            lines.append(f"> {self.confidence_note}")
+            lines.append("")
+
+        # Dependency coverage
+        total_deps = self.recognized_dep_count + len(self.unrecognized_deps)
+        if total_deps > 0 and self.unrecognized_deps:
+            lines.append(
+                f"myCode tested {self.recognized_dep_count} of "
+                f"{total_deps} dependencies with targeted scenarios. "
+                f"{len(self.unrecognized_deps)} "
+                f"{'dependency was' if len(self.unrecognized_deps) == 1 else 'dependencies were'} "
+                f"tested with general usage-based analysis."
+            )
+            lines.append("")
+
         # Plain-language summary
         if self.plain_summary:
             lines.append("## Summary")
@@ -355,41 +408,39 @@ class DiagnosticReport:
             lines.append(self.summary)
             lines.append("")
 
-        # Findings grouped by severity
+        # Findings grouped by severity with constraint context
         if self.findings:
-            # Critical findings
             criticals = [f for f in self.findings if f.severity == "critical"]
             warnings = [f for f in self.findings if f.severity == "warning"]
             infos = [f for f in self.findings if f.severity == "info"]
 
             if criticals:
-                lines.append("## Critical Issues")
+                lines.append("## Fix Before Launch")
                 lines.append("")
                 lines.append(
-                    "These problems will likely cause failures for your "
-                    "users under normal conditions. You should address "
-                    "them before deploying."
+                    "These problems will affect your users under the "
+                    "conditions you described. Address them before deploying."
                 )
                 lines.append("")
                 for f in criticals:
                     _render_finding(lines, f)
 
             if warnings:
-                lines.append("## Warnings")
+                lines.append("## Worth Investigating")
                 lines.append("")
                 lines.append(
-                    "These aren't breaking yet, but they could become "
-                    "problems as your project grows or usage increases."
+                    "These aren't breaking under your stated conditions, "
+                    "but they could become problems as usage grows."
                 )
                 lines.append("")
                 for f in warnings:
                     _render_finding(lines, f)
 
             if infos:
-                lines.append("## Notes")
+                lines.append("## Good to Know")
                 lines.append("")
                 lines.append(
-                    "Minor observations worth knowing about."
+                    "Beyond your current needs, but useful context."
                 )
                 lines.append("")
                 for f in infos:
@@ -440,20 +491,6 @@ class DiagnosticReport:
             lines.append("")
             for vf in self.version_flags:
                 lines.append(f"- {vf}")
-            lines.append("")
-
-        # Unrecognized deps
-        if self.unrecognized_deps:
-            lines.append("## Unrecognized Dependencies")
-            lines.append("")
-            lines.append(
-                "myCode doesn't have detailed profiles for these "
-                "dependencies yet. Generic stress testing was applied, "
-                "which may not catch all issues."
-            )
-            lines.append("")
-            for dep in self.unrecognized_deps:
-                lines.append(f"- {dep}")
             lines.append("")
 
         # Footer
@@ -513,11 +550,15 @@ class DiagnosticReport:
         return {
             "summary": self.summary,
             "plain_summary": self.plain_summary,
+            "project_description": self.project_description,
+            "confidence_note": self.confidence_note,
             "statistics": {
                 "scenarios_run": self.scenarios_run,
                 "scenarios_passed": self.scenarios_passed,
                 "scenarios_failed": self.scenarios_failed,
                 "total_errors": self.total_errors,
+                "recognized_dependencies": self.recognized_dep_count,
+                "unrecognized_dependencies": len(self.unrecognized_deps),
             },
             "findings": [_finding_dict(f) for f in self.findings],
             "incomplete_tests": [_finding_dict(f) for f in self.incomplete_tests],
@@ -615,6 +656,21 @@ class ReportGenerator:
         report = DiagnosticReport(
             operational_context=operational_intent,
             scenarios_run=len(execution.scenario_results),
+        )
+
+        # 0a. Generate project description from ingester analysis
+        report.project_description = _generate_project_description(
+            ingestion, project_name,
+        )
+
+        # 0b. Build confidence note from incomplete tests
+        report.confidence_note = _build_confidence_note(
+            ingestion, profile_matches,
+        )
+
+        # 0c. Track dependency coverage
+        report.recognized_dep_count = sum(
+            1 for pm in profile_matches if pm.profile is not None
         )
 
         # 1. Analyze execution results → findings + degradation
@@ -750,7 +806,11 @@ class ReportGenerator:
 
             # Check for failures
             if sr.status == "failed":
-                desc = sr.summary or "Scenario failed during execution."
+                base_desc = sr.summary or "Scenario failed during execution."
+                consequence = _consequence_for_category(
+                    sr.scenario_category, sr.scenario_name,
+                )
+                desc = f"{base_desc} {consequence}" if consequence else base_desc
                 f = Finding(
                     title=f"Scenario failed: {sr.scenario_name}",
                     severity="critical",
@@ -770,15 +830,20 @@ class ReportGenerator:
                 cap_detail = self._summarize_cap_hits(sr)
                 if load_detail:
                     cap_detail = f"{cap_detail}{load_detail}"
+                consequence = _consequence_for_category(
+                    sr.scenario_category, sr.scenario_name,
+                )
+                base_desc = (
+                    f"Your code exceeded safe operating limits "
+                    f"during this test."
+                )
+                if consequence:
+                    base_desc = f"{base_desc} {consequence}"
                 f = Finding(
                     title=f"Resource limit hit: {sr.scenario_name}",
                     severity="critical",
                     category=sr.scenario_category,
-                    description=(
-                        f"The test hit a resource cap during {sr.scenario_name}. "
-                        f"This means the code exceeded safe operating limits "
-                        f"under stress."
-                    ),
+                    description=base_desc,
                     details=cap_detail,
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
@@ -793,13 +858,19 @@ class ReportGenerator:
                 err_detail = self._summarize_errors(sr)
                 if load_detail:
                     err_detail = f"{err_detail}{load_detail}"
+                consequence = _consequence_for_category(
+                    sr.scenario_category, sr.scenario_name,
+                )
+                base_desc = (
+                    f"{sr.total_errors} error(s) occurred during this test."
+                )
+                if consequence:
+                    base_desc = f"{base_desc} {consequence}"
                 f = Finding(
                     title=f"Errors during: {sr.scenario_name}",
                     severity="warning",
                     category=sr.scenario_category,
-                    description=(
-                        f"{sr.total_errors} error(s) occurred during this test."
-                    ),
+                    description=base_desc,
                     details=err_detail,
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
@@ -1040,9 +1111,9 @@ class ReportGenerator:
                     finding.severity = "critical"
                     finding.description = (
                         f"You said {user_scale} users. "
-                        f"Under simulated concurrency, this issue appears "
-                        f"at {load_level} concurrent sessions — within "
-                        f"your stated capacity. "
+                        f"This breaks at {load_level} concurrent users "
+                        f"— that's within your stated needs. "
+                        f"This is a problem you need to fix before launch. "
                         f"{finding.description}"
                     )
                 elif ratio <= 3.0:
@@ -1050,9 +1121,10 @@ class ReportGenerator:
                     finding.severity = "warning"
                     finding.description = (
                         f"You said {user_scale} users. "
-                        f"Under simulated concurrency, this issue appears "
-                        f"at {load_level} concurrent sessions "
-                        f"({ratio:.1f}x your stated capacity). "
+                        f"This breaks at {load_level} concurrent users "
+                        f"({ratio:.1f}x your stated needs). "
+                        f"Not a problem today, but won't take much growth "
+                        f"to hit this. "
                         f"{finding.description}"
                     )
                 else:
@@ -1060,9 +1132,9 @@ class ReportGenerator:
                     finding.severity = "info"
                     finding.description = (
                         f"You said {user_scale} users. "
-                        f"Under simulated concurrency, this issue appears "
-                        f"at {load_level} — far beyond your stated "
-                        f"capacity ({ratio:.0f}x). "
+                        f"This breaks at {load_level} concurrent users "
+                        f"— well beyond your stated needs ({ratio:.0f}x). "
+                        f"Worth knowing, but not urgent. "
                         f"{finding.description}"
                     )
             elif load_level is not None and not is_concurrency:
@@ -1199,31 +1271,14 @@ class ReportGenerator:
         profile_matches: list[ProfileMatch],
         report: DiagnosticReport,
     ) -> None:
-        """Flag dependencies without component library profiles."""
+        """Track dependencies without component library profiles.
+
+        These are noted in the dependency coverage line in the report
+        output rather than as alarming "unrecognized" findings.
+        """
         for match in profile_matches:
             if match.profile is None:
                 report.unrecognized_deps.append(match.dependency_name)
-
-        if report.unrecognized_deps:
-            n = len(report.unrecognized_deps)
-            shown = report.unrecognized_deps[:5]
-            desc = ", ".join(shown)
-            if n > 5:
-                desc += f", and {n - 5} more"
-            desc += (
-                f" — {'this dependency has' if n == 1 else 'these have'} "
-                "no profile in the component library, so generic stress "
-                "testing was applied. Results may be less targeted."
-            )
-            report.findings.append(Finding(
-                title=(
-                    f"{n} unrecognized "
-                    f"{'dependency' if n == 1 else 'dependencies'}"
-                ),
-                severity="info",
-                description=desc,
-                affected_dependencies=report.unrecognized_deps[:10],
-            ))
 
     # ── Summary Generation ──
 
@@ -1244,7 +1299,10 @@ class ReportGenerator:
         lines: list[str] = []
 
         # ── Project reference ──
-        if project_name:
+        # Prefer the auto-generated description over raw user input
+        if report.project_description and report.project_description != "Your Project":
+            project_ref = f"your {report.project_description}"
+        elif project_name and len(project_name) <= 40:
             project_ref = f"your {project_name}"
         elif operational_intent:
             ref = _extract_project_ref(operational_intent)
@@ -2110,6 +2168,173 @@ class ReportGenerator:
                     result.append(rep)
 
         return result
+
+
+# ── Project Description & Confidence ──
+
+
+def _generate_project_description(
+    ingestion: IngestionResult, project_name: str = "",
+) -> str:
+    """Generate a short project description from ingester analysis.
+
+    Uses dependency names and project structure to produce something like
+    "Flask web application with pandas data processing" instead of
+    parroting whatever the user typed.
+    """
+    # Identify frameworks and key libraries
+    dep_names = {d.name.lower() for d in ingestion.dependencies if not d.is_dev}
+
+    # Framework detection
+    framework = ""
+    _FRAMEWORKS = {
+        "flask": "Flask web application",
+        "fastapi": "FastAPI web application",
+        "streamlit": "Streamlit dashboard",
+        "gradio": "Gradio interface",
+        "express": "Express web application",
+        "next": "Next.js application",
+        "react": "React application",
+        "svelte": "Svelte application",
+        "django": "Django web application",
+    }
+    for dep, label in _FRAMEWORKS.items():
+        if dep in dep_names:
+            framework = label
+            break
+
+    # Notable capabilities
+    capabilities: list[str] = []
+    if dep_names & {"pandas", "numpy", "polars"}:
+        capabilities.append("data processing")
+    if dep_names & {"openai", "anthropic", "langchain", "llamaindex"}:
+        capabilities.append("AI/LLM integration")
+    if dep_names & {"sqlalchemy", "sqlite3", "prisma", "mongoose"}:
+        capabilities.append("database access")
+    if dep_names & {"requests", "httpx", "axios"}:
+        capabilities.append("external API calls")
+    if dep_names & {"matplotlib", "plotly", "chartjs"}:
+        capabilities.append("data visualization")
+
+    if framework and capabilities:
+        return f"{framework} with {', '.join(capabilities[:2])}"
+    if framework:
+        return framework
+    if capabilities:
+        parts = ", ".join(capabilities[:2])
+        return f"Application with {parts}"
+
+    # Fall back to cleaned project_name, but don't parrot long strings
+    if project_name and len(project_name) <= 40:
+        return project_name
+    if project_name:
+        # Truncate at word boundary
+        cut = project_name[:40].rfind(" ")
+        if cut > 10:
+            return project_name[:cut]
+        return project_name[:40]
+
+    return "Your Project"
+
+
+def _build_confidence_note(
+    ingestion: IngestionResult,
+    profile_matches: list["ProfileMatch"],
+) -> str:
+    """Build a confidence note about sandbox limitations.
+
+    Returns a note like "2 of 7 dependencies could not be installed..."
+    or empty string if everything looks good.
+    """
+    # Count dependencies that failed to install (missing in environment)
+    missing_deps = [d for d in ingestion.dependencies if d.is_missing and not d.is_dev]
+    total_deps = [d for d in ingestion.dependencies if not d.is_dev]
+
+    if not missing_deps:
+        return ""
+
+    installed_names = [
+        d.name for d in total_deps if not d.is_missing
+    ]
+    missing_names = [d.name for d in missing_deps]
+
+    parts: list[str] = []
+    parts.append(
+        f"{len(missing_deps)} of {len(total_deps)} dependencies "
+        f"could not be installed in the test environment."
+    )
+    if installed_names:
+        shown = installed_names[:4]
+        parts.append(
+            f"Findings involving {', '.join(shown)} are fully tested."
+        )
+    if missing_names:
+        shown = missing_names[:3]
+        parts.append(
+            f"Findings involving {', '.join(shown)} may be incomplete."
+        )
+    return " ".join(parts)
+
+
+def _consequence_for_category(category: str, scenario_name: str = "") -> str:
+    """Return a "so what?" consequence for a finding based on its category.
+
+    Translates technical categories into user-meaningful impact statements.
+    """
+    name_lower = scenario_name.lower()
+    _CONSEQUENCES: dict[str, str] = {
+        "concurrent_execution": (
+            "In practice, this means your app will become unusable "
+            "when multiple people use it at the same time."
+        ),
+        "data_volume_scaling": (
+            "This means your app will slow down or crash "
+            "when handling larger amounts of data."
+        ),
+        "memory_profiling": (
+            "This means your app will use increasingly more memory "
+            "over time, eventually crashing or becoming unresponsive."
+        ),
+        "edge_case_input": (
+            "This means unexpected input from users could crash your app "
+            "instead of showing an error message."
+        ),
+        "blocking_io": (
+            "This means your app will freeze or become very slow "
+            "when waiting for external services while handling requests."
+        ),
+        "gil_contention": (
+            "This means CPU-heavy operations will bottleneck "
+            "when running alongside other tasks."
+        ),
+        "async_failures": (
+            "This means async operations may fail silently or pile up "
+            "under real-world load."
+        ),
+        "event_listener_accumulation": (
+            "This means your app will slowly leak memory "
+            "during long user sessions."
+        ),
+        "state_management_degradation": (
+            "This means your app's state will become corrupted or slow "
+            "during extended use."
+        ),
+    }
+    consequence = _CONSEQUENCES.get(category, "")
+
+    # Coupling-specific overrides
+    if "coupling" in name_lower:
+        if "api" in name_lower:
+            return (
+                "This means connected components may fail together "
+                "when external services are slow or unavailable."
+            )
+        if "state" in name_lower or "render" in name_lower:
+            return (
+                "This means shared state between components could become "
+                "inconsistent under load."
+            )
+    return consequence
 
 
 # ── Module Helpers ──

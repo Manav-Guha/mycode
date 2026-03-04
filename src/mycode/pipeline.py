@@ -22,6 +22,7 @@ Nine stages:
 Pure orchestration layer — no LLM dependency of its own.
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -255,6 +256,56 @@ def detect_language(project_path: Path) -> str:
 
 
 # ── Pipeline ──
+
+
+# ── LLM Report Counter ──
+
+_LLM_REPORTS_INITIAL = 3
+_CONFIG_DIR = Path.home() / ".mycode"
+_CONFIG_PATH = _CONFIG_DIR / "config.json"
+
+
+def _read_config() -> dict:
+    """Read ~/.mycode/config.json, returning empty dict if missing."""
+    try:
+        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_config(data: dict) -> None:
+    """Write ~/.mycode/config.json, creating directories if needed."""
+    try:
+        _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        _CONFIG_PATH.write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Could not write config: %s", exc)
+
+
+def check_llm_report_allowance() -> int:
+    """Return the number of free LLM reports remaining.
+
+    Returns _LLM_REPORTS_INITIAL if the config file doesn't exist yet
+    (first run hasn't happened).  Returns 0 if the user has exhausted
+    their free reports.
+    """
+    data = _read_config()
+    return data.get("llm_reports_remaining", _LLM_REPORTS_INITIAL)
+
+
+def decrement_llm_report_counter() -> int:
+    """Decrement the free LLM report counter and return the new value.
+
+    Creates the config file on first call if it doesn't exist.
+    """
+    data = _read_config()
+    remaining = data.get("llm_reports_remaining", _LLM_REPORTS_INITIAL)
+    remaining = max(0, remaining - 1)
+    data["llm_reports_remaining"] = remaining
+    _write_config(data)
+    return remaining
 
 
 def run_pipeline(config: PipelineConfig) -> PipelineResult:

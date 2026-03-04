@@ -29,6 +29,9 @@ from mycode.engine import (
     _SCENARIO_TIMEOUT_CAP,
     _RESULTS_START,
     _RESULTS_END,
+    _validate_harness,
+    _validate_python_harness,
+    _validate_js_harness,
 )
 from mycode.ingester import (
     CouplingPoint,
@@ -1653,3 +1656,117 @@ class TestPyLibBodies:
         )
         # pure_computation is in _PY_COUPLING_BODIES, should use that
         assert "_workload_for_source" in harness
+
+
+# ── Harness Syntax Validation Tests ──
+
+
+class TestHarnessValidation:
+    """Tests for pre-execution harness syntax validation."""
+
+    def test_valid_python_passes(self):
+        """Valid Python code passes validation."""
+        code = "import sys\nprint('hello')\nx = 1 + 2\n"
+        assert _validate_python_harness(code) == ""
+
+    def test_invalid_python_detected(self):
+        """Python syntax errors are detected."""
+        code = "def foo(\n  x = 1\n"  # unclosed paren
+        result = _validate_python_harness(code)
+        assert result != ""
+        assert "syntax error" in result.lower()
+
+    def test_valid_js_passes(self):
+        """Valid JS code passes validation."""
+        code = "function foo() { return [1, 2, 3]; }\nfoo();\n"
+        assert _validate_js_harness(code) == ""
+
+    def test_js_unclosed_brace_detected(self):
+        """Unclosed JS brace is detected."""
+        code = "function foo() {\n  console.log('hello');\n"
+        result = _validate_js_harness(code)
+        assert result != ""
+        assert "unclosed" in result.lower() or "still open" in result.lower()
+
+    def test_js_mismatched_bracket_detected(self):
+        """Mismatched JS brackets are detected."""
+        code = "var x = [1, 2, 3};\n"
+        result = _validate_js_harness(code)
+        assert result != ""
+        assert "mismatched" in result.lower() or "unexpected" in result.lower()
+
+    def test_js_strings_not_false_positive(self):
+        """Brackets inside JS strings don't cause false positives."""
+        code = 'var x = "hello { world }";\nvar y = { a: 1 };\n'
+        assert _validate_js_harness(code) == ""
+
+    def test_js_comments_not_false_positive(self):
+        """Brackets inside JS comments don't cause false positives."""
+        code = "// this has { unclosed\nvar x = { a: 1 };\n/* also { here */\n"
+        assert _validate_js_harness(code) == ""
+
+    def test_validate_harness_routes_correctly(self):
+        """_validate_harness dispatches to correct validator."""
+        assert _validate_harness("x = 1", "python") == ""
+        assert _validate_harness("var x = 1;", "node") == ""
+        assert _validate_harness("def foo(:", "python") != ""
+
+    def test_harness_generation_failure_result(self, tmp_path):
+        """Invalid harness produces HarnessGenerationError, not project failure."""
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(session, _make_ingestion(), language="python")
+
+        # Monkey-patch _build_harness to return invalid Python
+        original = engine._build_harness
+        engine._build_harness = lambda *a, **kw: "def broken(\n"
+
+        scenario = StressTestScenario(
+            name="test_broken_harness",
+            description="Test with broken harness",
+            category="data_volume_scaling",
+            test_config={"steps": [], "resource_limits": {}},
+        )
+        result = engine._execute_scenario(scenario)
+
+        assert result.status == "failed"
+        assert "harness generation failure" in result.summary.lower()
+        assert result.steps[0].errors[0]["type"] == "HarnessGenerationError"
+        assert "mycode limitation" in result.steps[0].errors[0]["message"].lower()
+
+        # Restore
+        engine._build_harness = original
+
+    def test_all_python_harness_bodies_valid(self):
+        """Every built-in Python harness body produces valid syntax."""
+        for name, body in _CATEGORY_BODIES.items():
+            script = _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
+            error = _validate_python_harness(script)
+            assert error == "", f"Python body '{name}' has syntax error: {error}"
+
+    def test_all_python_coupling_bodies_valid(self):
+        """Every Python coupling body produces valid syntax."""
+        for name, body in _PY_COUPLING_BODIES.items():
+            script = _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
+            error = _validate_python_harness(script)
+            assert error == "", f"Python coupling body '{name}' has syntax error: {error}"
+
+    def test_all_python_lib_bodies_valid(self):
+        """Every Python lib body produces valid syntax."""
+        for name, body in _PY_LIB_BODIES.items():
+            script = _HARNESS_PREAMBLE + "\n" + body + "\n" + _HARNESS_POSTAMBLE
+            error = _validate_python_harness(script)
+            assert error == "", f"Python lib body '{name}' has syntax error: {error}"
+
+    def test_all_js_harness_bodies_valid(self):
+        """Every built-in JS harness body has balanced brackets."""
+        for name, body in _JS_CATEGORY_BODIES.items():
+            script = _JS_HARNESS_PREAMBLE + "\n" + body + "\n" + _JS_HARNESS_POSTAMBLE
+            error = _validate_js_harness(script)
+            assert error == "", f"JS body '{name}' has bracket error: {error}"
+
+    def test_all_js_coupling_bodies_valid(self):
+        """Every JS coupling body has balanced brackets."""
+        for name, body in _JS_COUPLING_BODIES.items():
+            script = _JS_HARNESS_PREAMBLE + "\n" + body + "\n" + _JS_HARNESS_POSTAMBLE
+            error = _validate_js_harness(script)
+            assert error == "", f"JS coupling body '{name}' has bracket error: {error}"
