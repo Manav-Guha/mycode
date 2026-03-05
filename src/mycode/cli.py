@@ -15,6 +15,10 @@ Options::
     --skip-version-check  Skip PyPI/npm version lookups
     --non-interactive     Skip conversational interface
     --json-output         Write structured JSON report alongside terminal output
+    --report              Write markdown report to the project directory
+    --containerised       Run analysis inside a Docker container (full isolation)
+    --python-version VER  Python version for the Docker container (default: 3.11)
+    --yes / -y            Skip confirmation prompts
     --verbose / -v        Enable verbose logging
 """
 
@@ -87,6 +91,13 @@ def _build_json_report(result: PipelineResult, project_path: Path) -> dict:
         "constraints": constraints_dict,
         **report_dict,
     }
+
+
+_UNTRUSTED_CODE_WARNING = (
+    "myCode will install this project's dependencies and execute test code "
+    "in a sandboxed environment. Running untrusted code carries inherent "
+    "risk. Use --containerised for full isolation. Proceed? [Y/n] "
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -168,7 +179,53 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Write a clean markdown report (mycode-report.md) to the project directory",
     )
+    parser.add_argument(
+        "--containerised",
+        action="store_true",
+        default=False,
+        help="Run analysis inside a Docker container for full isolation",
+    )
+    parser.add_argument(
+        "--python-version",
+        default="3.11",
+        help="Python version for the Docker container (default: 3.11)",
+    )
+    parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        default=False,
+        help="Skip confirmation prompts (e.g. untrusted code warning)",
+    )
     return parser
+
+
+def _collect_passthrough_args(args: argparse.Namespace) -> list[str]:
+    """Build a list of CLI flags to pass through to the container.
+
+    Excludes ``--containerised``, ``--python-version``, ``--yes``,
+    ``project_path``, ``--json-output``, and ``--report`` (which cannot
+    write to a read-only mount).
+    """
+    passthrough: list[str] = []
+    if args.offline:
+        passthrough.append("--offline")
+    if args.language:
+        passthrough.extend(["--language", args.language])
+    if args.consent:
+        passthrough.append("--consent")
+    if args.api_key:
+        passthrough.extend(["--api-key", args.api_key])
+    if args.api_base:
+        passthrough.extend(["--api-base", args.api_base])
+    if args.model:
+        passthrough.extend(["--model", args.model])
+    if args.skip_version_check:
+        passthrough.append("--skip-version-check")
+    if args.verbose:
+        passthrough.append("--verbose")
+    if args.non_interactive:
+        passthrough.append("--non-interactive")
+    return passthrough
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -188,6 +245,51 @@ def main(argv: list[str] | None = None) -> int:
     if not project.is_dir():
         print(f"Error: Project path is not a directory: {project}", file=sys.stderr)
         return 1
+
+    # ── Containerised mode ──
+    if args.containerised:
+        from mycode.container import ContainerError, is_docker_available, run_containerised
+
+        if not is_docker_available():
+            print(
+                "Error: Docker is not available. To use --containerised, "
+                "install Docker and ensure the daemon is running.\n"
+                "  macOS / Windows: https://www.docker.com/products/docker-desktop\n"
+                "  Linux: https://docs.docker.com/engine/install/",
+                file=sys.stderr,
+            )
+            return 1
+
+        if args.json_output or args.report:
+            print(
+                "Note: --json-output and --report are not supported with "
+                "--containerised (project is mounted read-only). "
+                "The full report is displayed in the terminal.",
+            )
+
+        passthrough = _collect_passthrough_args(args)
+        try:
+            return run_containerised(
+                project_path=project,
+                cli_args=passthrough,
+                python_version=args.python_version,
+            )
+        except ContainerError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    # ── Untrusted code warning (non-containerised mode) ──
+    is_interactive = sys.stdin.isatty()
+    skip_warning = args.yes or args.non_interactive or not is_interactive
+    if not skip_warning:
+        try:
+            answer = input(_UNTRUSTED_CODE_WARNING)
+            if answer.strip().lower() in ("n", "no"):
+                print("Aborted. Use --containerised for full Docker isolation.")
+                return 0
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            return 0
 
     # Build LLM config — flag takes precedence, then env var
     api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
@@ -220,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("This is your last free AI-powered analysis.")
 
     # Build pipeline config
-    non_interactive = args.non_interactive or not sys.stdin.isatty()
+    non_interactive = args.non_interactive or not is_interactive
     config = PipelineConfig(
         project_path=project,
         language=args.language,

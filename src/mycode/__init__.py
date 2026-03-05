@@ -76,6 +76,12 @@ from mycode.session import (
     SessionResult,
     VenvCreationError,
 )
+from mycode.container import (
+    ContainerError,
+    build_image,
+    is_docker_available,
+    run_containerised,
+)
 
 __all__ = [
     # Session Manager (C1)
@@ -144,4 +150,9 @@ __all__ = [
     "SessionRecord",
     "RecorderError",
     "ConsentError",
+    # Docker Container (C5)
+    "ContainerError",
+    "build_image",
+    "is_docker_available",
+    "run_containerised",
 ]

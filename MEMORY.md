@@ -1,12 +1,12 @@
 # MEMORY.md — CC Knowledge Base
-# Updated: March 4, 2026 (Session 10)
+# Updated: March 6, 2026 (Session 12)
 # Read this at session start. Update at session end.
 
 ---
 
 ## Session State
 
-- **Test baseline:** 1,012 passing, 5 skipped, 0 failures. Do not break this.
+- **Test baseline:** 1,074 passing, 5 skipped, 0 failures. Do not break this.
 - **PyPI:** Published as `mycode-ai` v0.1.1. Next publish: v0.1.2 after report rework + harness validation landed.
 - **Profiles:** 18 Python + 23 JavaScript = 41 total. JS has 5 more than original spec (chartjs, google_auth_library, plotlyjs, react_chartjs_2, react_plotlyjs).
 - **Corpus data:** 200 Python repos mined (168 successful, 84%). Lovable JS corpus run not yet started.
@@ -49,13 +49,19 @@ These are confirmed by code analysis. Address in priority order:
 - Three free LLM reports: counter in ~/.mycode/config.json, BYOK bypass, exhaustion forces offline mode
 - Test baseline: 954 → 1,012 (+58 new tests). 0 failures.
 
-### Session 12 (NEXT — Docker containerisation):
-- `--containerised` flag for CLI: run myCode inside Docker container for full dependency isolation
-- Solves 68% dependency install failure on heavy projects (AI/ML stacks with C extensions)
-- Untrusted code warning on CLI before dependency installation
-- Docker Engine is free — no cost impact
+### Session 12: COMPLETE
+- Docker containerisation: `--containerised` flag runs myCode inside Docker container
+- New module: src/mycode/container.py (Docker detection, image build, container run)
+- Dockerfile in repo root (python:3.11-slim + Node.js, installs myCode from source)
+- `--python-version` flag (default 3.11) for container Python version
+- `--yes` / `-y` flag to skip confirmation prompts
+- Untrusted code warning when running WITHOUT --containerised (skipped with --yes/--non-interactive)
+- Container: read-only project mount, --network=none, --memory=2g, --cpus=2, auto-destroyed
+- --json-output and --report not supported in containerised mode (read-only mount)
+- Docker availability check with clear install instructions on failure
+- Test baseline: 1,012 → 1,074 (+62 new tests). 0 failures.
 
-### Session 13 (Library taxonomy classifiers + L5 migration):
+### Session 13 (NEXT — Library taxonomy classifiers + L5 migration):
 - Build auto-classifiers: vertical, architectural_pattern, failure_domain, failure_pattern, operational_trigger
 - Classifier inputs: dependency list, framework detection, file structure, scenario category, error type
 - Migrate 168 L5 repo JSON reports into new taxonomy schema
