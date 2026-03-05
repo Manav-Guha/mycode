@@ -54,24 +54,33 @@ These are confirmed by code analysis. Address in priority order:
 - Solves 68% dependency install failure on heavy projects (AI/ML stacks with C extensions)
 - Untrusted code warning on CLI before dependency installation
 - Docker Engine is free — no cost impact
-- This unblocks meaningful results from all subsequent sessions
 
-### Session 13:
+### Session 13 (Library taxonomy classifiers + L5 migration):
+- Build auto-classifiers: vertical, architectural_pattern, failure_domain, failure_pattern, operational_trigger
+- Classifier inputs: dependency list, framework detection, file structure, scenario category, error type
+- Migrate 168 L5 repo JSON reports into new taxonomy schema
+- Reference: myCode-Library-Taxonomy-Schema-v1.md in project knowledge
+
+### Session 14:
 - HTTP-level stress testing for web frameworks
 - Server mode in harness generator: start server process, send real HTTP requests
 
-### Session 14:
-- Run 20-30 Lovable repos with current JS ingester
+### Session 15:
+- Run 20-30 Lovable repos with current JS ingester (taxonomy applied from day one)
 - Collect failure data on regex parser gaps
 - Build real JS parser (Babel/Acorn via Node subprocess) targeting observed gaps
 
-### Session 15:
-- Web interface: Vercel frontend + Railway backend, execution in Docker containers (reuse Session 12 work)
+### Session 16:
+- Web interface: Vercel frontend + Railway backend, Docker containers, tiered compute model
+- Tier 1 (≤30s): static analysis + library pattern matching, no tests
+- Tier 2 (3-7 min): targeted stress tests on highest-risk patterns
+- Tier 3 (15-30 min): full suite, async delivery
 - Non-interactive mode already exists — web backend wraps this
 
-### Session 16:
-- Report polish: collapse incomplete tests list, sharpen consequence statements, translate load levels to plain language
+### Session 17:
+- Report polish: collapse incomplete tests list, translate load levels to plain language
 - Rich terminal output (rich library): coloured output, progress bars
+- Conversational interface redesign: better questions, format-specific scenario generation
 
 ---
 
@@ -83,6 +92,10 @@ These are confirmed by code analysis. Address in priority order:
 - **Web interface is the product** for target market (vibe coders). CLI becomes developer/power-user interface.
 - **Unrecognised dependencies** should be framed positively: "tested 7/9 with targeted scenarios, 2 with usage-based analysis."
 - **False positives:** Add confidence indicators per finding. Note sandbox limitations transparently. Let user calibrate trust.
+- **Library taxonomy:** 8 failure domains, Level 2 patterns grow with data. Every entry classified on ingestion. See myCode-Library-Taxonomy-Schema-v1.md for full spec.
+- **Auto-classifiers required:** vertical, architectural_pattern, failure_domain, failure_pattern, operational_trigger. Build these — don't defer.
+- **Tiered compute model:** Tier 1 (≤30s, static + library lookup, free), Tier 2 (3-7min, targeted tests, 3 free then paid), Tier 3 (15-30min, full suite, async, freemium/enterprise). Each tier creates demand for the next.
+- **Build principle:** Not a finished product, but a sophisticated and intelligent rendition. Don't defer obvious capability. If data exists to classify, classify. If logic is straightforward, build it.
 
 ---
 

@@ -1,8 +1,14 @@
 # myCode — Architectural Constraints & Product Boundaries (CLAUDE.md)
-# Version: 3.2 — March 4, 2026
+# Version: 3.3 — March 5, 2026
 # This file contains ONLY what cannot be discovered from source code.
 # Read source files directly for implementation details.
 # Do not override architectural decisions without explicit human approval.
+
+---
+
+## Build Principle
+
+myCode is not a finished product, but a sophisticated and intelligent rendition of a critical and growing problem. Do not defer obvious capability. If the data exists to make a classification, make it. If the logic is straightforward, build it. The distinction from feature creep: feature creep adds scope; this principle says execute defined scope to its intelligent conclusion.
 
 ---
 
@@ -115,26 +121,51 @@ The report must:
 
 ---
 
-## Current Priorities (as of March 4, 2026)
+## Library Taxonomy & Classification
+
+The component library uses a formal failure taxonomy defined in `myCode-Library-Taxonomy-Schema-v1.md` (project knowledge). Key points for CC:
+
+- **8 failure domains:** Resource exhaustion, Concurrency failure, Scaling collapse, Input handling failure, Dependency failure, Integration failure, Configuration and environment failure, Unclassified
+- **Every library entry must be classified** against this taxonomy on ingestion — not deferred
+- **Auto-classifiers required:** vertical (from dependency + structure), architectural_pattern (from framework + files), failure_domain and failure_pattern (from scenario + error type), operational_trigger (from scenario category)
+- **Unclassified entries** trigger automatic review at 3+ similar entries; human confirms promotion
+- **The library is the moat.** The LLM is interchangeable. The library is not. Every design decision about the library is a decision about competitive durability.
+
+---
+
+## Tiered Compute Model (Web Interface)
+
+Progressive disclosure — each tier creates demand for the next:
+
+- **Tier 1 (≤30s):** Static analysis + library pattern matching. No tests executed. Always free.
+- **Tier 2 (3-7 min):** 8-12 targeted stress tests on highest-risk patterns from Tier 1. Three free, then BYOK/subscription.
+- **Tier 3 (15-30 min):** Full scenario suite. Async delivery ("we'll notify you"). Freemium/enterprise.
+
+---
+
+## Current Priorities (as of March 5, 2026)
 
 ### Critical Path (blocks beta distribution):
-1. ~~Report quality rework~~ — DONE (Session 11: consequence analysis, confidence indicators, constraint contextualisation)
-2. ~~Harness syntax validation~~ — DONE (Session 11: Python via ast.parse, JS via balanced braces)
-3. ~~Three free LLM reports~~ — DONE (Session 11: counter in ~/.mycode/config.json)
-4. Docker containerisation — `--containerised` flag for CLI + web backend. Without this, heavy dependency projects (AI/ML) get 68% install failure. Non-negotiable before beta.
-5. HTTP-level stress testing — start actual server processes, send real HTTP requests for web framework testing
-6. JS ingester upgrade — real parser (Babel/Acorn via Node subprocess) replacing regex-based approach
-7. Web interface — Vercel frontend + Railway backend, execution in Docker containers
-8. Report polish — collapse incomplete tests list, sharpen consequence statements, translate load levels to plain language
-9. Rich terminal output — coloured output, progress bars (using `rich` library)
-10. Untrusted code warning — CLI must warn user before installing dependencies and executing test code
+1. ~~Report quality rework~~ — DONE (Session 11)
+2. ~~Harness syntax validation~~ — DONE (Session 11)
+3. ~~Three free LLM reports~~ — DONE (Session 11)
+4. Docker containerisation — `--containerised` flag for CLI + web backend. Non-negotiable before beta.
+5. Library taxonomy classifiers — auto-classify vertical, architectural_pattern, failure_domain, failure_pattern, operational_trigger on every entry
+6. L5 corpus migration — re-classify 168 repo JSON reports against taxonomy
+7. HTTP-level stress testing — start actual server processes, send real HTTP requests
+8. JS ingester upgrade — real parser (Babel/Acorn via Node subprocess)
+9. Web interface — Vercel frontend + Railway backend + Docker + tiered compute
+10. Report polish — collapse incomplete tests list, translate load levels to plain language
+11. Rich terminal output — coloured output, progress bars
+12. Untrusted code warning — CLI warning before dependency installation
 
 ### Secondary (after beta):
-- Lovable corpus mining (200 JS repos)
+- Lovable corpus mining (200 JS repos — taxonomy applied from day one)
 - Library expansion (scikit-learn, matplotlib, joblib, pillow profiles)
 - Historical comparison / regression mode
 - Freemium tier implementation (Stripe token billing)
 - GitHub Action integration
+- Conversational interface redesign (better questions, format-specific scenario generation)
 
 ---
 
