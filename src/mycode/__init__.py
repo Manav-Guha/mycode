@@ -76,6 +76,21 @@ from mycode.session import (
     SessionResult,
     VenvCreationError,
 )
+from mycode.inference import (
+    CorpusIndex,
+    InferenceEngine,
+    InferenceResult,
+    RiskPrediction,
+)
+from mycode.classifiers import (
+    architectural_pattern_classifier,
+    classify_finding,
+    classify_project,
+    failure_domain_classifier,
+    failure_pattern_classifier,
+    operational_trigger_classifier,
+    vertical_classifier,
+)
 from mycode.container import (
     ContainerError,
     build_image,
@@ -155,4 +170,17 @@ __all__ = [
     "build_image",
     "is_docker_available",
     "run_containerised",
+    # Inference Engine (C7)
+    "InferenceEngine",
+    "InferenceResult",
+    "RiskPrediction",
+    "CorpusIndex",
+    # Classifiers (C6)
+    "classify_finding",
+    "classify_project",
+    "failure_domain_classifier",
+    "failure_pattern_classifier",
+    "operational_trigger_classifier",
+    "vertical_classifier",
+    "architectural_pattern_classifier",
 ]

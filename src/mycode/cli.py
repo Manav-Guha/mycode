@@ -20,6 +20,7 @@ Options::
     --python-version VER  Python version for the Docker container (default: 3.11)
     --yes / -y            Skip confirmation prompts
     --verbose / -v        Enable verbose logging
+    --tier {1,2,3}        Analysis tier (1=inference only, 2=targeted, 3=full)
 """
 
 import argparse
@@ -196,6 +197,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Skip confirmation prompts (e.g. untrusted code warning)",
     )
+    parser.add_argument(
+        "--tier",
+        type=int,
+        choices=[1, 2, 3],
+        default=None,
+        help=(
+            "Analysis tier: 1=inference only (fast, no tests), "
+            "2=targeted stress tests, 3=full suite (default)"
+        ),
+    )
     return parser
 
 
@@ -225,6 +236,8 @@ def _collect_passthrough_args(args: argparse.Namespace) -> list[str]:
         passthrough.append("--verbose")
     if args.non_interactive:
         passthrough.append("--non-interactive")
+    if args.tier:
+        passthrough.extend(["--tier", str(args.tier)])
     return passthrough
 
 
@@ -290,6 +303,65 @@ def main(argv: list[str] | None = None) -> int:
         except (EOFError, KeyboardInterrupt):
             print("\nAborted.")
             return 0
+
+    # ── Tier 1: inference only (no test execution) ──
+    if args.tier == 1:
+        from mycode.inference import InferenceEngine
+        from mycode.pipeline import detect_language
+
+        try:
+            language = args.language or detect_language(project)
+        except Exception as exc:
+            print(f"Error detecting language: {exc}", file=sys.stderr)
+            return 1
+
+        # Run lightweight ingestion for dependency list
+        if language == "python":
+            from mycode.ingester import ProjectIngester
+            ingester = ProjectIngester(
+                project_path=project,
+                installed_packages={},
+                skip_pypi_check=True,
+            )
+        else:
+            from mycode.js_ingester import JsProjectIngester
+            ingester = JsProjectIngester(
+                project_path=project,
+                installed_packages=None,
+                skip_npm_check=True,
+            )
+        try:
+            ingestion = ingester.ingest()
+        except Exception as exc:
+            print(f"Error analyzing project: {exc}", file=sys.stderr)
+            return 1
+
+        deps = [d.name for d in ingestion.dependencies if not d.is_dev]
+        files = [fa.file_path for fa in ingestion.file_analyses]
+
+        engine = InferenceEngine()
+        result = engine.infer(
+            dependencies=deps,
+            file_structure=files,
+            file_count=ingestion.files_analyzed,
+        )
+
+        print(result.as_text())
+
+        if args.json_output:
+            json_path = project / "mycode-inference.json"
+            try:
+                json_path.write_text(
+                    json.dumps(result.as_dict(), indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                print(f"\nJSON inference written: {json_path}")
+            except Exception as exc:
+                print(
+                    f"\nWarning: Could not write JSON: {exc}",
+                    file=sys.stderr,
+                )
+        return 0
 
     # Build LLM config — flag takes precedence, then env var
     api_key = args.api_key or os.environ.get("GEMINI_API_KEY")

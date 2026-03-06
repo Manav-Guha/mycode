@@ -24,6 +24,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
 
+from mycode.classifiers import classify_finding, classify_project
 from mycode.constraints import OperationalConstraints
 from mycode.engine import ExecutionEngineResult, ScenarioResult, StepResult
 from mycode.ingester import DependencyInfo, IngestionResult
@@ -83,6 +84,9 @@ class Finding:
     affected_dependencies: list[str] = field(default_factory=list)
     grouped_findings: list["Finding"] = field(default_factory=list)
     group_count: int = 1
+    failure_domain: str = ""
+    failure_pattern: Optional[str] = None
+    operational_trigger: str = ""
     _peak_memory_mb: float = 0.0
     _execution_time_ms: float = 0.0
     _error_count: int = 0
@@ -150,6 +154,8 @@ class DiagnosticReport:
     operational_context: str = ""
     project_description: str = ""
     confidence_note: str = ""
+    vertical: str = ""
+    architectural_pattern: str = ""
     model_used: str = "offline"
     token_usage: dict = field(
         default_factory=lambda: {"input_tokens": 0, "output_tokens": 0}
@@ -522,6 +528,9 @@ class DiagnosticReport:
                 "load_level": f._load_level,
                 "affected_dependencies": list(f.affected_dependencies),
                 "group_count": f.group_count,
+                "failure_domain": f.failure_domain,
+                "failure_pattern": f.failure_pattern,
+                "operational_trigger": f.operational_trigger,
             }
             if f.grouped_findings:
                 d["grouped_findings"] = [
@@ -568,6 +577,8 @@ class DiagnosticReport:
             "version_discrepancies": list(self.version_flags),
             "unrecognized_dependencies": list(self.unrecognized_deps),
             "operational_context": self.operational_context,
+            "vertical": self.vertical,
+            "architectural_pattern": self.architectural_pattern,
             "model_used": self.model_used,
             "token_usage": dict(self.token_usage),
         }
@@ -675,6 +686,12 @@ class ReportGenerator:
 
         # 1. Analyze execution results → findings + degradation
         self._analyze_execution(execution, report)
+
+        # 1a. Auto-classify every finding against taxonomy
+        self._classify_all_findings(report)
+
+        # 1b. Classify project vertical and architectural pattern
+        self._classify_project(report, ingestion)
 
         # 2. Flag version discrepancies from ingester
         self._flag_version_discrepancies(ingestion, profile_matches, report)
@@ -904,6 +921,70 @@ class ReportGenerator:
         report.scenarios_passed = passed
         report.scenarios_failed = failed
         report.total_errors = total_errors
+
+    @staticmethod
+    def _classify_all_findings(report: DiagnosticReport) -> None:
+        """Apply taxonomy classifiers to every finding in the report."""
+        all_findings = list(report.findings) + list(report.incomplete_tests)
+        for finding in all_findings:
+            # Extract primary error type from details
+            error_type = ""
+            if finding.details:
+                # Look for known Python/JS error type names
+                for etype in (
+                    "MemoryError", "TimeoutError", "TypeError", "ValueError",
+                    "KeyError", "IndexError", "ImportError", "ModuleNotFoundError",
+                    "FileNotFoundError", "ConnectionError", "RuntimeError",
+                    "AttributeError", "OSError", "PermissionError",
+                    "UnicodeDecodeError", "JSONDecodeError",
+                    "ConnectionRefusedError", "ConnectionResetError",
+                    "BrokenPipeError",
+                ):
+                    if etype in finding.details:
+                        error_type = etype
+                        break
+
+            classification = classify_finding(
+                scenario_name=finding.title,
+                scenario_category=finding.category,
+                error_type=error_type,
+                error_details=finding.details,
+            )
+            finding.failure_domain = classification["failure_domain"]
+            finding.failure_pattern = classification["failure_pattern"]
+            finding.operational_trigger = classification["operational_trigger"]
+
+    @staticmethod
+    def _classify_project(
+        report: DiagnosticReport,
+        ingestion: IngestionResult,
+    ) -> None:
+        """Classify project vertical and architectural pattern."""
+        deps = [d.name for d in ingestion.dependencies if not d.is_dev]
+        files = [fa.file_path for fa in ingestion.file_analyses]
+
+        # Detect frontend/backend
+        has_frontend = any(
+            kw in f.lower()
+            for f in files
+            for kw in ("component", "page", "template", "view", "frontend")
+        )
+        has_backend = any(
+            kw in f.lower()
+            for f in files
+            for kw in ("route", "api", "server", "backend", "endpoint")
+        )
+
+        project_cls = classify_project(
+            dependencies=deps,
+            file_structure=files,
+            framework="",
+            file_count=ingestion.files_analyzed,
+            has_frontend=has_frontend,
+            has_backend=has_backend,
+        )
+        report.vertical = project_cls["vertical"]
+        report.architectural_pattern = project_cls["architectural_pattern"]
 
     def _detect_degradation(
         self,
