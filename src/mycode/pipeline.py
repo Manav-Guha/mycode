@@ -36,6 +36,7 @@ from mycode.ingester import IngestionResult, ProjectIngester
 from mycode.interface import (
     ConversationalInterface,
     InterfaceResult,
+    OperationalIntent,
     TerminalIO,
     UserIO,
 )
@@ -133,6 +134,7 @@ class PipelineConfig:
     data_dir: Optional[Path] = None
     io: Optional[UserIO] = None
     auto_approve_scenarios: bool = False
+    prebuilt_constraints: Optional[OperationalConstraints] = None
 
 
 @dataclass
@@ -675,6 +677,21 @@ def _run_conversation(
     skipped and ``project_name`` is empty.
     """
     stage_start = time.monotonic()
+
+    # Prebuilt constraints from host conversation (containerised mode)
+    if config.operational_intent and config.prebuilt_constraints is not None:
+        intent_obj = OperationalIntent(summary=config.operational_intent)
+        result.interface_result = InterfaceResult(
+            intent=intent_obj,
+            constraints=config.prebuilt_constraints,
+        )
+        result.stages.append(StageResult(
+            stage="conversation",
+            duration_ms=_elapsed_ms(stage_start),
+        ))
+        logger.info("Using prebuilt constraints from host conversation.")
+        project_name = _infer_project_name(Path(config.project_path))
+        return config.operational_intent, project_name
 
     # Headless mode — skip conversation
     if config.operational_intent:

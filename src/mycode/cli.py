@@ -28,7 +28,10 @@ import json
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from mycode.interface import TerminalIO
 from mycode.pipeline import (
@@ -36,6 +39,7 @@ from mycode.pipeline import (
     PipelineResult,
     check_llm_report_allowance,
     decrement_llm_report_counter,
+    detect_language,
     run_pipeline,
 )
 from mycode.scenario import LLMConfig
@@ -207,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
             "2=targeted stress tests, 3=full suite (default)"
         ),
     )
+    # Internal: used to pass host conversation constraints into a container
+    parser.add_argument(
+        "--constraints-file",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     return parser
 
 
@@ -238,7 +248,109 @@ def _collect_passthrough_args(args: argparse.Namespace) -> list[str]:
         passthrough.append("--non-interactive")
     if args.tier:
         passthrough.extend(["--tier", str(args.tier)])
+    if getattr(args, "constraints_file", None):
+        passthrough.extend(["--constraints-file", args.constraints_file])
     return passthrough
+
+
+def _run_host_conversation(project_path: Path, args: argparse.Namespace) -> str | None:
+    """Run the conversational interface on the host before launching Docker.
+
+    Performs lightweight local ingestion (no venv, no version checks) to
+    gather project metadata, then runs the conversational interface to
+    collect user constraints.  Serializes the result to a temp JSON file.
+
+    Args:
+        project_path: Resolved path to the user's project.
+        args: Parsed CLI arguments.
+
+    Returns:
+        Path to the temp JSON constraints file, or None if conversation
+        fails or produces no constraints.
+    """
+    from mycode.constraints import OperationalConstraints
+    from mycode.interface import ConversationalInterface
+
+    try:
+        language = args.language or detect_language(project_path)
+    except Exception as exc:
+        logger.warning("Language detection failed for host conversation: %s", exc)
+        return None
+
+    # Lightweight ingestion — no venv, no version checks
+    try:
+        if language == "python":
+            from mycode.ingester import ProjectIngester
+            ingester = ProjectIngester(
+                project_path=project_path,
+                installed_packages={},
+                skip_pypi_check=True,
+            )
+        else:
+            from mycode.js_ingester import JsProjectIngester
+            ingester = JsProjectIngester(
+                project_path=project_path,
+                installed_packages=None,
+                skip_npm_check=True,
+            )
+        ingestion = ingester.ingest()
+    except Exception as exc:
+        logger.warning("Host ingestion failed: %s", exc)
+        return None
+
+    # Run conversation
+    try:
+        offline = args.offline or not (args.api_key or os.environ.get("GEMINI_API_KEY"))
+        llm_config = None
+        api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
+        if api_key:
+            kwargs: dict = {"api_key": api_key}
+            if args.api_base:
+                kwargs["base_url"] = args.api_base
+            if args.model:
+                kwargs["model"] = args.model
+            llm_config = LLMConfig(**kwargs)
+
+        interface = ConversationalInterface(
+            llm_config=llm_config,
+            offline=offline,
+            io=TerminalIO(),
+        )
+        interface_result = interface.run(ingestion, language)
+    except Exception as exc:
+        logger.warning("Host conversation failed: %s", exc)
+        return None
+
+    # Serialize to temp JSON
+    constraints_dict = None
+    if interface_result.constraints:
+        c = interface_result.constraints
+        constraints_dict = {
+            "user_scale": c.user_scale,
+            "usage_pattern": c.usage_pattern,
+            "max_payload_mb": c.max_payload_mb,
+            "data_type": c.data_type,
+            "deployment_context": c.deployment_context,
+            "availability_requirement": c.availability_requirement,
+            "data_sensitivity": c.data_sensitivity,
+            "growth_expectation": c.growth_expectation,
+        }
+
+    intent_string = interface_result.intent.as_intent_string() if interface_result.intent else ""
+
+    data = {
+        "operational_intent": intent_string,
+        "constraints": constraints_dict,
+    }
+
+    try:
+        fd, path = tempfile.mkstemp(suffix=".json", prefix="mycode_constraints_")
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        return path
+    except Exception as exc:
+        logger.warning("Could not write constraints file: %s", exc)
+        return None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -281,15 +393,33 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         passthrough = _collect_passthrough_args(args)
+
+        # Run conversation on host if interactive
+        constraints_path = None
+        is_interactive = sys.stdin.isatty()
+        if not args.non_interactive and is_interactive:
+            constraints_path = _run_host_conversation(project, args)
+            # Container always runs non-interactive (conversation already done)
+            if "--non-interactive" not in passthrough:
+                passthrough.append("--non-interactive")
+
         try:
             return run_containerised(
                 project_path=project,
                 cli_args=passthrough,
                 python_version=args.python_version,
+                constraints_file=constraints_path,
             )
         except ContainerError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+        finally:
+            # Clean up temp constraints file
+            if constraints_path:
+                try:
+                    os.unlink(constraints_path)
+                except OSError:
+                    pass
 
     # ── Untrusted code warning (non-containerised mode) ──
     is_interactive = sys.stdin.isatty()
@@ -307,7 +437,6 @@ def main(argv: list[str] | None = None) -> int:
     # ── Tier 1: inference only (no test execution) ──
     if args.tier == 1:
         from mycode.inference import InferenceEngine
-        from mycode.pipeline import detect_language
 
         try:
             language = args.language or detect_language(project)
@@ -393,8 +522,26 @@ def main(argv: list[str] | None = None) -> int:
             if remaining == 1:
                 print("This is your last free AI-powered analysis.")
 
+    # Load prebuilt constraints from host conversation (inside container)
+    prebuilt_constraints = None
+    prebuilt_intent = ""
+    if args.constraints_file:
+        try:
+            from mycode.constraints import OperationalConstraints
+            with open(args.constraints_file, encoding="utf-8") as f:
+                cdata = json.load(f)
+            prebuilt_intent = cdata.get("operational_intent", "")
+            if cdata.get("constraints"):
+                prebuilt_constraints = OperationalConstraints(**{
+                    k: v for k, v in cdata["constraints"].items()
+                    if v is not None
+                })
+        except Exception as exc:
+            logger.warning("Could not load constraints file: %s", exc)
+
     # Build pipeline config
     non_interactive = args.non_interactive or not is_interactive
+    intent = prebuilt_intent or ("General stress testing" if non_interactive else "")
     config = PipelineConfig(
         project_path=project,
         language=args.language,
@@ -403,8 +550,9 @@ def main(argv: list[str] | None = None) -> int:
         skip_version_check=args.skip_version_check,
         consent=args.consent,
         io=TerminalIO(),
-        operational_intent="General stress testing" if non_interactive else "",
+        operational_intent=intent,
         auto_approve_scenarios=non_interactive,
+        prebuilt_constraints=prebuilt_constraints,
     )
 
     # Run pipeline

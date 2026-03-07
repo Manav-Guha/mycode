@@ -2,27 +2,35 @@
 
 Tests cover:
   - Docker availability detection
-  - Dockerfile generation (from source and from PyPI)
+  - Dockerfile generation (base image: from source and from PyPI)
+  - Project Dockerfile generation (two-phase build)
   - Image tag construction
   - Image existence check
   - Repo root detection
+  - Two-phase build (base + project image)
+  - Project image cleanup
   - CLI --containerised flag (Docker unavailable, passes through args)
   - CLI --python-version flag
   - CLI --yes flag and untrusted code warning
   - CLI passthrough arg collection
+  - CLI --constraints-file (host conversation serialization)
   - Container run command construction
+  - Constraints file mounting
   - Error handling (Docker not available, build failure, timeout)
 """
 
+import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from mycode.container import (
     ContainerError,
+    _build_project_image,
     _find_repo_root,
     _generate_dockerfile,
+    _generate_project_dockerfile,
     _image_exists,
     _image_tag,
     build_image,
@@ -154,6 +162,82 @@ class TestDockerfileGeneration:
         assert 'ENTRYPOINT ["mycode"]' in content
 
 
+# ── Project Dockerfile Generation (Two-Phase) ──
+
+
+class TestProjectDockerfileGeneration:
+    """Tests for _generate_project_dockerfile()."""
+
+    def test_project_dockerfile_includes_requirements(self):
+        """Project Dockerfile installs requirements.txt if present."""
+        content = _generate_project_dockerfile("mycode:py3.11")
+        assert "FROM mycode:py3.11" in content
+        assert "COPY . /workspace/project" in content
+        assert "requirements.txt" in content
+        assert "pip install" in content
+
+    def test_project_dockerfile_includes_package_json(self):
+        """Project Dockerfile installs package.json dependencies if present."""
+        content = _generate_project_dockerfile("mycode:py3.11")
+        assert "package.json" in content
+        assert "npm install" in content
+
+    def test_project_dockerfile_includes_setup_py(self):
+        """Project Dockerfile installs from setup.py if present."""
+        content = _generate_project_dockerfile("mycode:py3.11")
+        assert "setup.py" in content
+
+    def test_project_dockerfile_includes_pyproject_toml(self):
+        """Project Dockerfile installs from pyproject.toml with [project] section."""
+        content = _generate_project_dockerfile("mycode:py3.11")
+        assert "pyproject.toml" in content
+        assert "project" in content  # grep checks for [project] section
+
+    def test_project_dockerfile_uses_base_tag(self):
+        """Project Dockerfile starts FROM the given base tag."""
+        content = _generate_project_dockerfile("mycode:py3.12")
+        assert "FROM mycode:py3.12" in content
+
+
+class TestBuildProjectImage:
+    """Tests for _build_project_image()."""
+
+    def test_two_phase_build_then_run(self, tmp_path):
+        """_build_project_image calls docker build with project as context."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        with patch("mycode.container._docker_build") as mock_build:
+            tag = _build_project_image("mycode:py3.11", project)
+            assert tag.startswith("mycode-project:")
+            mock_build.assert_called_once()
+            # Context should be the project path
+            context = mock_build.call_args[0][1]
+            assert context == str(project)
+
+    def test_project_tag_is_deterministic(self, tmp_path):
+        """Same project path produces the same image tag."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        with patch("mycode.container._docker_build"):
+            tag1 = _build_project_image("mycode:py3.11", project)
+            tag2 = _build_project_image("mycode:py3.11", project)
+            assert tag1 == tag2
+
+    def test_different_paths_different_tags(self, tmp_path):
+        """Different project paths produce different tags."""
+        p1 = tmp_path / "project1"
+        p1.mkdir()
+        p2 = tmp_path / "project2"
+        p2.mkdir()
+
+        with patch("mycode.container._docker_build"):
+            tag1 = _build_project_image("mycode:py3.11", p1)
+            tag2 = _build_project_image("mycode:py3.11", p2)
+            assert tag1 != tag2
+
+
 # ── Repo Root Detection ──
 
 
@@ -250,59 +334,89 @@ class TestBuildImage:
 class TestRunContainerised:
     """Tests for run_containerised()."""
 
+    def _get_run_cmd(self, mock_run):
+        """Extract the docker run command (first call) from mock."""
+        return mock_run.call_args_list[0][0][0]
+
     def test_basic_run(self, tmp_path):
-        """Runs docker with correct arguments."""
+        """Two-phase: builds project image, runs with --network=none, no -v mount."""
         project = tmp_path / "project"
         project.mkdir()
 
         mock_result = MagicMock(returncode=0)
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
             patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
         ):
             exit_code = run_containerised(project, ["--offline"])
             assert exit_code == 0
 
-            cmd = mock_run.call_args[0][0]
+            cmd = self._get_run_cmd(mock_run)
             assert "docker" in cmd
             assert "run" in cmd
             assert "--rm" in cmd
             assert "--network=none" in cmd
             assert "/workspace/project" in cmd
             assert "--offline" in cmd
-
-    def test_project_mounted_read_only(self, tmp_path):
-        """Project directory is mounted as read-only."""
-        project = tmp_path / "project"
-        project.mkdir()
-
-        mock_result = MagicMock(returncode=0)
-        with (
-            patch("mycode.container.build_image", return_value="mycode:py3.11"),
-            patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
-        ):
-            run_containerised(project, [])
-            cmd = mock_run.call_args[0][0]
-            # Find the -v flag
+            # Project is baked into image, no -v mount for project
             volume_args = [
                 cmd[i + 1] for i in range(len(cmd))
                 if cmd[i] == "-v" and i + 1 < len(cmd)
             ]
-            assert any(":ro" in v for v in volume_args)
+            assert not any("/workspace/project" in v for v in volume_args)
 
-    def test_non_interactive_added(self, tmp_path):
-        """--non-interactive is added if not already present."""
+    def test_project_baked_into_image(self, tmp_path):
+        """Project is baked into the Docker image, not volume-mounted."""
         project = tmp_path / "project"
         project.mkdir()
 
         mock_result = MagicMock(returncode=0)
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
             patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
         ):
             run_containerised(project, [])
-            cmd = mock_run.call_args[0][0]
+            cmd = self._get_run_cmd(mock_run)
+            # Image tag should be the project image
+            assert "mycode-project:abc123" in cmd
+            # No -v for project directory
+            for i, arg in enumerate(cmd):
+                if arg == "-v" and i + 1 < len(cmd):
+                    assert str(project) not in cmd[i + 1]
+
+    def test_non_interactive_added_without_constraints(self, tmp_path):
+        """--non-interactive is added when no constraints_file provided."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        mock_result = MagicMock(returncode=0)
+        with (
+            patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
+            patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            run_containerised(project, [])
+            cmd = self._get_run_cmd(mock_run)
             assert "--non-interactive" in cmd
+
+    def test_non_interactive_not_added_with_constraints(self, tmp_path):
+        """--non-interactive is NOT auto-added when constraints_file is provided."""
+        project = tmp_path / "project"
+        project.mkdir()
+        cfile = tmp_path / "constraints.json"
+        cfile.write_text("{}")
+
+        mock_result = MagicMock(returncode=0)
+        with (
+            patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
+            patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            run_containerised(project, [], constraints_file=str(cfile))
+            cmd = self._get_run_cmd(mock_run)
+            assert "--non-interactive" not in cmd
 
     def test_non_interactive_not_duplicated(self, tmp_path):
         """--non-interactive is not added if already present."""
@@ -312,10 +426,11 @@ class TestRunContainerised:
         mock_result = MagicMock(returncode=0)
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
             patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
         ):
             run_containerised(project, ["--non-interactive"])
-            cmd = mock_run.call_args[0][0]
+            cmd = self._get_run_cmd(mock_run)
             assert cmd.count("--non-interactive") == 1
 
     def test_returns_container_exit_code(self, tmp_path):
@@ -326,6 +441,7 @@ class TestRunContainerised:
         mock_result = MagicMock(returncode=42)
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
             patch("mycode.container.subprocess.run", return_value=mock_result),
         ):
             assert run_containerised(project, []) == 42
@@ -338,6 +454,7 @@ class TestRunContainerised:
 
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
             patch(
                 "mycode.container.subprocess.run",
                 side_effect=subprocess.TimeoutExpired(cmd="docker", timeout=1800),
@@ -352,6 +469,7 @@ class TestRunContainerised:
 
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
             patch("mycode.container.subprocess.run", side_effect=FileNotFoundError),
         ):
             with pytest.raises(ContainerError, match="Docker not found"):
@@ -365,10 +483,11 @@ class TestRunContainerised:
         mock_result = MagicMock(returncode=0)
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
             patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
         ):
             run_containerised(project, [])
-            cmd = mock_run.call_args[0][0]
+            cmd = self._get_run_cmd(mock_run)
             assert "--memory=2g" in cmd
             assert "--cpus=2" in cmd
 
@@ -380,16 +499,63 @@ class TestRunContainerised:
         mock_result = MagicMock(returncode=0)
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
             patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
         ):
             run_containerised(project, [])
-            cmd = mock_run.call_args[0][0]
-            # Check -e MYCODE_CONTAINERISED=1 is in the command
+            cmd = self._get_run_cmd(mock_run)
             env_args = [
                 cmd[i + 1] for i in range(len(cmd))
                 if cmd[i] == "-e" and i + 1 < len(cmd)
             ]
             assert "MYCODE_CONTAINERISED=1" in env_args
+
+    def test_constraints_file_mounted(self, tmp_path):
+        """constraints_file is mounted read-only and --constraints-file arg added."""
+        project = tmp_path / "project"
+        project.mkdir()
+        cfile = tmp_path / "constraints.json"
+        cfile.write_text('{"operational_intent": "test", "constraints": null}')
+
+        mock_result = MagicMock(returncode=0)
+        with (
+            patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
+            patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            run_containerised(project, [], constraints_file=str(cfile))
+            cmd = self._get_run_cmd(mock_run)
+            # Check volume mount for constraints
+            volume_args = [
+                cmd[i + 1] for i in range(len(cmd))
+                if cmd[i] == "-v" and i + 1 < len(cmd)
+            ]
+            assert any("constraints.json:ro" in v for v in volume_args)
+            # Check --constraints-file arg
+            assert "--constraints-file" in cmd
+            assert "/workspace/constraints.json" in cmd
+
+    def test_project_image_cleaned_up(self, tmp_path):
+        """Project image is removed after run (docker rmi)."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        run_result = MagicMock(returncode=0)
+        rmi_result = MagicMock(returncode=0)
+
+        with (
+            patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
+            patch("mycode.container.subprocess.run", side_effect=[run_result, rmi_result]) as mock_run,
+        ):
+            run_containerised(project, [])
+            # Second call should be docker rmi
+            calls = mock_run.call_args_list
+            assert len(calls) == 2
+            rmi_cmd = calls[1][0][0]
+            assert "docker" in rmi_cmd
+            assert "rmi" in rmi_cmd
+            assert "mycode-project:abc123" in rmi_cmd
 
 
 # ── Docker Build Errors ──
@@ -753,3 +919,134 @@ class TestPassthroughArgs:
         args = parser.parse_args(["/some/path", "--non-interactive"])
         result = _collect_passthrough_args(args)
         assert "--non-interactive" in result
+
+    def test_constraints_file_passed_through(self):
+        """--constraints-file is forwarded when explicitly set."""
+        from mycode.cli import _collect_passthrough_args, build_parser
+        parser = build_parser()
+        args = parser.parse_args(["/some/path", "--constraints-file", "/tmp/c.json"])
+        result = _collect_passthrough_args(args)
+        assert "--constraints-file" in result
+        assert "/tmp/c.json" in result
+
+    def test_constraints_file_not_passed_when_absent(self):
+        """--constraints-file is NOT forwarded when not set."""
+        from mycode.cli import _collect_passthrough_args, build_parser
+        parser = build_parser()
+        args = parser.parse_args(["/some/path", "--offline"])
+        result = _collect_passthrough_args(args)
+        assert "--constraints-file" not in result
+
+
+# ── Host Conversation Serialization ──
+
+
+class TestHostConversation:
+    """Tests for _run_host_conversation() and constraints-file loading."""
+
+    def test_host_conversation_serialization(self, tmp_path):
+        """Host conversation produces a JSON file with intent and constraints."""
+        from mycode.cli import _run_host_conversation, build_parser
+        from mycode.constraints import OperationalConstraints
+        from mycode.interface import InterfaceResult, OperationalIntent
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "app.py").write_text("import flask\n")
+        (proj / "requirements.txt").write_text("flask==3.0.0\n")
+
+        parser = build_parser()
+        args = parser.parse_args([str(proj), "--offline"])
+
+        mock_intent = OperationalIntent(
+            summary="Web API serving 50 users",
+            project_description="Flask web API",
+        )
+        mock_constraints = OperationalConstraints(user_scale=50, usage_pattern="burst")
+        mock_result = InterfaceResult(
+            intent=mock_intent,
+            constraints=mock_constraints,
+        )
+
+        with (
+            patch("mycode.cli.detect_language", return_value="python"),
+            patch("mycode.interface.ConversationalInterface") as mock_cls,
+        ):
+            mock_cls.return_value.run.return_value = mock_result
+            path = _run_host_conversation(proj, args)
+
+        assert path is not None
+        data = json.loads(Path(path).read_text())
+        assert "operational_intent" in data
+        assert data["constraints"]["user_scale"] == 50
+        assert data["constraints"]["usage_pattern"] == "burst"
+        # Cleanup
+        Path(path).unlink()
+
+    def test_host_conversation_returns_none_on_failure(self, tmp_path):
+        """Returns None if language detection fails."""
+        from mycode.cli import _run_host_conversation, build_parser
+
+        proj = tmp_path / "empty"
+        proj.mkdir()
+
+        parser = build_parser()
+        args = parser.parse_args([str(proj), "--offline"])
+
+        with patch("mycode.cli.detect_language", side_effect=Exception("no language")):
+            result = _run_host_conversation(proj, args)
+            assert result is None
+
+    def test_constraints_file_loaded_into_pipeline(self, tmp_path):
+        """--constraints-file populates pipeline config with prebuilt constraints."""
+        from mycode.cli import main
+
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "app.py").write_text("x = 1\n")
+
+        cfile = tmp_path / "constraints.json"
+        cfile.write_text(json.dumps({
+            "operational_intent": "A web API serving 100 users",
+            "constraints": {
+                "user_scale": 100,
+                "usage_pattern": "sustained",
+                "max_payload_mb": None,
+                "data_type": None,
+                "deployment_context": "cloud",
+                "availability_requirement": None,
+                "data_sensitivity": None,
+                "growth_expectation": None,
+            },
+        }))
+
+        with patch("mycode.cli.run_pipeline") as mock_run:
+            mock_run.return_value = MagicMock(
+                success=True, report=None, execution=None,
+                stages=[], warnings=[], recording_path=None,
+                failed_stage=None,
+            )
+            exit_code = main([
+                str(proj), "--yes", "--offline",
+                "--constraints-file", str(cfile),
+            ])
+            assert exit_code == 0
+            config = mock_run.call_args[0][0]
+            assert config.operational_intent == "A web API serving 100 users"
+            assert config.prebuilt_constraints is not None
+            assert config.prebuilt_constraints.user_scale == 100
+            assert config.prebuilt_constraints.deployment_context == "cloud"
+
+    def test_parser_accepts_constraints_file(self):
+        """Parser accepts --constraints-file (hidden arg)."""
+        from mycode.cli import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["/some/path", "--constraints-file", "/tmp/c.json"])
+        assert args.constraints_file == "/tmp/c.json"
+
+    def test_parser_constraints_file_default_none(self):
+        """--constraints-file defaults to None."""
+        from mycode.cli import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["/some/path"])
+        assert args.constraints_file is None

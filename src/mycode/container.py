@@ -1,7 +1,8 @@
 """Docker containerisation for myCode — full isolation via Docker.
 
 Builds and runs myCode inside a Docker container when ``--containerised``
-is passed.  Solves two problems:
+is passed.  Two-phase build: installs project dependencies with network,
+then runs tests without network.
 
 1. Dependency install failures on projects with C extensions, system library
    requirements, or specific Python versions.
@@ -10,6 +11,7 @@ is passed.  Solves two problems:
 Pure Python.  No LLM dependency.
 """
 
+import hashlib
 import logging
 import shutil
 import subprocess
@@ -210,6 +212,87 @@ def build_image(python_version: str = "3.11", force: bool = False) -> str:
     return tag
 
 
+# ── Project Image (Two-Phase Build) ──
+
+
+def _generate_project_dockerfile(base_tag: str) -> str:
+    """Generate a Dockerfile that layers project deps onto the base image.
+
+    Copies the project into the image and conditionally installs
+    dependencies from requirements.txt, setup.py, pyproject.toml,
+    or package.json.
+
+    Args:
+        base_tag: The cached myCode base image tag (e.g. ``mycode:py3.11``).
+
+    Returns:
+        Dockerfile content as a string.
+    """
+    lines = [
+        f"FROM {base_tag}",
+        "",
+        "# Copy project files into image",
+        "COPY . /workspace/project",
+        "",
+        "# Install Python dependencies (if present)",
+        "RUN if [ -f /workspace/project/requirements.txt ]; then "
+        "pip install --no-cache-dir -r /workspace/project/requirements.txt; fi",
+        'RUN if [ -f /workspace/project/setup.py ]; then '
+        'pip install --no-cache-dir /workspace/project; fi',
+        'RUN if [ -f /workspace/project/pyproject.toml ] && '
+        'grep -q "\\[project\\]" /workspace/project/pyproject.toml; then '
+        'pip install --no-cache-dir /workspace/project; fi',
+        "",
+        "# Install JavaScript dependencies (if present)",
+        "RUN if [ -f /workspace/project/package.json ]; then "
+        "cd /workspace/project && npm install --ignore-scripts 2>/dev/null || true; fi",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _build_project_image(base_tag: str, project_path: Path) -> str:
+    """Build a project-specific Docker image with dependencies pre-installed.
+
+    Uses the project directory as the build context so ``COPY .`` picks
+    up all project files.  Dependencies are installed with network access
+    during the build step.
+
+    Args:
+        base_tag: The cached myCode base image tag.
+        project_path: Path to the user's project directory.
+
+    Returns:
+        The project image tag (e.g. ``mycode-project:a1b2c3d4``).
+
+    Raises:
+        ContainerError: If the build fails.
+    """
+    path_hash = hashlib.sha256(
+        str(project_path.resolve()).encode()
+    ).hexdigest()[:8]
+    project_tag = f"mycode-project:{path_hash}"
+
+    dockerfile_content = _generate_project_dockerfile(base_tag)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".Dockerfile", delete=False, prefix="mycode_proj_",
+    ) as f:
+        f.write(dockerfile_content)
+        dockerfile_path = f.name
+
+    try:
+        print("Installing project dependencies in container...")
+        _docker_build(project_tag, str(project_path), dockerfile_path)
+    finally:
+        try:
+            Path(dockerfile_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return project_tag
+
+
 # ── Container Execution ──
 
 
@@ -217,12 +300,14 @@ def run_containerised(
     project_path: Path,
     cli_args: list[str],
     python_version: str = "3.11",
+    constraints_file: Optional[str] = None,
 ) -> int:
     """Run myCode inside a Docker container.
 
-    Builds (or reuses) the Docker image, mounts the user's project as
-    read-only, runs myCode with the given CLI args, streams output to
-    the host terminal, and destroys the container on exit.
+    Two-phase approach:
+      1. Build base image (cached) with myCode installed.
+      2. Build project image (deps installed with network access).
+      3. Run tests from project image with ``--network=none``.
 
     Args:
         project_path: Resolved path to the user's project directory.
@@ -230,6 +315,8 @@ def run_containerised(
             ``["--offline", "--verbose"]``).  The project path is
             handled separately.
         python_version: Python version for the container image.
+        constraints_file: Optional path to a JSON file with serialized
+            conversational constraints (from host conversation).
 
     Returns:
         Exit code from the containerised myCode run.
@@ -237,36 +324,49 @@ def run_containerised(
     Raises:
         ContainerError: If Docker is unavailable or the build fails.
     """
-    tag = build_image(python_version)
+    # Phase 1: Build base image (cached)
+    base_tag = build_image(python_version)
 
     project_path = project_path.resolve()
     container_project = "/workspace/project"
 
-    cmd = [
-        "docker", "run",
-        "--rm",                                            # Destroy after run
-        "--network=none",                                  # No network (security)
-        "-v", f"{project_path}:{container_project}:ro",    # Read-only mount
-        "-e", "MYCODE_CONTAINERISED=1",                    # Signal containerised mode
-    ]
-
-    # Resource limits inside the container
-    cmd.extend(["--memory=2g", "--cpus=2"])
-
-    cmd.append(tag)
-
-    # myCode args: project path (inside container) + pass-through flags
-    cmd.append(container_project)
-    cmd.extend(cli_args)
-
-    # Force non-interactive (no TTY in container)
-    if "--non-interactive" not in cli_args:
-        cmd.append("--non-interactive")
-
-    print("Running myCode in Docker container...")
-    logger.info("Container command: %s", " ".join(cmd))
+    # Phase 2: Build project image (installs deps with network)
+    project_tag = _build_project_image(base_tag, project_path)
 
     try:
+        cmd = [
+            "docker", "run",
+            "--rm",                                        # Destroy after run
+            "--network=none",                              # No network (security)
+            "-e", "MYCODE_CONTAINERISED=1",                # Signal containerised mode
+        ]
+
+        # Mount constraints file if provided
+        if constraints_file:
+            cmd.extend([
+                "-v", f"{constraints_file}:/workspace/constraints.json:ro",
+            ])
+
+        # Resource limits inside the container
+        cmd.extend(["--memory=2g", "--cpus=2"])
+
+        cmd.append(project_tag)
+
+        # myCode args: project path (inside container) + pass-through flags
+        cmd.append(container_project)
+        cmd.extend(cli_args)
+
+        # Add constraints-file arg if provided
+        if constraints_file:
+            cmd.extend(["--constraints-file", "/workspace/constraints.json"])
+
+        # Force non-interactive if no constraints file (no conversation needed)
+        if "--non-interactive" not in cli_args and not constraints_file:
+            cmd.append("--non-interactive")
+
+        print("Running myCode in Docker container...")
+        logger.info("Container command: %s", " ".join(cmd))
+
         result = subprocess.run(cmd, timeout=1800)  # 30 minutes max
         return result.returncode
     except subprocess.TimeoutExpired:
@@ -280,3 +380,14 @@ def run_containerised(
             "Docker not found. Install Docker to use --containerised.\n"
             "See: https://docs.docker.com/get-docker/"
         )
+    finally:
+        # Clean up project image
+        try:
+            subprocess.run(
+                ["docker", "rmi", project_tag],
+                capture_output=True,
+                timeout=30,
+            )
+            logger.info("Cleaned up project image: %s", project_tag)
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            logger.debug("Could not clean up project image: %s", project_tag)
