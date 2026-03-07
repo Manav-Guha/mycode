@@ -33,6 +33,7 @@ from mycode.container import (
     _generate_project_dockerfile,
     _image_exists,
     _image_tag,
+    _pip_install_with_fallback,
     build_image,
     is_docker_available,
     run_containerised,
@@ -169,16 +170,45 @@ class TestProjectDockerfileGeneration:
     """Tests for _generate_project_dockerfile()."""
 
     def test_project_dockerfile_includes_requirements(self):
-        """Project Dockerfile installs requirements.txt with || true fallback."""
+        """Project Dockerfile installs requirements.txt with per-package fallback."""
         content = _generate_project_dockerfile("mycode:py3.11")
         assert "FROM mycode:py3.11" in content
         assert "COPY . /workspace/project" in content
         assert "requirements.txt" in content
         assert "pip install" in content
-        # All pip install commands should have || true for partial failure tolerance
+        # Requirements install should NOT have blanket || true — uses fallback
         for line in content.split("\n"):
-            if "pip install" in line and line.strip().startswith("RUN"):
-                assert "|| true" in line, f"Missing || true: {line}"
+            if "requirements.txt" in line and "pip install" in line:
+                assert "Bulk install failed" in line, (
+                    "requirements install should use per-package fallback"
+                )
+
+    def test_project_dockerfile_handles_requirement_singular(self):
+        """Project Dockerfile also handles requirement.txt (common typo)."""
+        content = _generate_project_dockerfile("mycode:py3.11")
+        # Must handle both plural and singular
+        assert "requirement.txt" in content
+        # Should have separate RUN lines for each variant
+        run_lines = [l for l in content.split("\n") if l.startswith("RUN")]
+        req_lines = [l for l in run_lines if "requirement" in l.lower()]
+        filenames_found = set()
+        for l in req_lines:
+            if "requirements-dev.txt" in l:
+                filenames_found.add("requirements-dev.txt")
+            elif "requirements_dev.txt" in l:
+                filenames_found.add("requirements_dev.txt")
+            elif "requirements.txt" in l:
+                filenames_found.add("requirements.txt")
+            elif "requirement.txt" in l:
+                filenames_found.add("requirement.txt")
+        assert "requirements.txt" in filenames_found
+        assert "requirement.txt" in filenames_found
+
+    def test_project_dockerfile_handles_dev_requirements(self):
+        """Project Dockerfile handles requirements-dev.txt and requirements_dev.txt."""
+        content = _generate_project_dockerfile("mycode:py3.11")
+        assert "requirements-dev.txt" in content
+        assert "requirements_dev.txt" in content
 
     def test_project_dockerfile_includes_package_json(self):
         """Project Dockerfile installs package.json dependencies if present."""
@@ -201,6 +231,32 @@ class TestProjectDockerfileGeneration:
         """Project Dockerfile starts FROM the given base tag."""
         content = _generate_project_dockerfile("mycode:py3.12")
         assert "FROM mycode:py3.12" in content
+
+
+class TestPipInstallWithFallback:
+    """Tests for _pip_install_with_fallback() shell snippet."""
+
+    def test_tries_bulk_install_first(self):
+        """Snippet starts with pip install -r (bulk)."""
+        snippet = _pip_install_with_fallback("/tmp/req.txt")
+        assert snippet.startswith("pip install --no-cache-dir -r /tmp/req.txt")
+
+    def test_has_per_package_fallback(self):
+        """On bulk failure, falls back to per-package install."""
+        snippet = _pip_install_with_fallback("/tmp/req.txt")
+        assert "Bulk install failed" in snippet
+        assert "while read" in snippet
+
+    def test_skips_comments_and_flags(self):
+        """Fallback grep filters out comments and option lines."""
+        snippet = _pip_install_with_fallback("/tmp/req.txt")
+        # grep -v filters comments (#), empty lines, and flag lines (-)
+        assert "grep -v" in snippet
+
+    def test_individual_failure_tolerated(self):
+        """Individual package failures produce SKIP message, don't abort."""
+        snippet = _pip_install_with_fallback("/tmp/req.txt")
+        assert 'SKIP: $pkg' in snippet
 
 
 class TestBuildProjectImage:
@@ -596,7 +652,7 @@ class TestDockerBuildErrors:
 
     def test_build_failure_raises(self):
         from mycode.container import _docker_build
-        mock_result = MagicMock(returncode=1, stderr="error: something went wrong")
+        mock_result = MagicMock(returncode=1, stdout="error: something went wrong")
         with patch("mycode.container.subprocess.run", return_value=mock_result):
             with pytest.raises(ContainerError, match="Docker build failed"):
                 _docker_build("mycode:py3.11", "/tmp", "/tmp/Dockerfile")

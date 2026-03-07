@@ -134,7 +134,7 @@ def _generate_dockerfile(python_version: str, from_source: bool) -> str:
 
 
 def _docker_build(tag: str, context_path: str, dockerfile_path: str) -> None:
-    """Run ``docker build`` with progress streamed to stderr."""
+    """Run ``docker build`` with output streamed to stderr."""
     cmd = [
         "docker", "build",
         "-t", tag,
@@ -145,14 +145,19 @@ def _docker_build(tag: str, context_path: str, dockerfile_path: str) -> None:
     try:
         result = subprocess.run(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             timeout=600,  # 10 minutes max
         )
+        if result.stdout:
+            # Print build output so dep install progress is visible
+            for line in result.stdout.strip().splitlines():
+                print(f"  {line}", file=sys.stderr)
         if result.returncode != 0:
             raise ContainerError(
                 f"Docker build failed (exit {result.returncode}):\n"
-                f"{result.stderr[:2000]}"
+                f"{result.stdout[-2000:] if result.stdout else '(no output)'}"
             )
         logger.info("Docker image built: %s", tag)
     except subprocess.TimeoutExpired:
@@ -215,12 +220,37 @@ def build_image(python_version: str = "3.11", force: bool = False) -> str:
 # ── Project Image (Two-Phase Build) ──
 
 
+def _pip_install_with_fallback(req_file: str) -> str:
+    r"""Generate a shell snippet that tries bulk pip install, then per-package fallback.
+
+    Tries ``pip install -r <file>`` first.  If that fails (C extensions,
+    version conflicts), falls back to installing each package individually
+    so that packages which *can* install still get installed.
+
+    Args:
+        req_file: Path to the requirements file inside the image.
+
+    Returns:
+        A shell command string for use in a Dockerfile ``RUN`` instruction.
+    """
+    return (
+        f"pip install --no-cache-dir -r {req_file} 2>&1 "
+        f"|| {{ echo '--- Bulk install failed, trying individual packages ---'; "
+        f"grep -v '^\\s*#\\|^\\s*$\\|^-' {req_file} "
+        f"| while read -r pkg; do "
+        f"pip install --no-cache-dir \"$pkg\" 2>&1 || echo \"SKIP: $pkg\"; "
+        f"done; }}"
+    )
+
+
 def _generate_project_dockerfile(base_tag: str) -> str:
     """Generate a Dockerfile that layers project deps onto the base image.
 
     Copies the project into the image and conditionally installs
-    dependencies from requirements.txt, setup.py, pyproject.toml,
-    or package.json.
+    dependencies from requirements.txt (or requirement.txt), setup.py,
+    pyproject.toml, or package.json.  Uses per-package fallback so that
+    individual C-extension failures don't prevent pure-Python deps from
+    installing.
 
     Args:
         base_tag: The cached myCode base image tag (e.g. ``mycode:py3.11``).
@@ -228,24 +258,40 @@ def _generate_project_dockerfile(base_tag: str) -> str:
     Returns:
         Dockerfile content as a string.
     """
+    proj = "/workspace/project"
+
+    # Build requirements install commands for all common filenames
+    req_files = [
+        "requirements.txt",
+        "requirement.txt",
+        "requirements-dev.txt",
+        "requirements_dev.txt",
+    ]
+    req_cmds = []
+    for rf in req_files:
+        full = f"{proj}/{rf}"
+        req_cmds.append(
+            f"RUN if [ -f {full} ]; then "
+            f"{_pip_install_with_fallback(full)}; fi"
+        )
+
     lines = [
         f"FROM {base_tag}",
         "",
         "# Copy project files into image",
-        "COPY . /workspace/project",
+        f"COPY . {proj}",
         "",
         "# Install Python dependencies (if present)",
-        "RUN if [ -f /workspace/project/requirements.txt ]; then "
-        "pip install --no-cache-dir -r /workspace/project/requirements.txt || true; fi",
-        'RUN if [ -f /workspace/project/setup.py ]; then '
-        'pip install --no-cache-dir /workspace/project || true; fi',
-        'RUN if [ -f /workspace/project/pyproject.toml ] && '
-        'grep -q "\\[project\\]" /workspace/project/pyproject.toml; then '
-        'pip install --no-cache-dir /workspace/project || true; fi',
+        *req_cmds,
+        f'RUN if [ -f {proj}/setup.py ]; then '
+        f'pip install --no-cache-dir {proj} || true; fi',
+        f'RUN if [ -f {proj}/pyproject.toml ] && '
+        f'grep -q "\\[project\\]" {proj}/pyproject.toml; then '
+        f'pip install --no-cache-dir {proj} || true; fi',
         "",
         "# Install JavaScript dependencies (if present)",
-        "RUN if [ -f /workspace/project/package.json ]; then "
-        "cd /workspace/project && npm install --ignore-scripts 2>/dev/null || true; fi",
+        f"RUN if [ -f {proj}/package.json ]; then "
+        f"cd {proj} && npm install --ignore-scripts 2>/dev/null || true; fi",
         "",
     ]
     return "\n".join(lines)
