@@ -185,6 +185,7 @@ class ScenarioResult:
     failure_indicators_triggered: list[str] = field(default_factory=list)
     resource_cap_hit: bool = False
     summary: str = ""
+    failure_reason: str = ""
 
 
 @dataclass
@@ -206,6 +207,68 @@ class ExecutionEngineResult:
     scenarios_failed: int = 0
     scenarios_skipped: int = 0
     warnings: list[str] = field(default_factory=list)
+
+
+# Known frameworks that require system-level setup beyond pip/npm
+_UNSUPPORTED_FRAMEWORKS = frozenset({
+    "expo", "django", "flask", "fastapi", "nextjs", "next",
+    "react-native", "electron", "ionic", "cordova", "unity",
+    "qt", "gtk", "kivy", "tkinter", "pygame",
+    "express", "react", "svelte", "vue", "angular",
+    "streamlit", "gradio",
+})
+
+
+def _classify_harness_failure(stderr: str, scenario_name: str = "") -> str:
+    """Classify a harness failure by examining stderr content.
+
+    Returns one of: "unsupported_framework", "dependency_unavailable",
+    "harness_generation_error", "module_import_failure", "timeout",
+    "unknown", or "" (not a harness failure).
+    """
+    if not stderr:
+        return "unknown"
+
+    stderr_lower = stderr.lower()
+
+    # Syntax / name errors in the harness itself
+    if "SyntaxError" in stderr or "NameError" in stderr:
+        return "harness_generation_error"
+
+    # Module not found — distinguish framework vs package vs user module
+    if "ModuleNotFoundError" in stderr or "Cannot find module" in stderr:
+        # Extract module name from "No module named 'foo'" or similar
+        import re
+        mod_match = re.search(
+            r"No module named ['\"]([^'\"]+)['\"]"
+            r"|Cannot find module ['\"]([^'\"]+)['\"]",
+            stderr,
+        )
+        mod_name = ""
+        if mod_match:
+            mod_name = (mod_match.group(1) or mod_match.group(2) or "").split(".")[0].lower()
+
+        if mod_name and mod_name in _UNSUPPORTED_FRAMEWORKS:
+            return "unsupported_framework"
+        # Check if it looks like a pip/npm package (lowercase, no path separators)
+        if mod_name and "/" not in mod_name and "\\" not in mod_name:
+            # Heuristic: user modules often match the project name or have
+            # underscores; packages are usually short single words.
+            # If the stderr also mentions pip/npm, it's a dependency.
+            if "pip install" in stderr_lower or "npm install" in stderr_lower:
+                return "dependency_unavailable"
+            # Check if it's a known package-like name (no dots, short)
+            if len(mod_name) <= 30 and mod_name.replace("_", "").isalnum():
+                return "module_import_failure"
+        return "module_import_failure"
+
+    # pip / npm installation failures
+    if "pip" in stderr_lower and ("error" in stderr_lower or "failed" in stderr_lower):
+        return "dependency_unavailable"
+    if "npm err" in stderr_lower or "npm error" in stderr_lower:
+        return "dependency_unavailable"
+
+    return "unknown"
 
 
 class EngineError(Exception):
@@ -287,6 +350,7 @@ class ExecutionEngine:
                     scenario_category=scenario.category,
                     status="failed",
                     summary=f"Engine error: {type(e).__name__}: {str(e)[:500]}",
+                    failure_reason="unknown",
                 ))
                 warnings.append(
                     f"Scenario '{scenario.name}' encountered an engine error: {e}"
@@ -386,6 +450,7 @@ class ExecutionEngine:
                     }],
                 )],
                 total_errors=1,
+                failure_reason="harness_generation_error",
             )
 
         # Build command — for Node.js, cap V8 heap to match resource caps
@@ -593,6 +658,7 @@ class ExecutionEngine:
                     stderr_snippet=session_result.stderr[-_SNIPPET_MAX:],
                 )],
                 total_errors=1,
+                failure_reason="timeout",
             )
 
         stdout = session_result.stdout
@@ -604,6 +670,10 @@ class ExecutionEngine:
 
         if start_idx == -1 or end_idx == -1:
             is_crash = session_result.returncode != 0
+            reason = (
+                _classify_harness_failure(stderr, scenario.name)
+                if is_crash else ""
+            )
             return ScenarioResult(
                 scenario_name=scenario.name,
                 scenario_category=scenario.category,
@@ -623,6 +693,7 @@ class ExecutionEngine:
                     stderr_snippet=stderr[-_SNIPPET_MAX:],
                 )],
                 total_errors=1 if is_crash else 0,
+                failure_reason=reason,
             )
 
         # Parse JSON

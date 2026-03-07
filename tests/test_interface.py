@@ -325,27 +325,22 @@ class TestConversationalInterfaceOffline:
             "1",
             "1",
             "2",
-            # Project name
-            "Expense Tracker",
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
-        # 7 prompts: turn 1, turn 2, 4 constraint questions, project name
-        assert len(io.prompts) == 7
-        # First prompt asks about the project
-        assert "project" in io.prompts[0].lower() or "tell me" in io.prompts[0].lower()
-        # Second prompt asks about stress priorities
-        assert "stress" in io.prompts[1].lower() or "matters" in io.prompts[1].lower()
+        # 6 prompts: turn 1, turn 2, 4 constraint questions
+        assert len(io.prompts) == 6
+        # First prompt asks user to confirm analysis
+        assert "sound right" in io.prompts[0].lower() or "project" in io.prompts[0].lower()
+        # Second prompt asks targeted questions
+        assert "people" in io.prompts[1].lower() or "users" in io.prompts[1].lower() or "worried" in io.prompts[1].lower()
         # Constraint questions asked
         assert "how many users" in io.prompts[2].lower()
-        # Last prompt asks for a short project name
-        assert "call this project" in io.prompts[6].lower()
 
         # Intent should capture responses
         assert "expenses" in result.intent.project_description.lower()
         assert "data" in result.intent.stress_priorities.lower()
-        assert result.intent.project_name == "Expense Tracker"
 
         # Constraints should be extracted
         assert result.constraints is not None
@@ -388,17 +383,15 @@ class TestConversationalInterfaceOffline:
         assert result.intent.raw_responses["turn_1"] == "desc here"
         assert result.intent.raw_responses["turn_2"] == "priorities here"
 
-    def test_project_name_empty_fallback(self, simple_ingestion):
-        io = MockIO(responses=["desc", "priorities", ""])
+    def test_project_name_not_asked_by_interface(self, simple_ingestion):
+        """Project name is now inferred by pipeline, not asked by interface."""
+        io = MockIO(responses=["desc", "priorities"])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
+        # project_name should be empty — pipeline sets it
         assert result.intent.project_name == ""
-
-    def test_project_name_capped_at_50_chars(self, simple_ingestion):
-        io = MockIO(responses=["desc", "priorities", "a" * 80])
-        interface = ConversationalInterface(offline=True, io=io)
-        result = interface.run(simple_ingestion)
-        assert len(result.intent.project_name) <= 50
+        # No prompt should ask "call this project"
+        assert not any("call this project" in p.lower() for p in io.prompts)
 
 
 # ── LLM-Backed Conversation Tests ──
@@ -497,7 +490,6 @@ class TestConversationalInterfaceLLM:
             "my app", "speed",
             # Constraint questions (after LLM fallback triggers offline)
             "not sure", "not sure", "not sure", "not sure",
-            "",  # project name
         ])
         config = LLMConfig(api_key="test-key")
         interface = ConversationalInterface(
@@ -513,8 +505,8 @@ class TestConversationalInterfaceLLM:
 
         result = interface.run(simple_ingestion)
 
-        # 7 prompts: turn 1, turn 2, 4 constraint questions, project name
-        assert len(io.prompts) == 7
+        # 6 prompts: turn 1, turn 2, 4 constraint questions
+        assert len(io.prompts) == 6
         assert "project" in io.prompts[0].lower() or "tell me" in io.prompts[0].lower()
         # Warnings should mention LLM failure
         assert any("llm" in w.lower() or "unavailable" in w.lower()
@@ -529,7 +521,7 @@ class TestConversationalInterfaceLLM:
 
     def test_llm_bad_json_falls_back(self, simple_ingestion):
         interface, io = self._make_interface_with_mock_backend(
-            responses=["my app", "speed", ""],
+            responses=["my app", "speed"],
             llm_responses=[
                 "This is not JSON at all",
                 "Also not JSON",
@@ -539,7 +531,8 @@ class TestConversationalInterfaceLLM:
         result = interface.run(simple_ingestion)
 
         # Should fall back to offline questions and still work
-        assert len(io.prompts) == 3
+        # 2 prompts: turn 1, turn 2 (no project name question)
+        assert len(io.prompts) == 2
         assert result.intent.project_description == "my app"
 
 
@@ -884,8 +877,8 @@ class TestConstraintExtraction:
 
         result = interface.run(simple_ingestion)
 
-        # Only 3 prompts: turn 1, turn 2, project name (no constraint questions)
-        assert len(io.prompts) == 3
+        # Only 2 prompts: turn 1, turn 2 (no project name, no constraint questions)
+        assert len(io.prompts) == 2
         # Constraints still extracted from turn text (without explicit Qs)
         assert result.constraints is not None
         assert result.constraints.user_scale == 50

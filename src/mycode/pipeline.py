@@ -617,6 +617,51 @@ def _run_library_matching(
         return []
 
 
+def _infer_project_name(project_path: Path) -> str:
+    """Infer a human-readable project name from the filesystem.
+
+    Checks pyproject.toml and package.json first, falls back to
+    the directory name.
+    """
+    project_path = project_path.resolve()
+
+    # Check pyproject.toml
+    pyproject = project_path / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            text = pyproject.read_text(encoding="utf-8")
+            # Simple TOML parsing for name field under [project]
+            import re
+            m = re.search(
+                r'^\[project\]\s*\n(?:.*\n)*?name\s*=\s*"([^"]+)"',
+                text,
+                re.MULTILINE,
+            )
+            if m:
+                name = m.group(1).replace("-", " ").replace("_", " ")
+                return name.title()
+        except Exception:
+            pass
+
+    # Check package.json
+    pkg_json = project_path / "package.json"
+    if pkg_json.exists():
+        try:
+            import json
+            data = json.loads(pkg_json.read_text(encoding="utf-8"))
+            name = data.get("name", "")
+            if name and not name.startswith("@"):
+                name = name.replace("-", " ").replace("_", " ")
+                return name.title()
+        except Exception:
+            pass
+
+    # Fall back to directory name
+    name = project_path.name
+    name = name.replace("-", " ").replace("_", " ")
+    return name.title()
+
+
 def _run_conversation(
     ingestion: IngestionResult,
     config: PipelineConfig,
@@ -638,7 +683,7 @@ def _run_conversation(
             duration_ms=_elapsed_ms(stage_start),
         ))
         logger.info("Conversation skipped — operational intent provided.")
-        project_name = Path(config.project_path).resolve().name
+        project_name = _infer_project_name(Path(config.project_path))
         return config.operational_intent, project_name
 
     try:
@@ -655,7 +700,10 @@ def _run_conversation(
             result.warnings.extend(interface_result.warnings)
 
         intent_string = interface_result.intent.as_intent_string()
-        project_name = interface_result.intent.project_name
+        project_name = (
+            interface_result.intent.project_name
+            or _infer_project_name(Path(config.project_path))
+        )
         if not intent_string:
             intent_string = _DEFAULT_INTENT
             result.warnings.append(

@@ -1770,3 +1770,76 @@ class TestHarnessValidation:
             script = _JS_HARNESS_PREAMBLE + "\n" + body + "\n" + _JS_HARNESS_POSTAMBLE
             error = _validate_js_harness(script)
             assert error == "", f"JS coupling body '{name}' has bracket error: {error}"
+
+
+# ── Harness Failure Classification Tests ──
+
+
+from mycode.engine import _classify_harness_failure
+
+
+class TestClassifyHarnessFailure:
+    """Tests for _classify_harness_failure() stderr classification."""
+
+    def test_syntax_error_classified(self):
+        stderr = "SyntaxError: invalid syntax (line 5)"
+        assert _classify_harness_failure(stderr) == "harness_generation_error"
+
+    def test_name_error_classified(self):
+        stderr = "NameError: name 'foo' is not defined"
+        assert _classify_harness_failure(stderr) == "harness_generation_error"
+
+    def test_module_not_found_framework(self):
+        stderr = "ModuleNotFoundError: No module named 'django'"
+        assert _classify_harness_failure(stderr) == "unsupported_framework"
+
+    def test_module_not_found_expo(self):
+        stderr = "ModuleNotFoundError: No module named 'expo'"
+        assert _classify_harness_failure(stderr) == "unsupported_framework"
+
+    def test_module_not_found_with_pip_suggestion(self):
+        stderr = (
+            "ModuleNotFoundError: No module named 'celery'\n"
+            "pip install celery"
+        )
+        assert _classify_harness_failure(stderr) == "dependency_unavailable"
+
+    def test_module_not_found_user_module(self):
+        stderr = "ModuleNotFoundError: No module named 'myapp'"
+        assert _classify_harness_failure(stderr) == "module_import_failure"
+
+    def test_npm_error(self):
+        stderr = "npm ERR! code E404\nnpm ERR! 404 Not Found"
+        assert _classify_harness_failure(stderr) == "dependency_unavailable"
+
+    def test_pip_error(self):
+        stderr = "pip install failed: No matching distribution"
+        assert _classify_harness_failure(stderr) == "dependency_unavailable"
+
+    def test_empty_stderr(self):
+        assert _classify_harness_failure("") == "unknown"
+
+    def test_unrecognized_error(self):
+        stderr = "RuntimeError: something bad happened"
+        assert _classify_harness_failure(stderr) == "unknown"
+
+    def test_cannot_find_module_js(self):
+        stderr = "Error: Cannot find module 'express'"
+        assert _classify_harness_failure(stderr) == "unsupported_framework"
+
+    def test_scenario_result_has_failure_reason_field(self):
+        sr = ScenarioResult(
+            scenario_name="test",
+            scenario_category="test_cat",
+            status="failed",
+            failure_reason="harness_generation_error",
+        )
+        assert sr.failure_reason == "harness_generation_error"
+
+    def test_scenario_result_failure_reason_default_empty(self):
+        sr = ScenarioResult(
+            scenario_name="test",
+            scenario_category="test_cat",
+            status="completed",
+        )
+        assert sr.failure_reason == ""

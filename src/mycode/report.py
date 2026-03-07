@@ -91,6 +91,7 @@ class Finding:
     _execution_time_ms: float = 0.0
     _error_count: int = 0
     _load_level: Optional[int] = None
+    _failure_reason: str = ""
 
 
 @dataclass
@@ -156,6 +157,11 @@ class DiagnosticReport:
     confidence_note: str = ""
     vertical: str = ""
     architectural_pattern: str = ""
+    has_user_constraints: bool = False
+    user_scale: int | None = None
+    _usage_pattern: str = ""
+    _data_type: str = ""
+    _max_payload_mb: float | None = None
     model_used: str = "offline"
     token_usage: dict = field(
         default_factory=lambda: {"input_tokens": 0, "output_tokens": 0}
@@ -187,6 +193,16 @@ class DiagnosticReport:
         if self.total_errors:
             sections.append(f"Total errors captured: {self.total_errors}")
 
+        # Scenario coverage summary
+        completed = self.scenarios_run - len(self.incomplete_tests)
+        if self.incomplete_tests:
+            sections.append(
+                f"myCode fully tested {completed} of "
+                f"{self.scenarios_run} scenarios. "
+                f"{len(self.incomplete_tests)} could not be run "
+                f"(see below)."
+            )
+
         # Confidence note
         if self.confidence_note:
             sections.append(f"\n{self.confidence_note}")
@@ -207,6 +223,12 @@ class DiagnosticReport:
         warnings = [f for f in self.findings if f.severity == "warning"]
         infos = [f for f in self.findings if f.severity == "info"]
 
+        # Header changes when no constraints were provided
+        critical_header = (
+            "  Fix Before Launch" if self.has_user_constraints
+            else "  Findings at Default Test Range"
+        )
+
         if not self.findings and self.scenarios_run:
             sections.append("\n" + "-" * 40)
             sections.append("  Findings")
@@ -219,10 +241,14 @@ class DiagnosticReport:
         else:
             if criticals:
                 sections.append("\n" + "-" * 40)
-                sections.append(
-                    "  Fix Before Launch"
-                )
+                sections.append(critical_header)
                 sections.append("-" * 40)
+                if not self.has_user_constraints:
+                    sections.append(
+                        "  No usage context was provided, so myCode tested at "
+                        "default ranges. For more targeted results, run with "
+                        "the conversational interface."
+                    )
                 for f in criticals:
                     self._render_text_finding(sections, f)
 
@@ -244,20 +270,12 @@ class DiagnosticReport:
                 for f in infos:
                     self._render_text_finding(sections, f)
 
-        # Incomplete tests (environment issues, not real failures)
+        # Tests myCode could not run (harness/environment issues)
         if self.incomplete_tests:
             sections.append("\n" + "-" * 40)
-            sections.append("  Incomplete Tests")
+            sections.append("  Tests myCode Could Not Run")
             sections.append("-" * 40)
-            sections.append(
-                "  These tests could not run fully due to environment "
-                "issues (missing modules, uninstalled dependencies, "
-                "missing files). They are not code failures."
-            )
-            for f in self.incomplete_tests:
-                sections.append(f"\n  - {f.title}")
-                if f.details:
-                    sections.append(f"    {f.details}")
+            _render_incomplete_text(sections, self.incomplete_tests)
 
         # Degradation
         if self.degradation_points:
@@ -265,18 +283,22 @@ class DiagnosticReport:
             sections.append("  Degradation Curves")
             sections.append("-" * 40)
             for dp in self.degradation_points:
-                header = f"{dp.scenario_name} ({dp.metric})"
+                header = _describe_scenario(dp.scenario_name) or dp.scenario_name
+                metric_label = _metric_label(dp.metric)
+                if metric_label:
+                    header = f"{metric_label} — {header}"
                 if dp.group_count > 1:
                     header += f" (and {dp.group_count - 1} similar)"
                 sections.append(f"\n  {header}:")
-                if dp.description:
+                narrative = _build_degradation_narrative(dp)
+                if narrative:
+                    sections.append(f"    {narrative}")
+                elif dp.description:
                     sections.append(f"    {dp.description}")
-                if dp.steps:
-                    for label, value in dp.steps:
-                        sections.append(f"      {label}: {value:.2f}")
                 if dp.breaking_point:
+                    bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
                     sections.append(
-                        f"    >> Breaking point: {dp.breaking_point}"
+                        f"    >> Breaking point: at {bp_desc}"
                     )
                 if dp.grouped_points:
                     names = [gp.scenario_name for gp in dp.grouped_points]
@@ -385,6 +407,17 @@ class DiagnosticReport:
         )
         lines.append("")
 
+        # Scenario coverage summary
+        completed = total - len(self.incomplete_tests)
+        if self.incomplete_tests:
+            lines.append(
+                f"myCode fully tested {completed} of "
+                f"{total} scenarios. "
+                f"{len(self.incomplete_tests)} could not be run "
+                f"(see below)."
+            )
+            lines.append("")
+
         # Confidence note
         if self.confidence_note:
             lines.append(f"> {self.confidence_note}")
@@ -421,12 +454,21 @@ class DiagnosticReport:
             infos = [f for f in self.findings if f.severity == "info"]
 
             if criticals:
-                lines.append("## Fix Before Launch")
-                lines.append("")
-                lines.append(
-                    "These problems will affect your users under the "
-                    "conditions you described. Address them before deploying."
-                )
+                if self.has_user_constraints:
+                    lines.append("## Fix Before Launch")
+                    lines.append("")
+                    lines.append(
+                        "These problems will affect your users under the "
+                        "conditions you described. Address them before deploying."
+                    )
+                else:
+                    lines.append("## Findings at Default Test Range")
+                    lines.append("")
+                    lines.append(
+                        "No usage context was provided, so myCode tested at "
+                        "default ranges. For more targeted results, run with "
+                        "the conversational interface."
+                    )
                 lines.append("")
                 for f in criticals:
                     _render_finding(lines, f)
@@ -461,28 +503,36 @@ class DiagnosticReport:
             )
             lines.append("")
 
+        # Tests myCode could not run
+        if self.incomplete_tests:
+            lines.append("## Tests myCode Could Not Run")
+            lines.append("")
+            _render_incomplete_markdown(lines, self.incomplete_tests)
+
         # Degradation curves (simplified for non-technical readers)
         if self.degradation_points:
             lines.append("## Performance Under Load")
             lines.append("")
             for dp in self.degradation_points:
-                name = dp.scenario_name
+                name = _describe_scenario(dp.scenario_name) or dp.scenario_name
+                metric_label = _metric_label(dp.metric)
+                if metric_label:
+                    name = f"{metric_label} — {name}"
                 if dp.group_count > 1:
                     name += f" (and {dp.group_count - 1} similar)"
                 lines.append(f"**{name}**")
                 lines.append("")
-                if dp.description:
+                narrative = _build_degradation_narrative(dp)
+                if narrative:
+                    lines.append(narrative)
+                    lines.append("")
+                elif dp.description:
                     lines.append(dp.description)
                     lines.append("")
-                if dp.steps:
-                    lines.append("| Load Level | Measurement |")
-                    lines.append("|---|---|")
-                    for label, value in dp.steps:
-                        lines.append(f"| {label} | {value:.2f} |")
-                    lines.append("")
                 if dp.breaking_point:
+                    bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
                     lines.append(
-                        f"Breaking point: **{dp.breaking_point}**"
+                        f"Breaking point: **at {bp_desc}**"
                     )
                     lines.append("")
 
@@ -531,6 +581,7 @@ class DiagnosticReport:
                 "failure_domain": f.failure_domain,
                 "failure_pattern": f.failure_pattern,
                 "operational_trigger": f.operational_trigger,
+                "failure_reason": f._failure_reason,
             }
             if f.grouped_findings:
                 d["grouped_findings"] = [
@@ -582,6 +633,110 @@ class DiagnosticReport:
             "model_used": self.model_used,
             "token_usage": dict(self.token_usage),
         }
+
+
+# ── Plain-language explanations for harness failure reasons ──
+
+_FAILURE_REASON_EXPLANATIONS: dict[str, str] = {
+    "unsupported_framework": (
+        "myCode does not yet support this framework. "
+        "This is a myCode limitation, not a problem with your code."
+    ),
+    "dependency_unavailable": (
+        "These tests could not run because dependencies were not installed "
+        "in the test environment. Use --containerised for better dependency support."
+    ),
+    "harness_generation_error": (
+        "myCode could not generate valid test scripts for these scenarios. "
+        "This is a myCode limitation."
+    ),
+    "module_import_failure": (
+        "myCode could not import your project's modules for these tests. "
+        "This can happen with non-standard project structures or monorepos."
+    ),
+    "timeout": "These tests exceeded the time limit.",
+    "unknown": "These tests could not run due to unexpected issues.",
+}
+
+_FAILURE_REASON_HEADERS: dict[str, str] = {
+    "unsupported_framework": "Unsupported Framework",
+    "dependency_unavailable": "Missing Dependencies",
+    "harness_generation_error": "Test Script Generation Issue",
+    "module_import_failure": "Module Import Issue",
+    "timeout": "Timed Out",
+    "unknown": "Other Issues",
+    "": "Environment Issues",
+}
+
+
+def _group_by_failure_reason(
+    findings: list["Finding"],
+) -> dict[str, list["Finding"]]:
+    """Group incomplete test findings by their failure_reason."""
+    groups: dict[str, list["Finding"]] = {}
+    for f in findings:
+        reason = f._failure_reason or ""
+        groups.setdefault(reason, []).append(f)
+    return groups
+
+
+def _render_incomplete_text(
+    sections: list[str], findings: list["Finding"],
+) -> None:
+    """Render incomplete tests grouped by failure reason for plain text."""
+    groups = _group_by_failure_reason(findings)
+    for reason, group in groups.items():
+        header = _FAILURE_REASON_HEADERS.get(reason, "Other Issues")
+        explanation = _FAILURE_REASON_EXPLANATIONS.get(
+            reason,
+            "These tests could not run fully due to environment issues.",
+        )
+        n = len(group)
+        sections.append(f"\n  {header} ({n} test{'s' if n != 1 else ''}):")
+        sections.append(f"    {explanation}")
+        if n <= 2:
+            for f in group:
+                sections.append(f"    - {f.title}")
+        else:
+            # Summarize — don't list individual failures for 3+
+            names = [f.title.replace("Could not test: ", "") for f in group]
+            shown = names[:3]
+            extra = n - 3
+            line = ", ".join(shown)
+            if extra > 0:
+                line += f", and {extra} more"
+            sections.append(f"    Affected: {line}")
+
+
+def _render_incomplete_markdown(
+    lines: list[str], findings: list["Finding"],
+) -> None:
+    """Render incomplete tests grouped by failure reason for markdown."""
+    groups = _group_by_failure_reason(findings)
+    for reason, group in groups.items():
+        header = _FAILURE_REASON_HEADERS.get(reason, "Other Issues")
+        explanation = _FAILURE_REASON_EXPLANATIONS.get(
+            reason,
+            "These tests could not run fully due to environment issues.",
+        )
+        n = len(group)
+        lines.append(f"### {header} ({n} test{'s' if n != 1 else ''})")
+        lines.append("")
+        lines.append(explanation)
+        lines.append("")
+        if n <= 2:
+            for f in group:
+                lines.append(f"- {f.title}")
+            lines.append("")
+        else:
+            names = [f.title.replace("Could not test: ", "") for f in group]
+            shown = names[:3]
+            extra = n - 3
+            line = ", ".join(shown)
+            if extra > 0:
+                line += f", and {extra} more"
+            lines.append(f"Affected: {line}")
+            lines.append("")
 
 
 def _render_finding(lines: list[str], f: "Finding") -> None:
@@ -669,29 +824,45 @@ class ReportGenerator:
             scenarios_run=len(execution.scenario_results),
         )
 
-        # 0a. Generate project description from ingester analysis
+        # 0a. Classify project first — description depends on it
+        self._classify_project(report, ingestion)
+
+        # 0b. Generate project description using classifier output
         report.project_description = _generate_project_description(
             ingestion, project_name,
+            vertical=report.vertical,
+            architectural_pattern=report.architectural_pattern,
         )
 
-        # 0b. Build confidence note from incomplete tests
+        # 0c. Build confidence note from incomplete tests
         report.confidence_note = _build_confidence_note(
             ingestion, profile_matches,
         )
 
-        # 0c. Track dependency coverage
+        # 0d. Track dependency coverage
         report.recognized_dep_count = sum(
             1 for pm in profile_matches if pm.profile is not None
         )
+
+        # 0e. Set constraint flag and store parsed constraint fields
+        report.has_user_constraints = (
+            constraints is not None and constraints.user_scale is not None
+        )
+        if constraints is not None:
+            if constraints.user_scale is not None:
+                report.user_scale = constraints.user_scale
+            if constraints.usage_pattern:
+                report._usage_pattern = constraints.usage_pattern
+            if constraints.data_type:
+                report._data_type = constraints.data_type
+            if constraints.max_payload_mb is not None:
+                report._max_payload_mb = constraints.max_payload_mb
 
         # 1. Analyze execution results → findings + degradation
         self._analyze_execution(execution, report)
 
         # 1a. Auto-classify every finding against taxonomy
         self._classify_all_findings(report)
-
-        # 1b. Classify project vertical and architectural pattern
-        self._classify_project(report, ingestion)
 
         # 2. Flag version discrepancies from ingester
         self._flag_version_discrepancies(ingestion, profile_matches, report)
@@ -800,6 +971,21 @@ class ReportGenerator:
                 (s.execution_time_ms for s in sr.steps), default=0.0,
             )
 
+            # ── Harness failures → incomplete tests (myCode limitation) ──
+            if sr.failure_reason:
+                f = Finding(
+                    title=f"Could not test: {sr.scenario_name}",
+                    severity="info",
+                    category=sr.scenario_category,
+                    description=sr.summary or "Test could not run.",
+                    details=self._summarize_errors(sr),
+                    affected_dependencies=self._deps_from_name(sr.scenario_name),
+                )
+                f._failure_reason = sr.failure_reason
+                f._error_count = sr.total_errors
+                report.incomplete_tests.append(f)
+                continue
+
             # ── Environment-only failures → incomplete tests ──
             if self._is_environment_only(sr):
                 f = Finding(
@@ -821,13 +1007,18 @@ class ReportGenerator:
             load_detail = self._load_level_detail(sr)
             failing_load = self._first_failing_load(sr)
 
+            # Build structured description parts
+            activity = _describe_scenario(sr.scenario_name) or sr.scenario_name
+            consequence = _consequence_for_category(
+                sr.scenario_category, sr.scenario_name,
+            )
+
             # Check for failures
             if sr.status == "failed":
-                base_desc = sr.summary or "Scenario failed during execution."
-                consequence = _consequence_for_category(
-                    sr.scenario_category, sr.scenario_name,
-                )
-                desc = f"{base_desc} {consequence}" if consequence else base_desc
+                what_happened = sr.summary or "The scenario failed during execution."
+                desc = f"myCode tested {activity}. {what_happened}"
+                if consequence:
+                    desc = f"{desc} {consequence}"
                 f = Finding(
                     title=f"Scenario failed: {sr.scenario_name}",
                     severity="critical",
@@ -847,12 +1038,9 @@ class ReportGenerator:
                 cap_detail = self._summarize_cap_hits(sr)
                 if load_detail:
                     cap_detail = f"{cap_detail}{load_detail}"
-                consequence = _consequence_for_category(
-                    sr.scenario_category, sr.scenario_name,
-                )
                 base_desc = (
-                    f"Your code exceeded safe operating limits "
-                    f"during this test."
+                    f"myCode tested {activity}. "
+                    f"Your code exceeded safe operating limits during this test."
                 )
                 if consequence:
                     base_desc = f"{base_desc} {consequence}"
@@ -875,10 +1063,8 @@ class ReportGenerator:
                 err_detail = self._summarize_errors(sr)
                 if load_detail:
                     err_detail = f"{err_detail}{load_detail}"
-                consequence = _consequence_for_category(
-                    sr.scenario_category, sr.scenario_name,
-                )
                 base_desc = (
+                    f"myCode tested {activity}. "
                     f"{sr.total_errors} error(s) occurred during this test."
                 )
                 if consequence:
@@ -1190,11 +1376,20 @@ class ReportGenerator:
                 if ratio <= 1.0:
                     # Within stated capacity → CRITICAL
                     finding.severity = "critical"
+                    fraction_note = ""
+                    if load_level < user_scale and user_scale > 0:
+                        pct = int(load_level / user_scale * 100)
+                        fraction_note = (
+                            f" This means if just {pct}% of your users "
+                            f"are active at the same time, the app will "
+                            f"stop working."
+                        )
                     finding.description = (
                         f"You said {user_scale} users. "
                         f"This breaks at {load_level} concurrent users "
                         f"— that's within your stated needs. "
-                        f"This is a problem you need to fix before launch. "
+                        f"This is a problem you need to fix before launch."
+                        f"{fraction_note} "
                         f"{finding.description}"
                     )
                 elif ratio <= 3.0:
@@ -1382,7 +1577,12 @@ class ReportGenerator:
         # ── Project reference ──
         # Prefer the auto-generated description over raw user input
         if report.project_description and report.project_description != "Your Project":
-            project_ref = f"your {report.project_description}"
+            desc = report.project_description
+            # Avoid "your Your ..." — description may already start with "Your"
+            if desc.lower().startswith("your "):
+                project_ref = desc[0].lower() + desc[1:]
+            else:
+                project_ref = f"your {desc}"
         elif project_name and len(project_name) <= 40:
             project_ref = f"your {project_name}"
         elif operational_intent:
@@ -1390,6 +1590,10 @@ class ReportGenerator:
             project_ref = f"your {ref}"
         else:
             project_ref = "your project"
+
+        # ── Short reference for bullet points ──
+        # Use full description in opening paragraph, short form in bullets
+        short_ref = _short_project_ref(report.vertical)
 
         # ── Overall assessment ──
         critical = [f for f in report.findings if f.severity == "critical"]
@@ -1428,7 +1632,9 @@ class ReportGenerator:
         # Degradation points first — they have the richest data
         degradation_scenarios: set[str] = set()
         for dp in report.degradation_points:
-            translated = self._translate_degradation(dp, project_ref)
+            translated = self._translate_degradation(
+                dp, short_ref, user_scale=report.user_scale,
+            )
             degradation_scenarios.add(dp.scenario_name)
             # Memory degradation at priority 1, execution time at 2
             if dp.metric == "memory_peak_mb":
@@ -1450,7 +1656,7 @@ class ReportGenerator:
             )
             if scenario_name in degradation_scenarios:
                 continue
-            translated = self._translate_finding(f, project_ref)
+            translated = self._translate_finding(f, short_ref)
             if translated:
                 sev_rank = _sev_order.get(f.severity, 9)
                 # Resource cap hits get priority 0, other criticals 1, warnings 2
@@ -1606,6 +1812,7 @@ class ReportGenerator:
 
     def _translate_degradation(
         self, dp: DegradationPoint, project_ref: str,
+        user_scale: int | None = None,
     ) -> str:
         """Translate a degradation point into plain language.
 
@@ -1620,7 +1827,7 @@ class ReportGenerator:
 
         first_val = dp.steps[0][1] if dp.steps else 0.0
         last_val = dp.steps[-1][1] if dp.steps else 0.0
-        impact = _describe_impact(dp.metric, first_val, last_val)
+        impact = _describe_impact(dp.metric, first_val, last_val, user_scale)
 
         # Describe what happens at the breaking point
         breaking_desc = ""
@@ -1800,11 +2007,52 @@ class ReportGenerator:
                 f"{len(report.version_flags)} version discrepancy(ies) noted."
             )
 
-        # Context
-        if report.operational_context:
-            parts.append(
-                f"Results assessed relative to: {report.operational_context}"
+        # Context — prefer structured constraint fields over raw input
+        ctx_parts: list[str] = []
+        if report.user_scale is not None:
+            ctx_parts.append(f"{report.user_scale:,} concurrent users")
+        if report._data_type:
+            _data_labels = {
+                "tabular": "tabular data",
+                "text": "text and documents",
+                "images": "images and media",
+                "api_responses": "API responses",
+                "mixed": "PDFs, text, and images",
+            }
+            ctx_parts.append(
+                f"handling {_data_labels.get(report._data_type, report._data_type)}"
             )
+        if report._usage_pattern:
+            _usage_labels = {
+                "sustained": "steady usage",
+                "burst": "burst/peak usage patterns",
+                "periodic": "occasional use",
+                "growing": "growing usage over time",
+            }
+            ctx_parts.append(
+                _usage_labels.get(report._usage_pattern, report._usage_pattern)
+            )
+        if ctx_parts:
+            parts.append(
+                f"Results assessed relative to: {', '.join(ctx_parts)}."
+            )
+        elif report.operational_context:
+            # Fall back to raw context (strip confirmation phrases)
+            ctx = report.operational_context
+            _CONFIRMATIONS = (
+                "sounds right", "sounds good", "looks right", "looks good",
+                "yes", "yeah", "yep", "correct", "that's right",
+                "thats right",
+            )
+            cleaned = ctx
+            for phrase in _CONFIRMATIONS:
+                if cleaned.lower().startswith(phrase):
+                    cleaned = cleaned[len(phrase):].lstrip(" .,;-—")
+                    break
+            if cleaned and len(cleaned) > 5:
+                parts.append(
+                    f"Results assessed relative to: {cleaned}"
+                )
 
         return " ".join(parts)
 
@@ -2254,68 +2502,73 @@ class ReportGenerator:
 # ── Project Description & Confidence ──
 
 
-def _generate_project_description(
-    ingestion: IngestionResult, project_name: str = "",
-) -> str:
-    """Generate a short project description from ingester analysis.
+_VERTICAL_LABELS: dict[str, str] = {
+    "web_app": "web application",
+    "data_pipeline": "data pipeline",
+    "chatbot": "AI chatbot",
+    "dashboard": "dashboard",
+    "api_service": "API service",
+    "ml_model": "machine learning project",
+    "portfolio": "portfolio site",
+    "utility": "project",
+    "cli_tool": "command-line tool",
+    "automation": "automation script",
+}
 
-    Uses dependency names and project structure to produce something like
-    "Flask web application with pandas data processing" instead of
-    parroting whatever the user typed.
+
+def _short_project_ref(vertical: str) -> str:
+    """Return a brief project reference for repeated use in bullets.
+
+    Uses just the vertical label (e.g. "your dashboard") instead of the
+    full description ("your dashboard built with flask, fastapi, and uvicorn").
     """
-    # Identify frameworks and key libraries
-    dep_names = {d.name.lower() for d in ingestion.dependencies if not d.is_dev}
+    label = _VERTICAL_LABELS.get(vertical, "")
+    if label and label != "project":
+        return f"your {label}"
+    return "your app"
 
-    # Framework detection
-    framework = ""
-    _FRAMEWORKS = {
-        "flask": "Flask web application",
-        "fastapi": "FastAPI web application",
-        "streamlit": "Streamlit dashboard",
-        "gradio": "Gradio interface",
-        "express": "Express web application",
-        "next": "Next.js application",
-        "react": "React application",
-        "svelte": "Svelte application",
-        "django": "Django web application",
-    }
-    for dep, label in _FRAMEWORKS.items():
-        if dep in dep_names:
-            framework = label
-            break
 
-    # Notable capabilities
-    capabilities: list[str] = []
-    if dep_names & {"pandas", "numpy", "polars"}:
-        capabilities.append("data processing")
-    if dep_names & {"openai", "anthropic", "langchain", "llamaindex"}:
-        capabilities.append("AI/LLM integration")
-    if dep_names & {"sqlalchemy", "sqlite3", "prisma", "mongoose"}:
-        capabilities.append("database access")
-    if dep_names & {"requests", "httpx", "axios"}:
-        capabilities.append("external API calls")
-    if dep_names & {"matplotlib", "plotly", "chartjs"}:
-        capabilities.append("data visualization")
+def _generate_project_description(
+    ingestion: IngestionResult,
+    project_name: str = "",
+    vertical: str = "",
+    architectural_pattern: str = "",
+) -> str:
+    """Generate a short project description from classifier output + deps.
 
-    if framework and capabilities:
-        return f"{framework} with {', '.join(capabilities[:2])}"
-    if framework:
-        return framework
-    if capabilities:
-        parts = ", ".join(capabilities[:2])
-        return f"Application with {parts}"
+    Format: "Your [human_label] built with [dep1], [dep2], and [dep3]"
+    Uses the vertical classifier output mapped to a human-readable label,
+    plus the top 3 non-dev dependencies.
+    """
+    # Get human label from classifier vertical
+    human_label = _VERTICAL_LABELS.get(vertical, "")
 
-    # Fall back to cleaned project_name, but don't parrot long strings
-    if project_name and len(project_name) <= 40:
-        return project_name
-    if project_name:
-        # Truncate at word boundary
-        cut = project_name[:40].rfind(" ")
-        if cut > 10:
-            return project_name[:cut]
-        return project_name[:40]
+    # Get top 3 non-dev dependencies by name
+    non_dev_deps = [d.name for d in ingestion.dependencies if not d.is_dev]
+    top_deps = non_dev_deps[:3]
 
-    return "Your Project"
+    if human_label and top_deps:
+        if len(top_deps) == 1:
+            dep_str = top_deps[0]
+        elif len(top_deps) == 2:
+            dep_str = f"{top_deps[0]} and {top_deps[1]}"
+        else:
+            dep_str = f"{top_deps[0]}, {top_deps[1]}, and {top_deps[2]}"
+        return f"Your {human_label} built with {dep_str}"
+
+    if human_label:
+        return f"Your {human_label}"
+
+    if top_deps:
+        if len(top_deps) == 1:
+            dep_str = top_deps[0]
+        elif len(top_deps) == 2:
+            dep_str = f"{top_deps[0]} and {top_deps[1]}"
+        else:
+            dep_str = f"{top_deps[0]}, {top_deps[1]}, and {top_deps[2]}"
+        return f"Your project built with {dep_str}"
+
+    return "your project"
 
 
 def _build_confidence_note(
@@ -2613,17 +2866,23 @@ def _describe_step(step_name: str) -> str:
     return ""
 
 
-def _describe_impact(metric: str, first_val: float, last_val: float) -> str:
+def _describe_impact(
+    metric: str,
+    first_val: float,
+    last_val: float,
+    user_scale: int | None = None,
+) -> str:
     """Describe the impact of a degradation in real terms.
 
     For timing: uses _human_time to convert both endpoints to natural
     language so users see "from fast to very slow" instead of "204x".
 
-    For memory: projects multi-user impact when peak is significant.
+    For memory: projects multi-user impact when peak is significant,
+    using the user's stated scale when available.
     """
     # TODO(post-funding): Separate measured harness results from linear
     # projections structurally.  Currently both appear inline in degradation
-    # descriptions (e.g. "if 10 users are active, that's 1200MB").  Future:
+    # descriptions (e.g. "if N users are active, that's XMB").  Future:
     # distinct "measured" vs "projected" sections in DiagnosticReport.
     if metric == "execution_time_ms":
         first_desc = _human_time(first_val)
@@ -2642,12 +2901,18 @@ def _describe_impact(metric: str, first_val: float, last_val: float) -> str:
         base = (
             f"memory grows from {first_val:.0f}MB to {last_val:.0f}MB"
         )
-        # Project multi-user impact for significant memory
-        if last_val >= 50:
-            projected = last_val * 10
+        # Contextualise with user scale when memory is significant
+        if last_val >= 50 and user_scale:
             base += (
-                f" — if 10 users are active, "
-                f"that's {projected:.0f}MB on your server"
+                f". With {user_scale:,} concurrent users, your server "
+                f"will need substantially more memory than a typical "
+                f"configuration provides"
+            )
+        elif last_val >= 50:
+            base += (
+                f". Under concurrent load, your server will need "
+                f"substantially more memory than a typical configuration "
+                f"provides"
             )
         return base
     if metric == "error_count":
@@ -2664,6 +2929,135 @@ def _format_ms(ms: float) -> str:
     if ms < 60000:
         return f"{ms / 1000:.1f}s"
     return f"{ms / 60000:.1f}min"
+
+
+def _time_qualifier(ms: float) -> str:
+    """Return a user-meaningful qualifier for a time value."""
+    if ms < 10:
+        return "still fast"
+    if ms < 100:
+        return "still fast"
+    if ms < 500:
+        return "your users will start to notice"
+    if ms < 2000:
+        return "your users will notice"
+    if ms < 10000:
+        return "the app feels slow"
+    return "the app stops responding"
+
+
+def _memory_qualifier(mb: float) -> str:
+    """Return a user-meaningful qualifier for a memory value."""
+    if mb < 50:
+        return ""
+    if mb < 200:
+        return "getting heavy"
+    if mb < 500:
+        return "heavy — may crash on limited devices"
+    return "very heavy — likely to crash"
+
+
+def _metric_label(metric: str) -> str:
+    """Return a human-readable label for a degradation metric."""
+    if metric == "execution_time_ms":
+        return "Response time under load"
+    if metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb"):
+        return "Memory usage under load"
+    if metric == "error_count":
+        return "Errors under load"
+    return ""
+
+
+def _build_degradation_narrative(dp: "DegradationPoint") -> str:
+    """Build a concise narrative from degradation steps.
+
+    Shows at most 3 key points: baseline (first), threshold (where
+    degradation becomes noticeable), and peak (last).  This avoids
+    dumping every data point as a sentence.
+    """
+    if not dp.steps:
+        return dp.description or ""
+
+    is_time = dp.metric in ("execution_time_ms",)
+    is_memory = dp.metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")
+    is_errors = dp.metric == "error_count"
+
+    # Select key points: baseline, threshold, peak
+    key_points = _select_key_points(dp.steps, is_time, is_memory)
+
+    parts: list[str] = []
+    for idx, (label, value) in enumerate(key_points):
+        step_desc = _describe_step(label) or label
+
+        if is_time:
+            val_str = _format_ms(value)
+            if idx == 0:
+                parts.append(f"With {step_desc}, response time is {val_str}")
+            else:
+                qualifier = _time_qualifier(value)
+                parts.append(
+                    f"With {step_desc}, it's {val_str} — {qualifier}"
+                )
+        elif is_memory:
+            val_str = f"{value:.0f}MB" if value >= 1 else f"{value:.2f}MB"
+            if idx == 0:
+                parts.append(f"With {step_desc}, memory usage is {val_str}")
+            else:
+                qualifier = _memory_qualifier(value)
+                if qualifier:
+                    parts.append(
+                        f"With {step_desc}, it's {val_str} — {qualifier}"
+                    )
+                else:
+                    parts.append(f"With {step_desc}, it's {val_str}")
+        elif is_errors:
+            val_str = str(int(value))
+            parts.append(
+                f"With {step_desc}, {val_str} error{'s' if value != 1 else ''}"
+            )
+        else:
+            parts.append(f"With {step_desc}, {value:.2f}")
+
+    return ". ".join(parts) + "."
+
+
+def _select_key_points(
+    steps: list[tuple[str, float]],
+    is_time: bool,
+    is_memory: bool,
+) -> list[tuple[str, float]]:
+    """Pick baseline, threshold, and peak from a degradation curve.
+
+    Returns at most 3 points.  The threshold is the first step where
+    the value becomes meaningfully worse than baseline.
+    """
+    if len(steps) <= 3:
+        return list(steps)
+
+    baseline = steps[0]
+    peak = steps[-1]
+    base_val = baseline[1]
+
+    # Find threshold: first point where value >= 2x baseline (or qualifier changes)
+    threshold = None
+    for step in steps[1:-1]:
+        val = step[1]
+        if is_time:
+            if base_val > 0 and val / base_val >= 2.0:
+                threshold = step
+                break
+        elif is_memory:
+            if base_val > 0 and val / base_val >= 1.5:
+                threshold = step
+                break
+        else:
+            if base_val > 0 and val / base_val >= 2.0:
+                threshold = step
+                break
+
+    if threshold and threshold != peak:
+        return [baseline, threshold, peak]
+    return [baseline, peak]
 
 
 def _extract_cap_type(f: "Finding") -> str:

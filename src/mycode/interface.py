@@ -339,21 +339,22 @@ class ConversationalInterface:
         result = InterfaceResult()
         warnings: list[str] = []
 
-        # Generate and display project summary
+        # Generate project summary
         summary = summarize_ingestion(ingestion, language)
         result.project_summary = summary
 
-        self._io.display(
-            "\n--- myCode Project Analysis ---\n"
-            f"{summary}\n"
-            "-------------------------------\n"
+        # Run lightweight inference on dependencies
+        inference_summary = self._run_inference(ingestion)
+
+        # Turn 1: Present analysis, ask if correct
+        turn1_response = self._run_turn_1(
+            summary, warnings, ingestion, inference_summary,
         )
 
-        # Turn 1: Ask about project purpose, audience, conditions
-        turn1_response = self._run_turn_1(summary, warnings)
-
-        # Turn 2: Confirm understanding and ask about stress priorities
-        turn2_response = self._run_turn_2(summary, turn1_response, warnings)
+        # Turn 2: Ask targeted questions (user scale, data types)
+        turn2_response = self._run_turn_2(
+            summary, turn1_response, warnings, ingestion,
+        )
 
         # Extract structured constraints from conversation
         constraints = self._extract_constraints(
@@ -361,14 +362,10 @@ class ConversationalInterface:
         )
         result.constraints = constraints
 
-        # Ask for a short project name
-        project_name = self._ask_project_name()
-
-        # Synthesize into structured intent
+        # Synthesize into structured intent (no project name question)
         intent = self._synthesize_intent(
             summary, turn1_response, turn2_response, warnings,
         )
-        intent.project_name = project_name
         result.intent = intent
         result.warnings = warnings
         result.token_usage = {
@@ -377,6 +374,32 @@ class ConversationalInterface:
         }
 
         return result
+
+    def _run_inference(self, ingestion: IngestionResult) -> str:
+        """Run lightweight inference to get risk predictions from corpus."""
+        try:
+            from mycode.inference import CorpusIndex, InferenceEngine
+            index = CorpusIndex()
+            if not index._entries:
+                return ""
+            engine = InferenceEngine(index)
+            dep_names = [d.name for d in ingestion.dependencies if not d.is_dev]
+            if not dep_names:
+                return ""
+            result = engine.infer(dep_names)
+            if not result.predictions:
+                return ""
+            # Build summary of top 3 risk predictions
+            top = result.predictions[:3]
+            lines = []
+            for pred in top:
+                lines.append(
+                    f"- {pred.failure_domain}: {pred.description} "
+                    f"({pred.confidence}% confidence)"
+                )
+            return "\n".join(lines)
+        except Exception:
+            return ""
 
     def review_scenarios(
         self,
@@ -450,12 +473,81 @@ class ConversationalInterface:
         self,
         summary: str,
         warnings: list[str],
+        ingestion: Optional[IngestionResult] = None,
+        inference_summary: str = "",
     ) -> str:
-        """Turn 1: Ask the user to describe their project."""
+        """Turn 1: Present analysis and ask user to confirm/correct."""
         if self._offline:
+            # Build presentation from analysis
+            parts: list[str] = []
+
+            # Classify project type
+            vertical = ""
+            if ingestion:
+                try:
+                    from mycode.classifiers import classify_project
+                    deps = [d.name for d in ingestion.dependencies if not d.is_dev]
+                    files = [fa.file_path for fa in ingestion.file_analyses]
+                    cls = classify_project(
+                        dependencies=deps,
+                        file_structure=files,
+                        framework="",
+                        file_count=ingestion.files_analyzed,
+                        has_frontend=False,
+                        has_backend=False,
+                    )
+                    vertical = cls.get("vertical", "")
+                except Exception:
+                    pass
+
+            # Map vertical to human label
+            _LABELS = {
+                "web_app": "a web application",
+                "data_pipeline": "a data pipeline",
+                "chatbot": "an AI chatbot",
+                "dashboard": "a dashboard",
+                "api_service": "an API service",
+                "ml_model": "a machine learning project",
+                "portfolio": "a portfolio site",
+                "utility": "a utility project",
+                "cli_tool": "a command-line tool",
+                "automation": "an automation script",
+            }
+            type_desc = _LABELS.get(vertical, "a project")
+
+            # Get top deps
+            if ingestion:
+                top_deps = [
+                    d.name for d in ingestion.dependencies if not d.is_dev
+                ][:5]
+                dep_str = ", ".join(top_deps) if top_deps else "no detected dependencies"
+                parts.append(
+                    f"This looks like {type_desc} built with {dep_str}."
+                )
+                parts.append(
+                    f"It has {ingestion.files_analyzed} files, "
+                    f"{ingestion.total_lines} lines, and "
+                    f"{len(ingestion.dependencies)} dependencies."
+                )
+            else:
+                parts.append(f"This looks like {type_desc}.")
+
+            if inference_summary:
+                parts.append(
+                    "Based on similar projects in myCode's library, "
+                    "the most common failure areas are:"
+                )
+                parts.append(inference_summary)
+
+            presentation = "\n".join(parts)
+            self._io.display(
+                f"\n--- myCode Project Analysis ---\n{presentation}\n"
+                "-------------------------------"
+            )
+
             question = (
-                "Tell me about your project: What does it do, who is it for, "
-                "and how will people use it?"
+                "Does this sound right, or would you describe your "
+                "project differently?"
             )
         else:
             question = self._llm_generate_question_turn1(summary, warnings)
@@ -474,14 +566,33 @@ class ConversationalInterface:
         summary: str,
         turn1_response: str,
         warnings: list[str],
+        ingestion: Optional[IngestionResult] = None,
     ) -> str:
-        """Turn 2: Confirm understanding and ask about stress priorities."""
+        """Turn 2: Ask targeted questions about usage context."""
         if self._offline:
-            question = (
-                "What matters most when stress-testing your project? "
-                "For example: handling lots of data, many users at once, "
-                "bad input, speed, memory usage, or something else?"
-            )
+            # Try to infer what we already know so we don't re-ask
+            combined = turn1_response or ""
+            already_has_scale = parse_user_scale(combined) is not None
+            already_has_data = parse_data_type(combined) is not None
+
+            parts: list[str] = []
+            if not already_has_scale:
+                parts.append(
+                    "How many people will use this at the same time? "
+                    "Over a typical day?"
+                )
+            if not already_has_data:
+                parts.append(
+                    "What will users upload or send to your app? "
+                    "PDFs, images, spreadsheets, text?"
+                )
+            if not parts:
+                parts.append(
+                    "What are you most worried about — speed, crashes, "
+                    "data handling, or something else?"
+                )
+
+            question = "\n".join(parts)
         else:
             question = self._llm_generate_question_turn2(
                 summary, turn1_response, warnings,
@@ -682,7 +793,7 @@ class ConversationalInterface:
         if self._offline or not turn1:
             # Offline: assemble from raw responses directly
             return OperationalIntent(
-                summary=f"{turn1} {turn2}".strip() or "General-purpose project",
+                summary=f"{turn1} {turn2}".strip(),
                 project_description=turn1,
                 stress_priorities=turn2,
                 raw_responses=raw,

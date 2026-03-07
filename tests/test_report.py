@@ -751,8 +751,7 @@ class TestReportRendering:
         )
         text = report.as_text()
         assert "Degradation Curves" in text
-        assert "Breaking point: large" in text
-        assert "10.00" in text
+        assert "Breaking point: at large" in text
 
     def test_renders_version_flags(self):
         report = DiagnosticReport(
@@ -1598,8 +1597,7 @@ class TestPlainSummary:
 
         lower = report.plain_summary.lower()
         assert "72mb" in lower
-        assert "10 users" in lower
-        assert "720mb" in lower
+        assert "concurrent load" in lower
 
     def test_priority_caps_before_memory_before_time(self):
         """Resource caps appear first, then memory, then execution time."""
@@ -1887,12 +1885,11 @@ class TestPlainSummaryHelpers:
         assert "80ms" in result
 
     def test_describe_impact_memory_projects_multi_user(self):
-        """Memory ≥50MB projects 10-user impact."""
+        """Memory ≥50MB projects concurrent load impact."""
         result = _describe_impact("memory_peak_mb", 5.0, 120.0)
         assert "5MB" in result
         assert "120MB" in result
-        assert "10 users" in result
-        assert "1200MB" in result
+        assert "concurrent load" in result
 
     def test_describe_impact_memory_small_no_projection(self):
         """Memory <50MB doesn't project multi-user."""
@@ -2473,3 +2470,364 @@ class TestCorpusAwareFindingLanguage:
 
         f = report.findings[0]
         assert "test portfolio" not in f.description
+
+
+# ── Session 14: Harness Failure Transparency Tests ──
+
+
+class TestHarnessFailureTransparency:
+    """Tests for harness failure routing and rendering."""
+
+    def test_harness_failure_routed_to_incomplete(self):
+        """ScenarioResults with failure_reason go to incomplete_tests."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="test_flask_concurrent",
+                    scenario_category="concurrent_execution",
+                    status="failed",
+                    failure_reason="unsupported_framework",
+                    summary="ModuleNotFoundError: No module named 'flask'",
+                    total_errors=1,
+                    steps=[StepResult(
+                        step_name="harness_crash",
+                        error_count=1,
+                        errors=[{"type": "HarnessCrash", "message": "..."}],
+                    )],
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        assert len(report.incomplete_tests) == 1
+        assert report.incomplete_tests[0]._failure_reason == "unsupported_framework"
+        assert len(report.findings) == 0
+
+    def test_env_errors_still_routed_to_incomplete(self):
+        """Environment-only errors (no failure_reason) still go to incomplete."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="test_import_stuff",
+                    scenario_category="data_volume_scaling",
+                    status="failed",
+                    total_errors=1,
+                    steps=[StepResult(
+                        step_name="module_import",
+                        error_count=1,
+                        errors=[{
+                            "type": "ModuleNotFoundError",
+                            "message": "No module named 'myapp'",
+                        }],
+                    )],
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        assert len(report.incomplete_tests) == 1
+        assert report.incomplete_tests[0]._failure_reason == ""
+
+    def test_section_header_renamed(self):
+        """Report renders 'Tests myCode Could Not Run' instead of 'Incomplete Tests'."""
+        report = DiagnosticReport(
+            incomplete_tests=[
+                Finding(
+                    title="Could not test: test_flask",
+                    severity="info",
+                    _failure_reason="unsupported_framework",
+                ),
+            ],
+        )
+        text = report.as_text()
+        assert "Tests myCode Could Not Run" in text
+        assert "Incomplete Tests" not in text
+
+    def test_markdown_has_incomplete_section(self):
+        """Markdown output includes Tests myCode Could Not Run section."""
+        report = DiagnosticReport(
+            incomplete_tests=[
+                Finding(
+                    title="Could not test: test_flask",
+                    severity="info",
+                    _failure_reason="dependency_unavailable",
+                ),
+            ],
+        )
+        md = report.as_markdown()
+        assert "Tests myCode Could Not Run" in md
+
+    def test_grouping_by_reason(self):
+        """Multiple failures of same reason are grouped."""
+        report = DiagnosticReport(
+            incomplete_tests=[
+                Finding(title="Could not test: test_a", severity="info",
+                        _failure_reason="harness_generation_error"),
+                Finding(title="Could not test: test_b", severity="info",
+                        _failure_reason="harness_generation_error"),
+                Finding(title="Could not test: test_c", severity="info",
+                        _failure_reason="harness_generation_error"),
+            ],
+        )
+        text = report.as_text()
+        assert "Test Script Generation Issue (3 tests)" in text
+        assert "Affected:" in text
+
+    def test_failure_reason_in_json(self):
+        """failure_reason appears in as_dict() output."""
+        report = DiagnosticReport(
+            incomplete_tests=[
+                Finding(title="Could not test: foo", severity="info",
+                        _failure_reason="timeout"),
+            ],
+        )
+        d = report.as_dict()
+        assert d["incomplete_tests"][0]["failure_reason"] == "timeout"
+
+    def test_plain_language_explanation(self):
+        """Each failure reason gets a plain-language explanation."""
+        report = DiagnosticReport(
+            incomplete_tests=[
+                Finding(title="Could not test: test_dep", severity="info",
+                        _failure_reason="dependency_unavailable"),
+            ],
+        )
+        text = report.as_text()
+        assert "--containerised" in text
+
+
+# ── Session 14: Intelligent Project Description Tests ──
+
+
+def _s14_ingestion(deps=None):
+    """Helper: minimal IngestionResult."""
+    dep_list = []
+    if deps:
+        for d in deps:
+            if isinstance(d, str):
+                dep_list.append(DependencyInfo(name=d))
+            else:
+                dep_list.append(d)
+    return IngestionResult(
+        project_path="/tmp/test",
+        files_analyzed=3,
+        total_lines=200,
+        dependencies=dep_list,
+    )
+
+
+class TestIntelligentProjectDescription:
+    """Tests for _generate_project_description with classifier output."""
+
+    def test_vertical_with_deps(self):
+        from mycode.report import _generate_project_description
+        ingestion = _s14_ingestion(["flask", "sqlalchemy", "pandas"])
+        desc = _generate_project_description(ingestion, vertical="web_app")
+        assert "web application" in desc
+        assert "flask" in desc
+
+    def test_vertical_only(self):
+        from mycode.report import _generate_project_description
+        ingestion = _s14_ingestion([])
+        desc = _generate_project_description(ingestion, vertical="dashboard")
+        assert "dashboard" in desc
+
+    def test_deps_only_no_vertical(self):
+        from mycode.report import _generate_project_description
+        ingestion = _s14_ingestion(["numpy", "pandas"])
+        desc = _generate_project_description(ingestion)
+        assert "numpy" in desc
+        assert "project" in desc.lower()
+
+    def test_never_says_general_purpose(self):
+        from mycode.report import _generate_project_description
+        ingestion = _s14_ingestion([])
+        desc = _generate_project_description(ingestion)
+        assert "General-purpose" not in desc
+        assert "Your Project" not in desc
+        assert desc == "your project"
+
+    def test_three_deps_formatted_correctly(self):
+        from mycode.report import _generate_project_description
+        ingestion = _s14_ingestion(["flask", "redis", "celery"])
+        desc = _generate_project_description(ingestion, vertical="api_service")
+        assert "flask, redis, and celery" in desc
+
+
+# ── Session 14: Report Narrative Tests ──
+
+
+class TestReportNarrative:
+    """Tests for progressive degradation and no-constraint mode."""
+
+    def test_degradation_narrative_format(self):
+        from mycode.report import _build_degradation_narrative
+        dp = DegradationPoint(
+            scenario_name="test_scaling",
+            metric="execution_time_ms",
+            steps=[
+                ("data_size_100", 3.0),
+                ("data_size_1000", 15.0),
+                ("data_size_10000", 750.0),
+            ],
+        )
+        narrative = _build_degradation_narrative(dp)
+        assert "100 items" in narrative
+        assert "1,000 items" in narrative
+        assert "3ms" in narrative
+
+    def test_no_constraint_header_text(self):
+        report = DiagnosticReport(
+            findings=[Finding(title="Problem", severity="critical")],
+            has_user_constraints=False,
+        )
+        text = report.as_text()
+        assert "Findings at Default Test Range" in text
+        assert "Fix Before Launch" not in text
+
+    def test_constraint_header_text(self):
+        report = DiagnosticReport(
+            findings=[Finding(title="Problem", severity="critical")],
+            has_user_constraints=True,
+        )
+        text = report.as_text()
+        assert "Fix Before Launch" in text
+
+    def test_no_constraint_header_markdown(self):
+        report = DiagnosticReport(
+            findings=[Finding(title="Problem", severity="critical")],
+            has_user_constraints=False,
+        )
+        md = report.as_markdown()
+        assert "Findings at Default Test Range" in md
+
+    def test_no_constraint_note(self):
+        report = DiagnosticReport(
+            findings=[Finding(title="Problem", severity="critical")],
+            has_user_constraints=False,
+        )
+        text = report.as_text()
+        assert "conversational interface" in text
+
+    def test_structured_finding_description(self):
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="flask_concurrent_execution",
+                    scenario_category="concurrent_execution",
+                    status="failed",
+                    summary="Failed at 10 concurrent users",
+                    total_errors=1,
+                    steps=[StepResult(
+                        step_name="concurrent_10",
+                        error_count=1,
+                        errors=[{"type": "RuntimeError", "message": "fail"}],
+                    )],
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(execution, _s14_ingestion(), [], "test")
+        criticals = [f for f in report.findings if f.severity == "critical"]
+        assert len(criticals) >= 1
+        assert "myCode tested" in criticals[0].description
+
+    def test_degradation_narrative_in_text(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="test_scaling",
+                    metric="execution_time_ms",
+                    steps=[
+                        ("data_size_100", 5.0),
+                        ("data_size_10000", 500.0),
+                    ],
+                    breaking_point="data_size_10000",
+                    description="Time increased 100x",
+                ),
+            ],
+        )
+        text = report.as_text()
+        assert "100 items" in text or "10,000 items" in text
+        assert "data_size_100: 5.00" not in text
+
+    def test_memory_degradation_narrative(self):
+        from mycode.report import _build_degradation_narrative
+        dp = DegradationPoint(
+            scenario_name="test_mem",
+            metric="memory_peak_mb",
+            steps=[
+                ("data_size_100", 10.0),
+                ("data_size_10000", 250.0),
+            ],
+        )
+        narrative = _build_degradation_narrative(dp)
+        assert "MB" in narrative
+        assert "100 items" in narrative
+
+    def test_fraction_context_for_concurrency(self):
+        """When app fails at M < N users, show fraction."""
+        from mycode.constraints import OperationalConstraints
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="Errors during: flask_concurrent_50",
+                    severity="warning",
+                    category="concurrent_execution",
+                    description="Some errors occurred.",
+                    details="concurrent_50",
+                    _load_level=10,
+                ),
+            ],
+        )
+        constraints = OperationalConstraints(user_scale=100)
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+        f = report.findings[0]
+        assert "10%" in f.description or "just" in f.description
+
+
+# ── Session 14: Project Name Inference Tests ──
+
+
+class TestProjectNameInference:
+    """Tests for _infer_project_name from pipeline."""
+
+    def test_infer_from_directory(self, tmp_path):
+        from mycode.pipeline import _infer_project_name
+        project = tmp_path / "my-cool-app"
+        project.mkdir()
+        name = _infer_project_name(project)
+        assert name == "My Cool App"
+
+    def test_infer_from_pyproject_toml(self, tmp_path):
+        from mycode.pipeline import _infer_project_name
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text(
+            '[project]\nname = "expense-tracker"\nversion = "1.0"\n'
+        )
+        name = _infer_project_name(project)
+        assert name == "Expense Tracker"
+
+    def test_infer_from_package_json(self, tmp_path):
+        import json as _json
+        from mycode.pipeline import _infer_project_name
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "package.json").write_text(
+            _json.dumps({"name": "budget-planner", "version": "2.0.0"})
+        )
+        name = _infer_project_name(project)
+        assert name == "Budget Planner"
+
+    def test_fallback_to_dirname(self, tmp_path):
+        from mycode.pipeline import _infer_project_name
+        project = tmp_path / "hello_world"
+        project.mkdir()
+        name = _infer_project_name(project)
+        assert name == "Hello World"
