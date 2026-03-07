@@ -189,10 +189,15 @@ class SessionManager:
             self._create_venv()
 
             # 5. Install dependencies from the project copy
-            self._install_dependencies()
+            # In containerised mode, deps are pre-installed during docker build
+            if os.environ.get("MYCODE_CONTAINERISED") == "1":
+                logger.info("Containerised mode — skipping dependency install "
+                            "(pre-installed during docker build)")
+            else:
+                self._install_dependencies()
 
-            # 6. Install JS dependencies if package.json exists
-            self._install_js_dependencies()
+                # 6. Install JS dependencies if package.json exists
+                self._install_js_dependencies()
 
             self._setup_complete = True
             logger.info("Session ready: %s", self.workspace_dir)
@@ -296,9 +301,20 @@ class SessionManager:
     # ── Venv Creation ──
 
     def _create_venv(self):
-        """Create a virtual environment in the workspace."""
+        """Create a virtual environment in the workspace.
+
+        When running inside a Docker container (``MYCODE_CONTAINERISED=1``),
+        enables ``system_site_packages`` so the venv inherits packages
+        installed during ``docker build``.
+        """
+        containerised = os.environ.get("MYCODE_CONTAINERISED") == "1"
         try:
-            venv.create(str(self.venv_dir), with_pip=True, clear=True)
+            venv.create(
+                str(self.venv_dir),
+                with_pip=True,
+                clear=True,
+                system_site_packages=containerised,
+            )
         except Exception as e:
             raise VenvCreationError(
                 f"Failed to create virtual environment: {e}"

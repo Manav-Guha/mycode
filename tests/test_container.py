@@ -169,12 +169,16 @@ class TestProjectDockerfileGeneration:
     """Tests for _generate_project_dockerfile()."""
 
     def test_project_dockerfile_includes_requirements(self):
-        """Project Dockerfile installs requirements.txt if present."""
+        """Project Dockerfile installs requirements.txt with || true fallback."""
         content = _generate_project_dockerfile("mycode:py3.11")
         assert "FROM mycode:py3.11" in content
         assert "COPY . /workspace/project" in content
         assert "requirements.txt" in content
         assert "pip install" in content
+        # All pip install commands should have || true for partial failure tolerance
+        for line in content.split("\n"):
+            if "pip install" in line and line.strip().startswith("RUN"):
+                assert "|| true" in line, f"Missing || true: {line}"
 
     def test_project_dockerfile_includes_package_json(self):
         """Project Dockerfile installs package.json dependencies if present."""
@@ -385,6 +389,36 @@ class TestRunContainerised:
             for i, arg in enumerate(cmd):
                 if arg == "-v" and i + 1 < len(cmd):
                     assert str(project) not in cmd[i + 1]
+
+    def test_skip_version_check_auto_added(self, tmp_path):
+        """--skip-version-check is auto-added (no PyPI lookups without network)."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        mock_result = MagicMock(returncode=0)
+        with (
+            patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
+            patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            run_containerised(project, [])
+            cmd = self._get_run_cmd(mock_run)
+            assert "--skip-version-check" in cmd
+
+    def test_skip_version_check_not_duplicated(self, tmp_path):
+        """--skip-version-check is not added if already present in cli_args."""
+        project = tmp_path / "project"
+        project.mkdir()
+
+        mock_result = MagicMock(returncode=0)
+        with (
+            patch("mycode.container.build_image", return_value="mycode:py3.11"),
+            patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
+            patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            run_containerised(project, ["--skip-version-check"])
+            cmd = self._get_run_cmd(mock_run)
+            assert cmd.count("--skip-version-check") == 1
 
     def test_non_interactive_added_without_constraints(self, tmp_path):
         """--non-interactive is added when no constraints_file provided."""
@@ -1050,3 +1084,130 @@ class TestHostConversation:
         parser = build_parser()
         args = parser.parse_args(["/some/path"])
         assert args.constraints_file is None
+
+
+# ── Containerised Session Manager Behaviour ──
+
+
+class TestContainerisedSessionManager:
+    """Tests that SessionManager adapts when MYCODE_CONTAINERISED=1."""
+
+    def test_venv_uses_system_site_packages_in_container(self, tmp_path):
+        """Venv is created with system_site_packages=True in containerised mode."""
+        import venv as venv_mod
+        from mycode.session import SessionManager
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "app.py").write_text("x = 1\n")
+
+        sm = SessionManager(project)
+        sm.workspace_dir = tmp_path / "workspace"
+        sm.workspace_dir.mkdir()
+        sm.venv_dir = sm.workspace_dir / "venv"
+
+        with patch.dict("os.environ", {"MYCODE_CONTAINERISED": "1"}):
+            with patch("venv.create") as mock_create:
+                try:
+                    sm._create_venv()
+                except Exception:
+                    pass  # venv_python won't exist since we mocked create
+                mock_create.assert_called_once_with(
+                    str(sm.venv_dir),
+                    with_pip=True,
+                    clear=True,
+                    system_site_packages=True,
+                )
+
+    def test_venv_isolated_outside_container(self, tmp_path):
+        """Venv is created without system_site_packages outside containerised mode."""
+        from mycode.session import SessionManager
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "app.py").write_text("x = 1\n")
+
+        sm = SessionManager(project)
+        sm.workspace_dir = tmp_path / "workspace"
+        sm.workspace_dir.mkdir()
+        sm.venv_dir = sm.workspace_dir / "venv"
+
+        with patch.dict("os.environ", {}, clear=False):
+            # Ensure MYCODE_CONTAINERISED is not set
+            import os
+            os.environ.pop("MYCODE_CONTAINERISED", None)
+            with patch("venv.create") as mock_create:
+                try:
+                    sm._create_venv()
+                except Exception:
+                    pass
+                mock_create.assert_called_once_with(
+                    str(sm.venv_dir),
+                    with_pip=True,
+                    clear=True,
+                    system_site_packages=False,
+                )
+
+    def test_deps_skipped_in_container(self, tmp_path):
+        """Dependency installation is skipped in containerised mode."""
+        from mycode.session import SessionManager
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "app.py").write_text("x = 1\n")
+        (project / "requirements.txt").write_text("flask==3.0.0\n")
+
+        sm = SessionManager(project)
+
+        with patch.dict("os.environ", {"MYCODE_CONTAINERISED": "1"}):
+            with (
+                patch.object(sm, "_register_session"),
+                patch.object(sm, "detect_environment") as mock_detect,
+                patch.object(sm, "_write_marker"),
+                patch.object(sm, "_copy_project"),
+                patch.object(sm, "_create_venv"),
+                patch.object(sm, "_install_dependencies") as mock_install,
+                patch.object(sm, "_install_js_dependencies") as mock_js_install,
+            ):
+                mock_detect.return_value = MagicMock(
+                    python_version="3.11", installed_packages=[]
+                )
+                sm.workspace_dir = tmp_path / "workspace"
+                sm.project_copy_dir = sm.workspace_dir / "project"
+                sm.venv_dir = sm.workspace_dir / "venv"
+                sm.setup()
+                # Neither install method should be called
+                mock_install.assert_not_called()
+                mock_js_install.assert_not_called()
+
+    def test_deps_installed_outside_container(self, tmp_path):
+        """Dependency installation runs normally outside containerised mode."""
+        from mycode.session import SessionManager
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "app.py").write_text("x = 1\n")
+
+        sm = SessionManager(project)
+
+        import os
+        os.environ.pop("MYCODE_CONTAINERISED", None)
+
+        with (
+            patch.object(sm, "_register_session"),
+            patch.object(sm, "detect_environment") as mock_detect,
+            patch.object(sm, "_write_marker"),
+            patch.object(sm, "_copy_project"),
+            patch.object(sm, "_create_venv"),
+            patch.object(sm, "_install_dependencies") as mock_install,
+            patch.object(sm, "_install_js_dependencies") as mock_js_install,
+        ):
+            mock_detect.return_value = MagicMock(
+                python_version="3.11", installed_packages=[]
+            )
+            sm.workspace_dir = tmp_path / "workspace"
+            sm.project_copy_dir = sm.workspace_dir / "project"
+            sm.venv_dir = sm.workspace_dir / "venv"
+            sm.setup()
+            mock_install.assert_called_once()
+            mock_js_install.assert_called_once()

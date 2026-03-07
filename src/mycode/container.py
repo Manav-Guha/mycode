@@ -236,12 +236,12 @@ def _generate_project_dockerfile(base_tag: str) -> str:
         "",
         "# Install Python dependencies (if present)",
         "RUN if [ -f /workspace/project/requirements.txt ]; then "
-        "pip install --no-cache-dir -r /workspace/project/requirements.txt; fi",
+        "pip install --no-cache-dir -r /workspace/project/requirements.txt || true; fi",
         'RUN if [ -f /workspace/project/setup.py ]; then '
-        'pip install --no-cache-dir /workspace/project; fi',
+        'pip install --no-cache-dir /workspace/project || true; fi',
         'RUN if [ -f /workspace/project/pyproject.toml ] && '
         'grep -q "\\[project\\]" /workspace/project/pyproject.toml; then '
-        'pip install --no-cache-dir /workspace/project; fi',
+        'pip install --no-cache-dir /workspace/project || true; fi',
         "",
         "# Install JavaScript dependencies (if present)",
         "RUN if [ -f /workspace/project/package.json ]; then "
@@ -359,6 +359,10 @@ def run_containerised(
         # Add constraints-file arg if provided
         if constraints_file:
             cmd.extend(["--constraints-file", "/workspace/constraints.json"])
+
+        # Skip PyPI/npm version lookups (no network in container)
+        if "--skip-version-check" not in cli_args:
+            cmd.append("--skip-version-check")
 
         # Force non-interactive if no constraints file (no conversation needed)
         if "--non-interactive" not in cli_args and not constraints_file:
