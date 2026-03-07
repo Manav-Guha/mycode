@@ -282,8 +282,10 @@ def _build_project_image(base_tag: str, project_path: Path) -> str:
         dockerfile_path = f.name
 
     try:
-        print("Installing project dependencies in container...")
+        print(f"Building project image ({project_tag}) with dependencies...")
+        logger.info("Project Dockerfile: %s", dockerfile_path)
         _docker_build(project_tag, str(project_path), dockerfile_path)
+        print(f"Project image ready: {project_tag}")
     finally:
         try:
             Path(dockerfile_path).unlink(missing_ok=True)
@@ -384,14 +386,3 @@ def run_containerised(
             "Docker not found. Install Docker to use --containerised.\n"
             "See: https://docs.docker.com/get-docker/"
         )
-    finally:
-        # Clean up project image
-        try:
-            subprocess.run(
-                ["docker", "rmi", project_tag],
-                capture_output=True,
-                timeout=30,
-            )
-            logger.info("Cleaned up project image: %s", project_tag)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            logger.debug("Could not clean up project image: %s", project_tag)

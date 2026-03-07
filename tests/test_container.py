@@ -569,27 +569,23 @@ class TestRunContainerised:
             assert "--constraints-file" in cmd
             assert "/workspace/constraints.json" in cmd
 
-    def test_project_image_cleaned_up(self, tmp_path):
-        """Project image is removed after run (docker rmi)."""
+    def test_project_image_persists_after_run(self, tmp_path):
+        """Project image is NOT deleted after run (persists for reuse/inspection)."""
         project = tmp_path / "project"
         project.mkdir()
 
-        run_result = MagicMock(returncode=0)
-        rmi_result = MagicMock(returncode=0)
-
+        mock_result = MagicMock(returncode=0)
         with (
             patch("mycode.container.build_image", return_value="mycode:py3.11"),
             patch("mycode.container._build_project_image", return_value="mycode-project:abc123"),
-            patch("mycode.container.subprocess.run", side_effect=[run_result, rmi_result]) as mock_run,
+            patch("mycode.container.subprocess.run", return_value=mock_result) as mock_run,
         ):
             run_containerised(project, [])
-            # Second call should be docker rmi
-            calls = mock_run.call_args_list
-            assert len(calls) == 2
-            rmi_cmd = calls[1][0][0]
-            assert "docker" in rmi_cmd
-            assert "rmi" in rmi_cmd
-            assert "mycode-project:abc123" in rmi_cmd
+            # Only one subprocess.run call (docker run) — no docker rmi
+            assert mock_run.call_count == 1
+            cmd = mock_run.call_args[0][0]
+            assert "run" in cmd
+            assert "rmi" not in cmd
 
 
 # ── Docker Build Errors ──
