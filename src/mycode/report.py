@@ -1623,7 +1623,11 @@ class ReportGenerator:
                 f"under the conditions we tested."
             )
 
-        # ── Top findings (up to 3, prioritized, one per scenario) ──
+        # ── Top findings (up to 4, prioritized, one per scenario) ──
+        #
+        # SIGNIFICANCE FILTER: Only surface findings with real consequences.
+        # Small memory (<50MB), stable fast timing (<500ms), zero-error
+        # degradation curves are not worth a summary bullet.
         #
         # Priority order: resource cap hits first, then memory degradation,
         # then execution time degradation, then other findings.
@@ -1631,33 +1635,34 @@ class ReportGenerator:
         # scenario because they contain richer curve data (start→end
         # values, breaking points).
 
-        # Build a list of (priority, severity_rank, scenario_name, translated)
-        # severity_rank ensures criticals sort before warnings within the
-        # same priority band.
         _sev_order = {"critical": 0, "warning": 1, "info": 2}
         candidates: list[tuple[int, int, str, str]] = []
 
         # Degradation points first — they have the richest data
         degradation_scenarios: set[str] = set()
         for dp in report.degradation_points:
+            # Significance filter: skip degradation that doesn't matter
+            if not _is_significant_degradation(dp):
+                continue
             translated = self._translate_degradation(
                 dp, short_ref, user_scale=report.user_scale,
             )
             degradation_scenarios.add(dp.scenario_name)
-            # Memory degradation at priority 1, execution time at 2
             if dp.metric == "memory_peak_mb":
                 prio = 1
             elif dp.metric == "error_count":
                 prio = 1
             else:
                 prio = 2
-            # Degradation points have no explicit severity; treat as critical
             candidates.append((prio, 0, dp.scenario_name, translated))
 
         # Critical/warning findings — only for scenarios without
         # degradation points (which already have better data)
         for f in report.findings:
             if f.severity == "info":
+                continue
+            # Significance filter: skip findings without real consequences
+            if not _is_significant_finding(f):
                 continue
             scenario_name = (
                 f.title.split(": ", 1)[-1] if ": " in f.title else ""
@@ -1667,7 +1672,6 @@ class ReportGenerator:
             translated = self._translate_finding(f, short_ref)
             if translated:
                 sev_rank = _sev_order.get(f.severity, 9)
-                # Resource cap hits get priority 0, other criticals 1, warnings 2
                 if "resource" in f.title.lower() or f.category == "edge_case_input":
                     prio = 0
                 elif f.severity == "critical":
@@ -1676,13 +1680,13 @@ class ReportGenerator:
                     prio = 2
                 candidates.append((prio, sev_rank, scenario_name, translated))
 
-        # Sort by priority, then severity rank; pick top 3 (one per scenario)
+        # Sort by priority, then severity rank; pick top 4 (one per scenario)
         candidates.sort(key=lambda c: (c[0], c[1]))
         items: list[str] = []
         seen_scenarios: set[str] = set()
         seen_text: set[str] = set()
         for _prio, _sev, scenario_name, translated in candidates:
-            if len(items) >= 3:
+            if len(items) >= 4:
                 break
             if scenario_name in seen_scenarios:
                 continue
@@ -1822,12 +1826,19 @@ class ReportGenerator:
     ) -> str:
         """Translate a degradation point into a plain-language summary bullet.
 
-        Follows: what happened → why it matters for the user.
+        Every bullet answers three questions:
+        1. What activity caused it (from scenario name)
+        2. What happened (metric values)
+        3. Why it matters (consequence for the user)
+
         Threshold details belong in degradation curves, not summary.
         """
         first_val = dp.steps[0][1] if dp.steps else 0.0
         last_val = dp.steps[-1][1] if dp.steps else 0.0
-        impact = _describe_impact(dp.metric, first_val, last_val, user_scale)
+        activity = _describe_scenario(dp.scenario_name)
+        impact = _describe_impact(
+            dp.metric, first_val, last_val, user_scale, activity=activity,
+        )
         return f"{impact[0].upper()}{impact[1:]}."
 
     def _translate_finding(
@@ -1835,7 +1846,8 @@ class ReportGenerator:
     ) -> str:
         """Translate a finding into plain language using actual metric data.
 
-        ``project_ref`` is woven into the description (e.g.
+        Every bullet must answer: what was tested, what happened, why it
+        matters.  ``project_ref`` is woven into the description (e.g.
         "your incident matching system").
         """
         # Extract scenario name from finding title
@@ -1848,7 +1860,6 @@ class ReportGenerator:
             ctx = activity or f"{project_ref} is handling multiple users"
             if "failed" in f.title.lower():
                 return f"When {ctx}, the system fails."
-            # Use actual metrics instead of vague "things slow down"
             parts = []
             if f._execution_time_ms > 0:
                 parts.append(
@@ -1857,13 +1868,12 @@ class ReportGenerator:
             if f._peak_memory_mb > 0:
                 parts.append(f"memory reached {f._peak_memory_mb:.0f}MB")
             if f._error_count > 0:
-                parts.append(_describe_errors(f))
+                parts.append(_describe_errors_with_context(f, scenario_name))
             if parts:
                 return f"When {ctx}, {' and '.join(parts)}."
             return f"When {ctx}, the system struggled under load."
 
         if f.category == "edge_case_input":
-            # Identify what kind of cap/failure from details
             cap_type = _extract_cap_type(f)
             if cap_type:
                 return (
@@ -1884,10 +1894,10 @@ class ReportGenerator:
                 return f"When {ctx}, the system hits safety limits."
             if f._error_count > 0:
                 return (
-                    f"When {ctx}, {_describe_errors(f)} "
+                    f"When {ctx}, "
+                    f"{_describe_errors_with_context(f, scenario_name)} "
                     f"at the highest load."
                 )
-            # Use actual metrics
             parts = []
             if f._execution_time_ms > 0:
                 parts.append(
@@ -1900,14 +1910,18 @@ class ReportGenerator:
             return f"When {ctx}, performance degrades under load."
 
         if f.category == "memory_profiling":
+            ctx = activity or "extended use"
             if f._peak_memory_mb > 0:
+                sessions = max(1, int(2048 / f._peak_memory_mb))
                 return (
-                    f"Memory reached {f._peak_memory_mb:.0f}MB and keeps "
-                    f"growing. After extended use, your server will run "
-                    f"out of memory."
+                    f"During {ctx}, memory grew to "
+                    f"{f._peak_memory_mb:.0f}MB and keeps growing. "
+                    f"On a 2GB server, this limits you to approximately "
+                    f"{sessions} concurrent sessions before running out "
+                    f"of memory."
                 )
             return (
-                f"Memory grows without limit under sustained use. "
+                f"During {ctx}, memory grows without limit. "
                 f"Your server will eventually run out of memory."
             )
 
@@ -1921,7 +1935,7 @@ class ReportGenerator:
             if f._peak_memory_mb > 0:
                 parts.append(f"memory reached {f._peak_memory_mb:.0f}MB")
             if f._error_count > 0:
-                parts.append(_describe_errors(f))
+                parts.append(_describe_errors_with_context(f, scenario_name))
             if parts:
                 return f"When {activity}, {' and '.join(parts)}."
             return f"When {activity}, issues were found."
@@ -2956,49 +2970,74 @@ def _describe_impact(
     first_val: float,
     last_val: float,
     user_scale: int | None = None,
+    activity: str = "",
 ) -> str:
     """Describe the impact of a degradation in real terms.
 
     For timing: uses _human_time to convert both endpoints to natural
     language so users see "from fast to very slow" instead of "204x".
 
-    For memory: projects multi-user impact when peak is significant,
-    using the user's stated scale when available.
+    For memory: projects multi-user impact with practical server sizing
+    (e.g. "a 2GB server would handle approximately 27 sessions").
+
+    For errors: names the count and relates to user impact.
+
+    Args:
+        metric: The degradation metric name.
+        first_val: Value at the first measurement step.
+        last_val: Value at the last measurement step.
+        user_scale: User's stated concurrent user count.
+        activity: What was being tested (e.g. "concurrent user handling").
     """
-    # TODO(post-funding): Separate measured harness results from linear
-    # projections structurally.  Currently both appear inline in degradation
-    # descriptions (e.g. "if N users are active, that's XMB").  Future:
-    # distinct "measured" vs "projected" sections in DiagnosticReport.
+    during = f"during {activity}" if activity else "under stress testing"
+
     if metric == "execution_time_ms":
         first_desc = _human_time(first_val)
         last_desc = _human_time(last_val)
         if first_desc == last_desc:
-            # Same band — use concrete peak value
             return (
-                f"response time reached {_format_ms(last_val)} "
-                f"under stress testing"
+                f"{during}, response time reached {_format_ms(last_val)}"
             )
         return (
-            f"response time went from {first_desc} "
-            f"to {last_desc} under stress testing"
+            f"{during}, response time went from {first_desc} "
+            f"to {last_desc}"
         )
     if metric == "memory_peak_mb":
-        base = f"memory reached {last_val:.0f}MB under stress testing"
-        # Connect to user context when memory is significant
+        base = f"{during}, memory "
+        if first_val > 0 and last_val > first_val * 1.5:
+            base += f"grew from {first_val:.0f}MB to {last_val:.0f}MB"
+        else:
+            base += f"reached {last_val:.0f}MB"
+        # Practical server sizing
         if last_val >= 50 and user_scale:
+            sessions = max(1, int(2048 / last_val))
             base += (
-                f". With your expected {user_scale:,} users, "
-                f"your server will likely run out of memory"
+                f". On a 2GB server, that leaves room for approximately "
+                f"{sessions} concurrent sessions before running out of memory"
             )
         elif last_val >= 50:
+            sessions = max(1, int(2048 / last_val))
             base += (
-                ". For a production deployment, ensure your server "
-                "has sufficient memory headroom"
+                f". On a typical 2GB server, that limits you to "
+                f"approximately {sessions} concurrent sessions"
+            )
+        else:
+            base += (
+                ". This is moderate and unlikely to cause problems "
+                "on a typical server"
             )
         return base
     if metric == "error_count":
-        return f"errors increased from {int(first_val)} to {int(last_val)}"
-    return f"{_human_metric(metric)} increases significantly"
+        count = int(last_val) - int(first_val)
+        if count <= 0:
+            count = int(last_val)
+        noun = "error" if count == 1 else "errors"
+        return (
+            f"{during}, {count} runtime {noun} occurred. "
+            f"This means your app may crash or produce wrong "
+            f"results under this load"
+        )
+    return f"{during}, {_human_metric(metric)} increases significantly"
 
 
 def _format_ms(ms: float) -> str:
@@ -3047,6 +3086,54 @@ def _metric_label(metric: str) -> str:
     if metric == "error_count":
         return "Errors under load"
     return ""
+
+
+def _is_significant_finding(f: "Finding") -> bool:
+    """Return True if a finding is worth surfacing in the summary.
+
+    Critical findings are always significant. Warning findings are only
+    significant if they involve resource caps, errors, high memory
+    (≥50MB), or slow response times (≥500ms).
+    """
+    if f.severity == "critical":
+        return True
+    if f.category == "edge_case_input":
+        return True
+    if "resource" in (f.title or "").lower():
+        return True
+    if f._error_count > 0:
+        return True
+    if f._peak_memory_mb >= 50:
+        return True
+    if f._execution_time_ms >= 500:
+        return True
+    return False
+
+
+def _is_significant_degradation(dp: "DegradationPoint") -> bool:
+    """Return True if a degradation point is worth surfacing in the summary.
+
+    Filters out degradation that has no real consequence for the user:
+    - Memory peaking below 50MB (moderate, not actionable)
+    - Execution time staying under 500ms (still fast for users)
+    - Error count ending at 0
+    """
+    if not dp.steps:
+        return False
+    last_val = dp.steps[-1][1]
+    first_val = dp.steps[0][1]
+    if dp.metric == "memory_peak_mb":
+        # Only significant if peak is ≥50MB or growth is ≥10x
+        if last_val < 50 and (first_val <= 0 or last_val / max(first_val, 0.1) < 10):
+            return False
+    elif dp.metric == "execution_time_ms":
+        # Only significant if it crosses into noticeable territory (>500ms)
+        if last_val < 500:
+            return False
+    elif dp.metric == "error_count":
+        if last_val <= 0:
+            return False
+    return True
 
 
 def _build_degradation_narrative(dp: "DegradationPoint") -> str:
@@ -3186,6 +3273,33 @@ def _describe_errors(f: "Finding") -> str:
     if count == 1:
         return "1 error occurred"
     return f"{count} errors occurred"
+
+
+def _describe_errors_with_context(f: "Finding", scenario_name: str = "") -> str:
+    """Describe errors with type and significance context.
+
+    Extends ``_describe_errors`` by adding what the error means for
+    the user, based on the error type and scenario context.
+    """
+    base = _describe_errors(f)
+    count = f._error_count
+    details_lower = f.details.lower() if f.details else ""
+    title_lower = f.title.lower() if f.title else ""
+    combined = f"{details_lower} {title_lower}"
+
+    # Add significance for generic errors
+    if "timed out" in base or "ran out of memory" in base or "connection" in base:
+        return base  # Already specific enough
+
+    # For generic "N errors occurred", add the error type if detectable
+    if "runtime" in combined or "exception" in combined or "traceback" in combined:
+        noun = "runtime error" if count == 1 else "runtime errors"
+        return f"{count} {noun} occurred"
+    if "assertion" in combined:
+        noun = "assertion failure" if count == 1 else "assertion failures"
+        return f"{count} {noun} occurred"
+
+    return base
 
 
 # Step name prefixes that are repetition counters, not load levels.

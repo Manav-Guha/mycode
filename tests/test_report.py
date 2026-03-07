@@ -25,15 +25,18 @@ from mycode.report import (
     Finding,
     ReportError,
     ReportGenerator,
+    _describe_errors,
+    _describe_errors_with_context,
     _describe_impact,
     _describe_scenario,
     _describe_step,
-    _describe_errors,
     _extract_cap_type,
     _extract_project_ref,
     _format_ms,
     _human_metric,
     _human_time,
+    _is_significant_degradation,
+    _is_significant_finding,
 )
 from mycode.scenario import LLMBackend, LLMConfig, LLMError, LLMResponse
 
@@ -1369,8 +1372,8 @@ class TestPlainSummary:
         lower = report.plain_summary.lower()
         # Should describe impact in real terms, not multipliers
         assert "response time" in lower or "memory" in lower
-        # Should connect to practical consequences
-        assert "stress testing" in lower or "production" in lower
+        # Should include activity context and practical consequences
+        assert "during" in lower or "server" in lower or "session" in lower
 
     def test_findings_translated(
         self, failing_execution, simple_ingestion, profile_matches,
@@ -1518,7 +1521,8 @@ class TestPlainSummary:
         lower = report.plain_summary.lower()
         # Should describe the impact in real terms
         assert "memory" in lower or "response time" in lower
-        assert "stress testing" in lower or "production" in lower
+        # Should include activity context and practical server sizing
+        assert "during" in lower or "server" in lower or "session" in lower
 
     def test_one_bullet_per_scenario(self):
         """Same scenario with multiple degradation metrics → only one bullet."""
@@ -1603,7 +1607,8 @@ class TestPlainSummary:
 
         lower = report.plain_summary.lower()
         assert "72mb" in lower
-        assert "production" in lower or "memory headroom" in lower
+        # Should include practical server sizing
+        assert "2gb server" in lower or "concurrent sessions" in lower
 
     def test_priority_caps_before_memory_before_time(self):
         """Resource caps appear first, then memory, then execution time."""
@@ -1883,32 +1888,61 @@ class TestPlainSummaryHelpers:
         result = _describe_impact("execution_time_ms", 0.5, 5000.0)
         assert "instant" in result
         assert "very slow" in result
-        assert "stress testing" in result
 
     def test_describe_impact_time_same_band_uses_peak(self):
         """When both values are in the same band, use concrete peak value."""
         result = _describe_impact("execution_time_ms", 10.0, 80.0)
         assert "80ms" in result
-        assert "stress testing" in result
+
+    def test_describe_impact_time_with_activity(self):
+        """Activity context is included when provided."""
+        result = _describe_impact(
+            "execution_time_ms", 0.5, 5000.0,
+            activity="concurrent user handling",
+        )
+        assert "concurrent user handling" in result
+        assert "instant" in result
+        assert "very slow" in result
 
     def test_describe_impact_memory_high_no_user_scale(self):
-        """Memory ≥50MB without user_scale references production deployment."""
+        """Memory ≥50MB without user_scale gives practical server sizing."""
         result = _describe_impact("memory_peak_mb", 5.0, 120.0)
         assert "120MB" in result
-        assert "production" in result.lower()
+        assert "2gb server" in result.lower()
+        assert "concurrent sessions" in result.lower()
 
     def test_describe_impact_memory_with_user_scale(self):
         """Memory ≥50MB with user_scale connects to user context."""
         result = _describe_impact("memory_peak_mb", 5.0, 120.0, user_scale=2983)
         assert "120MB" in result
-        assert "2,983" in result
-        assert "run out of memory" in result
+        assert "2gb server" in result.lower()
+        assert "concurrent sessions" in result.lower()
+        assert "running out of memory" in result
 
     def test_describe_impact_memory_small_no_projection(self):
-        """Memory <50MB doesn't project multi-user."""
+        """Memory <50MB says it's moderate and unlikely to cause problems."""
         result = _describe_impact("memory_peak_mb", 5.0, 30.0)
         assert "30MB" in result
-        assert "production" not in result.lower()
+        assert "moderate" in result.lower()
+        assert "unlikely" in result.lower()
+
+    def test_describe_impact_memory_shows_growth(self):
+        """Memory with significant growth shows from→to values."""
+        result = _describe_impact("memory_peak_mb", 5.0, 120.0)
+        assert "grew from 5MB to 120MB" in result
+
+    def test_describe_impact_errors_names_count_and_consequence(self):
+        """Error degradation names count and states consequence."""
+        result = _describe_impact("error_count", 0, 3)
+        assert "3" in result
+        assert "runtime" in result.lower()
+        assert "crash" in result.lower() or "wrong" in result.lower()
+
+    def test_describe_impact_errors_singular(self):
+        """Single error uses singular form."""
+        result = _describe_impact("error_count", 0, 1)
+        assert "1 runtime error" in result
+        assert "errors" not in result.split("1 runtime error")[0]
 
     def test_format_ms(self):
         assert _format_ms(0.16) == "0.16ms"
@@ -1986,6 +2020,250 @@ class TestPlainSummaryHelpers:
         f._error_count = 1
         result = _describe_errors(f)
         assert "1 request timed out" == result
+
+
+# ── Summary Bullet Quality Tests (Session 15) ──
+
+
+class TestSummaryBulletQuality:
+    """Tests that summary bullets answer: what was tested, what happened, why it matters."""
+
+    def test_memory_bullet_includes_activity(self):
+        """Memory degradation bullet must name what activity caused it."""
+        gen = ReportGenerator(offline=True)
+        dp = DegradationPoint(
+            scenario_name="flask_concurrent_request_load",
+            metric="memory_peak_mb",
+            steps=[("concurrent_1", 7.0), ("concurrent_50", 73.0)],
+        )
+        result = gen._translate_degradation(dp, "your app")
+        lower = result.lower()
+        # Must say WHAT was being done
+        assert "handling" in lower or "concurrent" in lower or "multiple" in lower
+        # Must include the metric
+        assert "73mb" in lower
+
+    def test_memory_bullet_includes_server_sizing(self):
+        """Memory bullet must relate to real server sizes."""
+        gen = ReportGenerator(offline=True)
+        dp = DegradationPoint(
+            scenario_name="streamlit_cache_memory_growth",
+            metric="memory_peak_mb",
+            steps=[("batch_0", 7.0), ("batch_50", 73.0)],
+        )
+        result = gen._translate_degradation(dp, "your app")
+        lower = result.lower()
+        assert "2gb server" in lower
+        assert "concurrent sessions" in lower
+
+    def test_memory_bullet_with_user_scale_shows_capacity(self):
+        """Memory bullet with user_scale shows sessions before OOM."""
+        gen = ReportGenerator(offline=True)
+        dp = DegradationPoint(
+            scenario_name="flask_concurrent_request_load",
+            metric="memory_peak_mb",
+            steps=[("concurrent_1", 5.0), ("concurrent_50", 73.0)],
+        )
+        result = gen._translate_degradation(dp, "your app", user_scale=13467)
+        lower = result.lower()
+        assert "73mb" in lower
+        assert "2gb server" in lower
+        assert "running out of memory" in lower
+
+    def test_error_bullet_names_type_and_significance(self):
+        """Error degradation bullet must name the error type and consequence."""
+        gen = ReportGenerator(offline=True)
+        dp = DegradationPoint(
+            scenario_name="flask_concurrent_request_load",
+            metric="error_count",
+            steps=[("concurrent_1", 0), ("concurrent_50", 3)],
+        )
+        result = gen._translate_degradation(dp, "your app")
+        lower = result.lower()
+        # Must say WHAT was being done
+        assert "handling" in lower or "concurrent" in lower or "multiple" in lower
+        # Must name the count
+        assert "3" in lower
+        # Must say WHY it matters
+        assert "crash" in lower or "wrong" in lower
+
+    def test_single_error_bullet_significance(self):
+        """Single error bullet must still explain why it matters."""
+        gen = ReportGenerator(offline=True)
+        dp = DegradationPoint(
+            scenario_name="flask_concurrent_request_load",
+            metric="error_count",
+            steps=[("concurrent_1", 0), ("concurrent_50", 1)],
+        )
+        result = gen._translate_degradation(dp, "your app")
+        lower = result.lower()
+        assert "1" in result
+        assert "runtime" in lower or "error" in lower
+        assert "crash" in lower or "wrong" in lower
+
+    def test_insignificant_memory_filtered_from_summary(self):
+        """41MB memory alone should NOT appear in summary (not actionable)."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="coupling_compute_pipeline",
+                    scenario_category="dependency_interaction",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="compute_100", execution_time_ms=5.0, memory_peak_mb=7.0),
+                        StepResult(step_name="compute_10000", execution_time_ms=8.0, memory_peak_mb=41.0),
+                    ],
+                    total_errors=0,
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+        lower = report.plain_summary.lower()
+        # 41MB is insignificant — should NOT be a bullet
+        assert "41mb" not in lower
+
+    def test_insignificant_fast_timing_filtered(self):
+        """Fast timing (<500ms) degradation should NOT appear in summary."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="flask_scaling",
+                    scenario_category="data_volume_scaling",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="size_10", execution_time_ms=5.0, memory_peak_mb=5.0),
+                        StepResult(step_name="size_1000", execution_time_ms=200.0, memory_peak_mb=10.0),
+                    ],
+                    total_errors=0,
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+        lower = report.plain_summary.lower()
+        # Under 500ms is still fast — should not be a bullet
+        assert "200ms" not in lower
+
+    def test_significance_filter_memory_below_50(self):
+        """_is_significant_degradation returns False for memory <50MB."""
+        dp = DegradationPoint(
+            scenario_name="test", metric="memory_peak_mb",
+            steps=[("a", 5.0), ("b", 41.0)],
+        )
+        assert _is_significant_degradation(dp) is False
+
+    def test_significance_filter_memory_above_50(self):
+        """_is_significant_degradation returns True for memory ≥50MB."""
+        dp = DegradationPoint(
+            scenario_name="test", metric="memory_peak_mb",
+            steps=[("a", 5.0), ("b", 73.0)],
+        )
+        assert _is_significant_degradation(dp) is True
+
+    def test_significance_filter_time_below_500(self):
+        """_is_significant_degradation returns False for timing <500ms."""
+        dp = DegradationPoint(
+            scenario_name="test", metric="execution_time_ms",
+            steps=[("a", 5.0), ("b", 200.0)],
+        )
+        assert _is_significant_degradation(dp) is False
+
+    def test_significance_filter_time_above_500(self):
+        """_is_significant_degradation returns True for timing ≥500ms."""
+        dp = DegradationPoint(
+            scenario_name="test", metric="execution_time_ms",
+            steps=[("a", 5.0), ("b", 800.0)],
+        )
+        assert _is_significant_degradation(dp) is True
+
+    def test_significance_filter_errors_zero(self):
+        """_is_significant_degradation returns False for error count ending at 0."""
+        dp = DegradationPoint(
+            scenario_name="test", metric="error_count",
+            steps=[("a", 0), ("b", 0)],
+        )
+        assert _is_significant_degradation(dp) is False
+
+    def test_significance_filter_errors_nonzero(self):
+        """_is_significant_degradation returns True for error count > 0."""
+        dp = DegradationPoint(
+            scenario_name="test", metric="error_count",
+            steps=[("a", 0), ("b", 1)],
+        )
+        assert _is_significant_degradation(dp) is True
+
+    def test_memory_profiling_finding_includes_activity(self):
+        """memory_profiling finding bullet includes what activity caused it."""
+        gen = ReportGenerator(offline=True)
+        f = Finding(
+            title="Memory growth: streamlit_cache_memory_growth",
+            severity="warning",
+            category="memory_profiling",
+        )
+        f._peak_memory_mb = 72.0
+        result = gen._translate_finding(f, "your app")
+        lower = result.lower()
+        # Must name activity
+        assert "caching" in lower or "memory" in lower
+        # Must include practical server sizing
+        assert "2gb server" in lower or "concurrent sessions" in lower
+
+    def test_describe_errors_with_context_runtime(self):
+        """Runtime errors are identified from details."""
+        f = Finding(
+            title="Errors during: test_scenario",
+            severity="warning",
+            details="RuntimeError: division by zero",
+        )
+        f._error_count = 2
+        result = _describe_errors_with_context(f, "test_scenario")
+        assert "runtime" in result.lower()
+
+    def test_describe_errors_with_context_generic(self):
+        """Generic errors without type info keep generic description."""
+        f = Finding(
+            title="Errors during: test_scenario",
+            severity="warning",
+            details="Something went wrong",
+        )
+        f._error_count = 3
+        result = _describe_errors_with_context(f, "test_scenario")
+        assert "3 errors occurred" in result
+
+    def test_summary_max_4_bullets(self):
+        """Summary has at most 4 bullets."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name=f"scenario_{i}",
+                    scenario_category="concurrent_execution",
+                    status="completed",
+                    steps=[
+                        StepResult(step_name="step_1", execution_time_ms=10.0, memory_peak_mb=100.0),
+                        StepResult(step_name="step_50", execution_time_ms=5000.0, memory_peak_mb=500.0),
+                    ],
+                    total_errors=i,
+                )
+                for i in range(6)
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            IngestionResult(project_path="/tmp/x", files_analyzed=1),
+            [],
+        )
+        bullet_count = report.plain_summary.count("\n- ")
+        assert bullet_count <= 4
 
 
 # ── Constraint Contextualisation Tests ──
