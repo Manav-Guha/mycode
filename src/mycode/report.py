@@ -1392,7 +1392,7 @@ class ReportGenerator:
                     finding.description = (
                         f"You said {user_scale:,} users. "
                         f"This breaks at just {load_level:,} concurrent "
-                        f"users — that's within your stated needs. "
+                        f"users — well below your expected {user_scale:,}. "
                         f"This is a problem you need to fix before launch."
                         f"{fraction_note} "
                         f"{finding.description}"
