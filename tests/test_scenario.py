@@ -2173,3 +2173,128 @@ class TestConstraintDrivenScenarios:
             s.test_config.get("constraint_data_type") == "tabular"
             for s in data_scenarios
         )
+
+    def test_large_user_scale_capped_at_10000(self):
+        """user_scale of 360,234 uses progressive levels, capped at 10,000."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.scenario import MAX_CONCURRENT, _scale_levels
+
+        levels = _scale_levels(360_234)
+        assert max(levels) <= MAX_CONCURRENT
+        assert max(levels) == 10_000
+        # Should be progressive escalation
+        assert levels == [10, 50, 100, 500, 1_000, 5_000, 10_000]
+
+    def test_moderate_user_scale_not_capped(self):
+        """user_scale of 2,000 uses normal [1x, 1.5x, 2x, 3x] scaling."""
+        from mycode.scenario import MAX_CONCURRENT, _scale_levels
+
+        levels = _scale_levels(2_000)
+        assert max(levels) <= MAX_CONCURRENT
+        assert 2_000 in levels
+        assert max(levels) == 6_000  # 3x
+
+    def test_edge_case_user_scale_at_cap(self):
+        """user_scale of exactly 10,000 — max level is 10k, with sub-levels."""
+        from mycode.scenario import MAX_CONCURRENT, _scale_levels
+
+        levels = _scale_levels(10_000)
+        assert max(levels) == MAX_CONCURRENT
+        assert 10_000 in levels
+        # Near-cap should still have ≥3 escalation levels
+        assert len(levels) >= 3
+
+    def test_user_scale_just_above_cap_uses_progressive(self):
+        """user_scale of 10,001 triggers progressive levels."""
+        from mycode.scenario import _scale_levels
+
+        levels = _scale_levels(10_001)
+        assert levels == [10, 50, 100, 500, 1_000, 5_000, 10_000]
+
+    def test_zero_user_scale_returns_defaults(self):
+        """user_scale of 0 returns safe defaults."""
+        from mycode.scenario import _scale_levels
+
+        levels = _scale_levels(0)
+        assert levels == [1, 10, 100]
+
+    def test_capped_scenario_gets_description_note(self):
+        """Capped scenarios include explanatory note in description."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=500_000)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        concurrent_scenarios = [
+            s for s in result.scenarios
+            if s.category in ("concurrent_execution", "gil_contention")
+            and "constraint_scale" in s.test_config
+        ]
+        assert len(concurrent_scenarios) > 0
+
+        for s in concurrent_scenarios:
+            assert s.test_config.get("scale_capped") is True
+            assert "500,000 users" in s.description
+            assert "10,000 concurrent connections" in s.description
+
+    def test_uncapped_scenario_no_cap_note(self):
+        """Normal-range scenarios do NOT get the cap note."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=50)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        for s in result.scenarios:
+            assert "scale_capped" not in s.test_config
+            assert "Testing higher would not" not in s.description
+
+
+class TestUserFractionFormatting:
+    """Tests for _format_user_fraction in report.py."""
+
+    def test_tiny_percentage_shows_absolute(self):
+        """20 out of 360,234 → shows absolute number, not 0%."""
+        from mycode.report import _format_user_fraction
+
+        result = _format_user_fraction(20, 360_234)
+        assert "20" in result
+        assert "360,234" in result
+        assert "0%" not in result
+
+    def test_meaningful_percentage_shows_both(self):
+        """500 out of 1,000 → shows 50%."""
+        from mycode.report import _format_user_fraction
+
+        result = _format_user_fraction(500, 1_000)
+        assert "500" in result
+        assert "50%" in result
+
+    def test_small_but_nonzero_percentage(self):
+        """100 out of 5,000 → 2%, shows percentage."""
+        from mycode.report import _format_user_fraction
+
+        result = _format_user_fraction(100, 5_000)
+        assert "2%" in result
+        assert "100" in result
+
+    def test_sub_one_percent(self):
+        """5 out of 10,000 → 0.05%, shows absolute instead."""
+        from mycode.report import _format_user_fraction
+
+        result = _format_user_fraction(5, 10_000)
+        assert "0%" not in result
+        assert "5" in result
+        assert "far below" in result.lower()
+
+    def test_zero_user_scale(self):
+        """user_scale=0 returns empty string."""
+        from mycode.report import _format_user_fraction
+
+        result = _format_user_fraction(20, 0)
+        assert result == ""

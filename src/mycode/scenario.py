@@ -1279,11 +1279,19 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 "concurrent_execution", "gil_contention",
                 "async_failures",
             ):
-                # Replace arbitrary concurrent ranges with stated capacity
                 scale_levels = _scale_levels(user_scale)
                 params["concurrent"] = scale_levels
                 scenario.test_config["constraint_scale"] = scale_levels
                 scenario.test_config["user_stated_capacity"] = user_scale
+
+                if user_scale > MAX_CONCURRENT:
+                    scenario.test_config["scale_capped"] = True
+                    scenario.description += (
+                        f" You stated {user_scale:,} users. myCode tests up "
+                        f"to {MAX_CONCURRENT:,} concurrent connections to "
+                        f"find your breaking point. Testing higher would not "
+                        f"provide additional insight on this hardware."
+                    )
 
             # ── 2. Data size boundaries ──
             if max_payload is not None and scenario.category in (
@@ -1587,20 +1595,45 @@ def _infer_priority_from_template(template: dict) -> str:
     return "low"
 
 
+MAX_CONCURRENT = 10_000
+"""Hard cap on concurrent simulations.  Testing beyond 10,000 threads
+measures Python/OS threading limits, not the application's quality."""
+
+_PROGRESSIVE_LEVELS = [10, 50, 100, 500, 1_000, 5_000, 10_000]
+"""Progressive escalation ladder used when ``user_scale`` exceeds
+``MAX_CONCURRENT``.  Finds the actual breaking point through escalation
+rather than jumping straight to an unachievable number."""
+
+
 def _scale_levels(user_scale: int) -> list[int]:
     """Compute test levels from stated user scale.
 
     Per spec §5: test at stated capacity → 1.5x → 2x → 3x.
     Minimum level is 1 to avoid empty tests.
+
+    When ``user_scale`` exceeds ``MAX_CONCURRENT`` (10,000), uses
+    progressive escalation instead — testing at 10 → 50 → 100 → … →
+    10,000.  This finds the real breaking point without spawning an
+    impossible number of threads.
     """
     if user_scale <= 0:
         return [1, 10, 100]
-    levels = sorted({
-        max(1, user_scale),
-        max(1, int(user_scale * 1.5)),
-        max(1, user_scale * 2),
-        max(1, user_scale * 3),
-    })
+
+    if user_scale > MAX_CONCURRENT:
+        return list(_PROGRESSIVE_LEVELS)
+
+    raw = [user_scale, int(user_scale * 1.5), user_scale * 2, user_scale * 3]
+    levels = sorted({max(1, min(v, MAX_CONCURRENT)) for v in raw})
+
+    # When near the cap, capping collapses distinct values.
+    # Add sub-levels so we still have a meaningful escalation ladder.
+    if len(levels) < 3:
+        for divisor in (2, 4):
+            sub = max(1, user_scale // divisor)
+            if sub not in levels:
+                levels.append(sub)
+        levels = sorted(set(levels))
+
     return levels
 
 

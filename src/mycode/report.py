@@ -1386,16 +1386,13 @@ class ReportGenerator:
                     finding.severity = "critical"
                     fraction_note = ""
                     if load_level < user_scale and user_scale > 0:
-                        pct = int(load_level / user_scale * 100)
                         fraction_note = (
-                            f" This means if just {pct}% of your users "
-                            f"are active at the same time, the app will "
-                            f"stop working."
+                            f" {_format_user_fraction(load_level, user_scale)}"
                         )
                     finding.description = (
-                        f"You said {user_scale} users. "
-                        f"This breaks at {load_level} concurrent users "
-                        f"— that's within your stated needs. "
+                        f"You said {user_scale:,} users. "
+                        f"This breaks at just {load_level:,} concurrent "
+                        f"users — that's within your stated needs. "
                         f"This is a problem you need to fix before launch."
                         f"{fraction_note} "
                         f"{finding.description}"
@@ -1404,8 +1401,8 @@ class ReportGenerator:
                     # Beyond but ≤3x → WARNING
                     finding.severity = "warning"
                     finding.description = (
-                        f"You said {user_scale} users. "
-                        f"This breaks at {load_level} concurrent users "
+                        f"You said {user_scale:,} users. "
+                        f"This breaks at {load_level:,} concurrent users "
                         f"({ratio:.1f}x your stated needs). "
                         f"Not a problem today, but won't take much growth "
                         f"to hit this. "
@@ -1415,8 +1412,8 @@ class ReportGenerator:
                     # Far beyond → INFORMATIONAL
                     finding.severity = "info"
                     finding.description = (
-                        f"You said {user_scale} users. "
-                        f"This breaks at {load_level} concurrent users "
+                        f"You said {user_scale:,} users. "
+                        f"This breaks at {load_level:,} concurrent users "
                         f"— well beyond your stated needs ({ratio:.0f}x). "
                         f"Worth knowing, but not urgent. "
                         f"{finding.description}"
@@ -3323,6 +3320,36 @@ def _step_level(step_name: str) -> Optional[int]:
         return None
     val = int(m.group(2))
     return val if val > 0 else None
+
+
+def _format_user_fraction(load_level: int, user_scale: int) -> str:
+    """Format failure threshold relative to user scale without showing 0%.
+
+    When the percentage is tiny (e.g. 20 out of 360,234 = 0.006%),
+    shows the absolute number instead: "just 20 concurrent users".
+    When percentage is meaningful (≥1%), shows both:
+    "just 500 concurrent users (less than 1% of your expected 360,234)".
+
+    Args:
+        load_level: Concurrent user count that caused failure.
+        user_scale: User's stated concurrent user count.
+
+    Returns:
+        A human-readable sentence fragment.
+    """
+    if user_scale <= 0:
+        return ""
+    pct = load_level / user_scale * 100
+    if pct < 1:
+        return (
+            f"The app fails at just {load_level:,} concurrent users "
+            f"— far below your expected {user_scale:,}."
+        )
+    return (
+        f"Just {load_level:,} concurrent users "
+        f"(only {pct:.0f}% of your expected {user_scale:,}) "
+        f"is enough to break it."
+    )
 
 
 def _extract_load_level(finding: "Finding") -> tuple[Optional[int], bool]:
