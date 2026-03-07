@@ -283,7 +283,7 @@ class TestFindingExtraction:
             if "indicator" in f.title.lower()
         ]
         assert len(indicator_findings) >= 1
-        assert "memory_growth_unbounded" in indicator_findings[0].description
+        assert "memory usage grows without limit" in indicator_findings[0].description
 
     def test_error_type_summarization(
         self, failing_execution, simple_ingestion, profile_matches,
@@ -1041,7 +1041,8 @@ class TestFindingGrouping:
         )
         text = report.as_text()
         assert "(and 2 similar)" in text
-        assert "Also: coupling_api_send, coupling_api_post" in text
+        # Scenario names are humanized in Also: lines
+        assert "Also: Send, Post" in text
 
     def test_grouping_preserves_ungrouped(self):
         """Version flag findings (unique titles) should not be grouped."""
@@ -1170,7 +1171,8 @@ class TestDegradationGrouping:
         report = DiagnosticReport(degradation_points=[dp])
         text = report.as_text()
         assert "(and 2 similar)" in text
-        assert "Also: coupling_compute_setError, coupling_compute_setRawScores" in text
+        # Scenario names are humanized in Also: lines
+        assert "Also: Set error, Set raw scores" in text
 
     def test_many_grouped_shows_plus_more(self):
         """More than 5 grouped → shows '+N more'."""

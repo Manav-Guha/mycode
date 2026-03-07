@@ -301,7 +301,10 @@ class DiagnosticReport:
                         f"    >> Breaking point: at {bp_desc}"
                     )
                 if dp.grouped_points:
-                    names = [gp.scenario_name for gp in dp.grouped_points]
+                    names = [
+                        _humanize_scenario_name(gp.scenario_name)
+                        for gp in dp.grouped_points
+                    ]
                     shown = names[:5]
                     extra = len(names) - 5
                     also_line = ", ".join(shown)
@@ -347,7 +350,8 @@ class DiagnosticReport:
             names = []
             for gf in f.grouped_findings:
                 parts = gf.title.split(": ", 1)
-                names.append(parts[1] if len(parts) > 1 else gf.title)
+                raw = parts[1] if len(parts) > 1 else gf.title
+                names.append(_humanize_scenario_name(raw))
             shown = names[:5]
             extra = len(names) - 5
             also_line = ", ".join(shown)
@@ -1085,12 +1089,16 @@ class ReportGenerator:
 
             # Check failure indicators
             if sr.failure_indicators_triggered:
+                human_triggers = [
+                    _humanize_trigger(t)
+                    for t in sr.failure_indicators_triggered
+                ]
                 f = Finding(
                     title=f"Failure indicators triggered: {sr.scenario_name}",
                     severity="warning",
                     category=sr.scenario_category,
                     description=(
-                        f"Triggered: {', '.join(sr.failure_indicators_triggered)}"
+                        f"myCode detected: {', '.join(human_triggers)}."
                     ),
                     details=load_detail.strip() if load_detail else "",
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
@@ -1426,7 +1434,7 @@ class ReportGenerator:
                     )
                 else:
                     finding.description = (
-                        f"This issue occurs at load level {load_level:,}. "
+                        f"This issue occurs at {load_level:,} operations. "
                         f"{finding.description}"
                     )
             elif user_scale is None and finding.severity in ("critical", "warning"):
@@ -1938,11 +1946,11 @@ class ReportGenerator:
             ctx = activity or f"{project_ref} is running over time"
             if f._peak_memory_mb > 0:
                 return (
-                    f"During {ctx}, memory grows to "
+                    f"When {ctx}, memory grows to "
                     f"{f._peak_memory_mb:.0f}MB and keeps climbing."
                 )
             return (
-                f"During {ctx}, memory keeps growing and could "
+                f"When {ctx}, memory keeps growing and could "
                 f"eventually run out."
             )
 
@@ -2241,7 +2249,7 @@ class ReportGenerator:
                 return f" at {step_name} ({desc})"
             level = _step_level(step_name)
             if level is not None:
-                return f" at {step_name} (load level {level:,})"
+                return f" at {level:,} operations"
             return ""
 
         # Prefer the first failing step's load level
@@ -2692,6 +2700,31 @@ def _human_error_type(etype: str) -> str:
     return re.sub(r"(?<=[a-z])(?=[A-Z])", " ", etype).lower()
 
 
+def _humanize_trigger(trigger_name: str) -> str:
+    """Translate a failure indicator trigger name to plain language.
+
+    ``memory_growth_unbounded`` → ``memory usage grows without limit``.
+    """
+    _TRIGGER_MAP: dict[str, str] = {
+        "memory_growth_unbounded": "memory usage grows without limit",
+        "memory_growth_linear": "memory usage grows steadily with load",
+        "memory_growth_exponential": "memory usage grows rapidly with load",
+        "memory_spike": "sudden memory spike detected",
+        "timeout_cascade": "timeouts cascade across operations",
+        "error_rate_increasing": "error rate increases with load",
+        "throughput_collapse": "throughput drops sharply under load",
+        "latency_spike": "response time spikes suddenly",
+        "connection_exhaustion": "connections are exhausted under load",
+        "deadlock_detected": "potential deadlock detected",
+        "resource_leak": "resources are not being released",
+        "cpu_saturation": "CPU is fully saturated",
+    }
+    if trigger_name in _TRIGGER_MAP:
+        return _TRIGGER_MAP[trigger_name]
+    # Fallback: replace underscores with spaces
+    return trigger_name.replace("_", " ")
+
+
 def _human_metric(metric: str) -> str:
     """Convert a metric name to human-readable text."""
     return {
@@ -2800,6 +2833,71 @@ def _describe_scenario(scenario_name: str) -> str:
     return ""
 
 
+def _humanize_scenario_name(scenario_name: str) -> str:
+    """Translate an internal scenario name to a readable label for "Also:" lines.
+
+    Strips known prefixes (coupling_compute_, coupling_state_, etc.) and
+    converts the remainder to readable text. Designed to give unique
+    per-scenario labels, unlike ``_describe_scenario`` which returns
+    category-level descriptions.
+    """
+    name_lower = scenario_name.lower()
+
+    # Strip known coupling prefixes (preserve original case for remainder)
+    _COUPLING_PREFIXES = (
+        "coupling_compute_", "coupling_state_", "coupling_api_",
+        "coupling_render_", "coupling_errorhandler_",
+    )
+    for prefix in _COUPLING_PREFIXES:
+        if name_lower.startswith(prefix):
+            remainder = scenario_name[len(prefix):]
+            return _humanize_identifier(remainder)
+
+    # Try template match for the suffix
+    parts = name_lower.split("_")
+    for start in range(1, len(parts)):
+        template_key = "_".join(parts[start:])
+        if template_key in _TEMPLATE_DESCRIPTIONS:
+            dep = "_".join(parts[:start])
+            return f"{dep} {_TEMPLATE_DESCRIPTIONS[template_key]}"
+
+    # Fallback: humanize the full name
+    return _humanize_identifier(scenario_name)
+
+
+def _humanize_identifier(name: str) -> str:
+    """Convert a snake_case or camelCase identifier to readable text.
+
+    ``uuid_uuid4`` → ``UUID generation``,
+    ``getattr`` → ``attribute access``,
+    ``setError`` → ``set error``,
+    ``setRawScores`` → ``set raw scores``.
+    """
+    _KNOWN_IDENTIFIERS: dict[str, str] = {
+        "uuid_uuid4": "UUID generation",
+        "uuid4": "UUID generation",
+        "getattr": "attribute access",
+        "setattr": "attribute assignment",
+        "json_dumps": "JSON serialisation",
+        "json_loads": "JSON parsing",
+        "hashlib": "hashing operations",
+        "re_compile": "regex compilation",
+        "deepcopy": "deep copy operations",
+        "pickle": "serialisation",
+    }
+    name_lower = name.lower()
+    if name_lower in _KNOWN_IDENTIFIERS:
+        return _KNOWN_IDENTIFIERS[name_lower]
+
+    # Split camelCase: "setRawScores" → "set Raw Scores" → "set raw scores"
+    result = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name)
+    # Replace underscores with spaces
+    result = result.replace("_", " ").strip().lower()
+    if result:
+        return result[0].upper() + result[1:]
+    return name
+
+
 def _describe_step(step_name: str) -> str:
     """Translate a step name into user terms.
 
@@ -2862,6 +2960,36 @@ def _describe_step(step_name: str) -> str:
     m = re.match(r"compute_(\d+)", step_name)
     if m:
         return f"{int(m.group(1)):,} computation cycles"
+
+    m = re.match(r"rerun_rows_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} rows of data"
+
+    m = re.match(r"cached_rows_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} cached entries"
+
+    m = re.match(r"table_serialize_(\d+)kb", step_name, re.IGNORECASE)
+    if m:
+        kb = int(m.group(1))
+        if kb >= 1000:
+            return f"{kb // 1000}MB of serialised data"
+        return f"{kb}KB of serialised data"
+
+    m = re.match(r"session_reruns_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} session reruns"
+
+    # Generic fallback: strip underscores, add spaces, capitalise
+    # Only apply if the name has a recognisable word_number pattern
+    # and is NOT an iteration counter (iteration_5, repeat_3, etc.)
+    m = re.match(r"([a-z_]+?)_(\d+)$", step_name)
+    if m:
+        prefix = m.group(1)
+        if prefix not in _ITERATION_PREFIXES and prefix != "edge":
+            label = prefix.replace("_", " ")
+            number = int(m.group(2))
+            return f"{number:,} {label}"
 
     return ""
 
