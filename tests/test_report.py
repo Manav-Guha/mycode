@@ -1369,8 +1369,8 @@ class TestPlainSummary:
         lower = report.plain_summary.lower()
         # Should describe impact in real terms, not multipliers
         assert "response time" in lower or "memory" in lower
-        # Should use "When" pattern for activity framing
-        assert "when " in lower
+        # Should connect to practical consequences
+        assert "stress testing" in lower or "production" in lower
 
     def test_findings_translated(
         self, failing_execution, simple_ingestion, profile_matches,
@@ -1409,14 +1409,15 @@ class TestPlainSummary:
         bullet_count = report.plain_summary.count("\n- ")
         assert bullet_count <= 3
 
-    def test_closing_line_present(
+    def test_no_boilerplate_closing_line(
         self, failing_execution, simple_ingestion, profile_matches,
     ):
-        """Summary ends with the bridge line."""
+        """Summary does NOT end with boilerplate bridge line."""
         gen = ReportGenerator(offline=True)
         report = gen.generate(failing_execution, simple_ingestion, profile_matches)
 
-        assert "paste these into your coding tool" in report.plain_summary.lower()
+        assert "paste these into your coding tool" not in report.plain_summary.lower()
+        assert "see detailed" not in report.plain_summary.lower()
 
     def test_plain_summary_in_as_text(
         self, failing_execution, simple_ingestion, profile_matches,
@@ -1491,8 +1492,8 @@ class TestPlainSummary:
         import re
         assert not re.search(r"\d+x slower", lower)
 
-    def test_step_translated_to_user_terms(self):
-        """Step names translated to user-meaningful descriptions."""
+    def test_degradation_bullet_describes_impact(self):
+        """Degradation bullet leads with impact, not step labels."""
         execution = ExecutionEngineResult(
             scenario_results=[
                 ScenarioResult(
@@ -1515,7 +1516,9 @@ class TestPlainSummary:
         )
 
         lower = report.plain_summary.lower()
-        assert "simultaneous users" in lower
+        # Should describe the impact in real terms
+        assert "memory" in lower or "response time" in lower
+        assert "stress testing" in lower or "production" in lower
 
     def test_one_bullet_per_scenario(self):
         """Same scenario with multiple degradation metrics → only one bullet."""
@@ -1544,8 +1547,8 @@ class TestPlainSummary:
         bullet_count = report.plain_summary.count("\n- ")
         assert bullet_count == 1
 
-    def test_breaking_point_describes_impact(self):
-        """Breaking point includes what happens there, not just the label."""
+    def test_summary_bullet_no_threshold_detail(self):
+        """Summary bullets don't include threshold details (those belong in curves)."""
         execution = ExecutionEngineResult(
             scenario_results=[
                 ScenarioResult(
@@ -1569,13 +1572,14 @@ class TestPlainSummary:
         )
 
         lower = report.plain_summary.lower()
-        # Should describe what happens at the breaking point in user terms
-        assert "simultaneous users" in lower
-        # Memory is prioritized over time — should describe climbing or MB
-        assert "climbing" in lower or "mb" in lower
+        # Memory is prioritized — should show peak MB
+        assert "80mb" in lower
+        # Should NOT include threshold details like "starts climbing around"
+        assert "starts climbing" not in lower
+        assert "starts slowing" not in lower
 
-    def test_memory_projects_multi_user(self):
-        """Memory findings project multi-user impact."""
+    def test_memory_projects_production_impact(self):
+        """Memory findings connect to production deployment impact."""
         execution = ExecutionEngineResult(
             scenario_results=[
                 ScenarioResult(
@@ -1599,7 +1603,7 @@ class TestPlainSummary:
 
         lower = report.plain_summary.lower()
         assert "72mb" in lower
-        assert "concurrent load" in lower
+        assert "production" in lower or "memory headroom" in lower
 
     def test_priority_caps_before_memory_before_time(self):
         """Resource caps appear first, then memory, then execution time."""
@@ -1879,25 +1883,32 @@ class TestPlainSummaryHelpers:
         result = _describe_impact("execution_time_ms", 0.5, 5000.0)
         assert "instant" in result
         assert "very slow" in result
+        assert "stress testing" in result
 
-    def test_describe_impact_time_same_band_uses_concrete(self):
-        """When both values are in the same band, use concrete ms values."""
+    def test_describe_impact_time_same_band_uses_peak(self):
+        """When both values are in the same band, use concrete peak value."""
         result = _describe_impact("execution_time_ms", 10.0, 80.0)
-        assert "10ms" in result
         assert "80ms" in result
+        assert "stress testing" in result
 
-    def test_describe_impact_memory_projects_multi_user(self):
-        """Memory ≥50MB projects concurrent load impact."""
+    def test_describe_impact_memory_high_no_user_scale(self):
+        """Memory ≥50MB without user_scale references production deployment."""
         result = _describe_impact("memory_peak_mb", 5.0, 120.0)
-        assert "5MB" in result
         assert "120MB" in result
-        assert "concurrent load" in result
+        assert "production" in result.lower()
+
+    def test_describe_impact_memory_with_user_scale(self):
+        """Memory ≥50MB with user_scale connects to user context."""
+        result = _describe_impact("memory_peak_mb", 5.0, 120.0, user_scale=2983)
+        assert "120MB" in result
+        assert "2,983" in result
+        assert "run out of memory" in result
 
     def test_describe_impact_memory_small_no_projection(self):
         """Memory <50MB doesn't project multi-user."""
         result = _describe_impact("memory_peak_mb", 5.0, 30.0)
         assert "30MB" in result
-        assert "10 users" not in result
+        assert "production" not in result.lower()
 
     def test_format_ms(self):
         assert _format_ms(0.16) == "0.16ms"

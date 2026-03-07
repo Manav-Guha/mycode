@@ -1697,17 +1697,11 @@ class ReportGenerator:
             for item in items:
                 lines.append(f"- {item}")
 
-        # ── Closing line ──
-        lines.append("")
-        if items:
+        # ── Closing line (clean runs only) ──
+        if not items:
+            lines.append("")
             lines.append(
-                "See detailed technical findings below — you can paste these "
-                "into your coding tool for specific fixes."
-            )
-        else:
-            lines.append(
-                "No issues were found under the conditions we tested. "
-                "See detailed results below."
+                "No issues were found under the conditions we tested."
             )
 
         return "\n".join(lines)
@@ -1769,12 +1763,16 @@ class ReportGenerator:
             "for this specific project, in terms a non-technical user would "
             "understand.\n\n"
             "RULES:\n"
+            "- Each bullet: state the problem, explain why it matters for "
+            "the user, optionally note when it starts.\n"
+            "- Connect numbers to user context: 'Memory reached 72MB. "
+            "With your expected 2,983 users, your server will likely run "
+            "out of memory.'\n"
+            "- Use 'your app' in bullets, not the full project description.\n"
             "- Do not suggest fixes or code changes.\n"
             "- Do not use engineering jargon.\n"
             "- Each bullet should start with '- '.\n"
-            "- Be specific about what happened, using the project name.\n"
-            "- End with a brief closing line (not a bullet) directing them "
-            "to the detailed findings below.\n\n"
+            "- Do not end with a closing line or boilerplate.\n\n"
             + "\n".join(context_parts)
         )
 
@@ -1822,55 +1820,14 @@ class ReportGenerator:
         self, dp: DegradationPoint, project_ref: str,
         user_scale: int | None = None,
     ) -> str:
-        """Translate a degradation point into plain language.
+        """Translate a degradation point into a plain-language summary bullet.
 
-        Reads the actual curve data to describe what happens at the
-        breaking point in user terms, not just name it.
-        ``project_ref`` is woven into the activity phrase (e.g.
-        "your incident matching system").
+        Follows: what happened → why it matters for the user.
+        Threshold details belong in degradation curves, not summary.
         """
-        activity = _describe_scenario(dp.scenario_name)
-        if activity:
-            activity = f"{project_ref} is {activity}"
-
         first_val = dp.steps[0][1] if dp.steps else 0.0
         last_val = dp.steps[-1][1] if dp.steps else 0.0
         impact = _describe_impact(dp.metric, first_val, last_val, user_scale)
-
-        # Describe what happens at the breaking point
-        breaking_desc = ""
-        if dp.breaking_point and len(dp.steps) >= 2:
-            step_desc = _describe_step(dp.breaking_point)
-            # Find the value at the breaking point
-            bp_val = None
-            for label, val in dp.steps:
-                if label == dp.breaking_point:
-                    bp_val = val
-                    break
-            if step_desc and bp_val is not None:
-                if dp.metric == "execution_time_ms":
-                    breaking_desc = (
-                        f"starts slowing down noticeably around "
-                        f"{step_desc} ({_format_ms(bp_val)})"
-                    )
-                elif dp.metric == "memory_peak_mb":
-                    breaking_desc = (
-                        f"starts climbing around {step_desc} "
-                        f"({bp_val:.0f}MB)"
-                    )
-                else:
-                    breaking_desc = f"starts around {step_desc}"
-            elif step_desc:
-                breaking_desc = (
-                    f"starts around {step_desc}"
-                )
-
-        if activity and breaking_desc:
-            return f"When {activity}, {impact} — {breaking_desc}."
-        if activity:
-            return f"When {activity}, {impact}."
-        if breaking_desc:
-            return f"{impact[0].upper()}{impact[1:]} — {breaking_desc}."
         return f"{impact[0].upper()}{impact[1:]}."
 
     def _translate_finding(
@@ -1943,15 +1900,15 @@ class ReportGenerator:
             return f"When {ctx}, performance degrades under load."
 
         if f.category == "memory_profiling":
-            ctx = activity or f"{project_ref} is running over time"
             if f._peak_memory_mb > 0:
                 return (
-                    f"When {ctx}, memory grows to "
-                    f"{f._peak_memory_mb:.0f}MB and keeps climbing."
+                    f"Memory reached {f._peak_memory_mb:.0f}MB and keeps "
+                    f"growing. After extended use, your server will run "
+                    f"out of memory."
                 )
             return (
-                f"When {ctx}, memory keeps growing and could "
-                f"eventually run out."
+                f"Memory grows without limit under sustained use. "
+                f"Your server will eventually run out of memory."
             )
 
         # Default: use actual metrics if available
@@ -3016,35 +2973,31 @@ def _describe_impact(
         first_desc = _human_time(first_val)
         last_desc = _human_time(last_val)
         if first_desc == last_desc:
-            # Same band — fall back to concrete values
+            # Same band — use concrete peak value
             return (
-                f"response time goes from {_format_ms(first_val)} "
-                f"to {_format_ms(last_val)}"
+                f"response time reached {_format_ms(last_val)} "
+                f"under stress testing"
             )
         return (
-            f"response time goes from {first_desc} "
-            f"to {last_desc}"
+            f"response time went from {first_desc} "
+            f"to {last_desc} under stress testing"
         )
     if metric == "memory_peak_mb":
-        base = (
-            f"memory grows from {first_val:.0f}MB to {last_val:.0f}MB"
-        )
-        # Contextualise with user scale when memory is significant
+        base = f"memory reached {last_val:.0f}MB under stress testing"
+        # Connect to user context when memory is significant
         if last_val >= 50 and user_scale:
             base += (
-                f". With {user_scale:,} concurrent users, your server "
-                f"will need substantially more memory than a typical "
-                f"configuration provides"
+                f". With your expected {user_scale:,} users, "
+                f"your server will likely run out of memory"
             )
         elif last_val >= 50:
             base += (
-                f". Under concurrent load, your server will need "
-                f"substantially more memory than a typical configuration "
-                f"provides"
+                ". For a production deployment, ensure your server "
+                "has sufficient memory headroom"
             )
         return base
     if metric == "error_count":
-        return f"errors jump from {int(first_val)} to {int(last_val)}"
+        return f"errors increased from {int(first_val)} to {int(last_val)}"
     return f"{_human_metric(metric)} increases significantly"
 
 
