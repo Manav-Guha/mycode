@@ -162,6 +162,9 @@ class DiagnosticReport:
     _usage_pattern: str = ""
     _data_type: str = ""
     _max_payload_mb: float | None = None
+    baseline_failed: bool = False
+    _baseline_report_text: str = ""
+    project_name: str = ""
     model_used: str = "offline"
     token_usage: dict = field(
         default_factory=lambda: {"input_tokens": 0, "output_tokens": 0}
@@ -169,6 +172,9 @@ class DiagnosticReport:
 
     def as_text(self) -> str:
         """Render the report as readable plain text."""
+        if self.baseline_failed and self._baseline_report_text:
+            return self._baseline_report_text
+
         sections: list[str] = []
 
         # Header

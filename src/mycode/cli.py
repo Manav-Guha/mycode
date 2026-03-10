@@ -616,4 +616,8 @@ def main(argv: list[str] | None = None) -> int:
     if result.recording_path:
         print(f"\nSession recorded: {result.recording_path}")
 
+    # Exit code 2 = baseline viability failure (environment too broken)
+    if result.report and getattr(result.report, "baseline_failed", False):
+        return 2
+
     return 0 if result.success else 1

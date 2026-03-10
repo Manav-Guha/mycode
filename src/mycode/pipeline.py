@@ -24,6 +24,7 @@ Pure orchestration layer — no LLM dependency of its own.
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +52,7 @@ from mycode.scenario import (
     StressTestScenario,
 )
 from mycode.session import ResourceCaps, SessionManager
+from mycode.viability import ViabilityResult, build_baseline_failed_text, run_viability_gate
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,7 @@ class PipelineResult:
     interface_result: Optional[InterfaceResult] = None
     report: Optional[DiagnosticReport] = None
     recording_path: Optional[Path] = None
+    viability: Optional[ViabilityResult] = None
     discovery_paths: list[Path] = field(default_factory=list)
     total_duration_ms: float = 0.0
     warnings: list[str] = field(default_factory=list)
@@ -406,6 +409,25 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                 recorder.record_dependencies, ingestion, matches, language,
             )
 
+            # ── Stage 4.5: Viability Gate ──
+            viability = _run_viability_check(
+                session, ingestion, language, result,
+            )
+            if not viability.viable:
+                project_name = _infer_project_name(Path(config.project_path))
+                report_text = build_baseline_failed_text(
+                    viability, ingestion, project_name,
+                )
+                result.report = DiagnosticReport(
+                    project_name=project_name,
+                    summary=viability.reason,
+                    baseline_failed=True,
+                    _baseline_report_text=report_text,
+                )
+                result.total_duration_ms = _elapsed_ms(pipeline_start)
+                _safe_save(recorder, result)
+                return result
+
             # ── Stage 5: Conversational Interface ──
             intent, project_name = _run_conversation(
                 ingestion, config, language, result,
@@ -617,6 +639,35 @@ def _run_library_matching(
         )
         logger.exception("Library matching failed")
         return []
+
+
+def _run_viability_check(
+    session: SessionManager,
+    ingestion: IngestionResult,
+    language: str,
+    result: PipelineResult,
+) -> ViabilityResult:
+    """Stage 4.5: Check whether the sandbox can produce meaningful results."""
+    stage_start = time.monotonic()
+
+    is_containerised = os.environ.get("MYCODE_CONTAINERISED") == "1"
+
+    viability = run_viability_gate(
+        session=session,
+        ingestion=ingestion,
+        language=language,
+        is_containerised=is_containerised,
+    )
+
+    result.viability = viability
+    result.stages.append(StageResult(
+        stage="viability_gate",
+        success=viability.viable,
+        duration_ms=_elapsed_ms(stage_start),
+        error=viability.reason if not viability.viable else "",
+    ))
+
+    return viability
 
 
 def _infer_project_name(project_path: Path) -> str:
