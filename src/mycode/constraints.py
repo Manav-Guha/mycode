@@ -195,7 +195,7 @@ _DATA_TYPE_CHOICES: dict[str, str] = {
 
 _DATA_TYPE_KEYWORDS: dict[str, list[str]] = {
     "tabular": [
-        "csv", "spreadsheet", "excel", "table", "tabular",
+        "csv", "spreadsheet", "excel", "xls", "xlsx", "table", "tabular",
         "dataframe", "pandas", "column", "row", "sql", "database",
     ],
     "text": [
@@ -204,7 +204,7 @@ _DATA_TYPE_KEYWORDS: dict[str, list[str]] = {
     ],
     "images": [
         "image", "photo", "picture", "video", "media",
-        "upload", "audio", "png", "jpg", "jpeg",
+        "audio", "png", "jpg", "jpeg", "gif", "svg",
     ],
     "api_responses": [
         "api", "json", "endpoint", "rest",
@@ -229,17 +229,32 @@ def parse_data_type(text: str) -> Optional[str]:
     if stripped in _DATA_TYPE_CHOICES:
         return _DATA_TYPE_CHOICES[stripped]
 
-    # Keyword scoring — highest match count wins
+    # Keyword scoring — highest match count wins, but if keywords hit
+    # two or more *distinct* categories the user is describing mixed data.
     scores: dict[str, int] = {}
     for dtype, keywords in _DATA_TYPE_KEYWORDS.items():
         score = sum(1 for kw in keywords if kw in text_lower)
         if score > 0:
             scores[dtype] = score
 
-    if scores:
-        return max(scores, key=scores.get)
+    if not scores:
+        return None
 
-    return None
+    # When keywords clearly span multiple distinct categories the user is
+    # describing mixed data (e.g. "PDFs, JPEGs, XLS documents").  Trigger
+    # "mixed" when 3+ categories match, or when 2 categories both have
+    # strong signal (score >= 2 each).  A single incidental keyword hit in
+    # a second category (e.g. "uploading CSV files" where "upload" used to
+    # touch images) should not override the dominant category.
+    non_mixed = {k: v for k, v in scores.items() if k != "mixed"}
+    if len(non_mixed) >= 3:
+        return "mixed"
+    if len(non_mixed) == 2:
+        vals = sorted(non_mixed.values())
+        if vals[0] >= 2:
+            return "mixed"
+
+    return max(scores, key=scores.get)
 
 
 # ── Usage Pattern ──

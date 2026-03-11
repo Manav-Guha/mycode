@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import venv
 from dataclasses import dataclass, field
@@ -826,7 +827,16 @@ class SessionManager:
         On Windows only SIGINT (Ctrl+C) is reliably supported; SIGTERM
         cannot be caught via ``signal.signal``.  We install SIGTERM only
         on POSIX systems.
+
+        signal.signal() can only be called from the main thread.  When
+        running inside a web server (e.g. uvicorn worker threads), skip
+        signal registration — atexit cleanup still works.
         """
+        if threading.current_thread() is not threading.main_thread():
+            logger.debug(
+                "Skipping signal handler installation — not on main thread"
+            )
+            return
         cls._original_sigint = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, cls._signal_handler)
         if not _IS_WINDOWS:

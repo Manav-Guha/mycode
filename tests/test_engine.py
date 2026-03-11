@@ -831,7 +831,7 @@ class TestScenarioExecution:
         assert remaining == []
 
     def test_timeout_capped_when_config_exceeds_cap(self, tmp_path):
-        """Config timeout of 42 exceeds the 30s cap → should be capped."""
+        """Config timeout of 90 exceeds the 60s cap → should be capped."""
         session = _make_session(tmp_path)
         harness_stdout = _make_harness_output(steps=[_make_step_data()])
         session.run_in_session.return_value = SessionResult(
@@ -840,7 +840,7 @@ class TestScenarioExecution:
 
         scenario = _make_scenario(test_config={
             "parameters": {},
-            "resource_limits": {"timeout_seconds": 42},
+            "resource_limits": {"timeout_seconds": 90},
         })
         engine = ExecutionEngine(session, _make_ingestion())
         engine._execute_scenario(scenario)
@@ -886,8 +886,8 @@ class TestScenarioExecution:
         assert actual == _SCENARIO_TIMEOUT_CAP
 
     def test_scenario_timeout_cap_value(self):
-        """_SCENARIO_TIMEOUT_CAP should be 30 seconds."""
-        assert _SCENARIO_TIMEOUT_CAP == 30
+        """_SCENARIO_TIMEOUT_CAP should be 60 seconds."""
+        assert _SCENARIO_TIMEOUT_CAP == 60
 
     def test_js_category_executed_via_node(self, tmp_path):
         session = _make_session(tmp_path)

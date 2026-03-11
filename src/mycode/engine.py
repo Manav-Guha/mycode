@@ -33,7 +33,7 @@ _SNIPPET_MAX = 2000
 
 # Hard per-scenario timeout cap — prevents any single scenario from hanging
 # the entire run, regardless of what resource_limits say.
-_SCENARIO_TIMEOUT_CAP = 30
+_SCENARIO_TIMEOUT_CAP = 60
 
 # JavaScript-specific categories — executed via Node.js harness
 _JS_CATEGORIES = frozenset({

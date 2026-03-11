@@ -66,7 +66,8 @@ async function runPreflight(formData) {
 
         if (data.error) {
             $("preflight-content").innerHTML =
-                `<div class="viability-banner fail">${escapeHtml(data.error)}</div>`;
+                `<div class="diagnostics-grid" id="diag-grid"></div>` +
+                `<div id="viability-banner" class="viability-banner fail">${escapeHtml(data.error)}</div>`;
             show("preflight-content");
             resetInput();
             return;
@@ -82,7 +83,8 @@ async function runPreflight(formData) {
     } catch (err) {
         hide("preflight-loading");
         $("preflight-content").innerHTML =
-            `<div class="viability-banner fail">Connection failed: ${escapeHtml(err.message)}</div>`;
+            `<div class="diagnostics-grid" id="diag-grid"></div>` +
+            `<div id="viability-banner" class="viability-banner fail">Connection failed: ${escapeHtml(err.message)}</div>`;
         show("preflight-content");
         resetInput();
     }
@@ -94,47 +96,45 @@ function resetInput() {
 }
 
 function renderPreflight(data) {
-    const grid = $("diag-grid");
     const v = data.viability || {};
 
     const pct = (val) => Math.round((val || 0) * 100);
     const cls = (val, threshold) => val >= threshold ? "pass" : val >= threshold * 0.6 ? "warn" : "fail";
 
-    grid.innerHTML = `
-        <div class="diag-item">
-            <span class="diag-label">Language</span>
-            <span class="diag-value">${escapeHtml(data.language || "unknown")}</span>
-        </div>
-        <div class="diag-item">
-            <span class="diag-label">Project</span>
-            <span class="diag-value">${escapeHtml(data.project_name || "—")}</span>
-        </div>
-        <div class="diag-item">
-            <span class="diag-label">Dependencies installed</span>
-            <span class="diag-value ${cls(v.install_rate, 0.5)}">${pct(v.install_rate)}%</span>
-        </div>
-        <div class="diag-item">
-            <span class="diag-label">Imports working</span>
-            <span class="diag-value ${cls(v.import_rate, 0.5)}">${pct(v.import_rate)}%</span>
-        </div>
-        <div class="diag-item">
-            <span class="diag-label">Syntax valid</span>
-            <span class="diag-value ${cls(v.syntax_rate, 0.25)}">${pct(v.syntax_rate)}%</span>
-        </div>
-        <div class="diag-item">
-            <span class="diag-label">Library profiles</span>
-            <span class="diag-value">${(data.profile_matches || []).length} matched</span>
-        </div>
-    `;
+    const bannerClass = v.viable ? "pass" : "fail";
+    const bannerText = v.viable
+        ? "Ready for testing"
+        : escapeHtml(v.reason || "Baseline viability check failed");
 
-    const banner = $("viability-banner");
-    if (v.viable) {
-        banner.className = "viability-banner pass";
-        banner.textContent = "Ready for testing";
-    } else {
-        banner.className = "viability-banner fail";
-        banner.textContent = v.reason || "Baseline viability check failed";
-    }
+    $("preflight-content").innerHTML = `
+        <div class="diagnostics-grid" id="diag-grid">
+            <div class="diag-item">
+                <span class="diag-label">Language</span>
+                <span class="diag-value">${escapeHtml(data.language || "unknown")}</span>
+            </div>
+            <div class="diag-item">
+                <span class="diag-label">Project</span>
+                <span class="diag-value">${escapeHtml(data.project_name || "—")}</span>
+            </div>
+            <div class="diag-item">
+                <span class="diag-label">Dependencies installed</span>
+                <span class="diag-value ${cls(v.install_rate, 0.5)}">${pct(v.install_rate)}%</span>
+            </div>
+            <div class="diag-item">
+                <span class="diag-label">Imports working</span>
+                <span class="diag-value ${cls(v.import_rate, 0.5)}">${pct(v.import_rate)}%</span>
+            </div>
+            <div class="diag-item">
+                <span class="diag-label">Syntax valid</span>
+                <span class="diag-value ${cls(v.syntax_rate, 0.25)}">${pct(v.syntax_rate)}%</span>
+            </div>
+            <div class="diag-item">
+                <span class="diag-label">Library profiles</span>
+                <span class="diag-value">${(data.profile_matches || []).length} matched</span>
+            </div>
+        </div>
+        <div id="viability-banner" class="viability-banner ${bannerClass}">${bannerText}</div>
+    `;
 }
 
 // ── Conversation ──
