@@ -919,6 +919,181 @@ class ConversationalInterface:
             self._backend = None
             return None
 
+    # ── Turn-Based API (Web Interface) ──
+
+    def prepare_turn_1(
+        self,
+        ingestion: IngestionResult,
+        language: str = "python",
+    ) -> tuple[str, str]:
+        """Prepare the Turn 1 question without prompting for user input.
+
+        Returns ``(question_text, project_summary)``.  The question is the
+        same content that ``_run_turn_1`` would display + prompt, but
+        returned as a string instead of being sent to I/O.
+
+        Used by the web API to send the first question to the browser.
+        """
+        summary = summarize_ingestion(ingestion, language)
+        inference_summary = self._run_inference(ingestion)
+
+        # Build the presentation (same logic as _run_turn_1 offline path)
+        parts: list[str] = []
+        vertical = ""
+        try:
+            from mycode.classifiers import classify_project
+            deps = [d.name for d in ingestion.dependencies if not d.is_dev]
+            files = [fa.file_path for fa in ingestion.file_analyses]
+            cls = classify_project(
+                dependencies=deps,
+                file_structure=files,
+                framework="",
+                file_count=ingestion.files_analyzed,
+                has_frontend=False,
+                has_backend=False,
+            )
+            vertical = cls.get("vertical", "")
+        except Exception:
+            pass
+
+        _LABELS = {
+            "web_app": "a web application",
+            "data_pipeline": "a data pipeline",
+            "chatbot": "an AI chatbot",
+            "dashboard": "a dashboard",
+            "api_service": "an API service",
+            "ml_model": "a machine learning project",
+            "portfolio": "a portfolio site",
+            "utility": "a utility project",
+            "cli_tool": "a command-line tool",
+            "automation": "an automation script",
+        }
+        type_desc = _LABELS.get(vertical, "a project")
+
+        top_deps = [d.name for d in ingestion.dependencies if not d.is_dev][:5]
+        dep_str = ", ".join(top_deps) if top_deps else "no detected dependencies"
+        parts.append(
+            f"This looks like {type_desc} built with {dep_str}."
+        )
+        parts.append(
+            f"It has {ingestion.files_analyzed} files, "
+            f"{ingestion.total_lines} lines, and "
+            f"{len(ingestion.dependencies)} dependencies."
+        )
+
+        if inference_summary:
+            parts.append(
+                "Based on similar projects in myCode's library, "
+                "the most common failure areas are:"
+            )
+            parts.append(inference_summary)
+
+        presentation = "\n".join(parts)
+        question = (
+            f"{presentation}\n\n"
+            "Does this sound right, or would you describe your "
+            "project differently?"
+        )
+        return question, summary
+
+    def process_turn_1(
+        self,
+        user_response: str,
+        ingestion: IngestionResult,
+        language: str = "python",
+    ) -> str:
+        """Parse the Turn 1 answer and return the Turn 2 question.
+
+        This wraps the same logic as ``_run_turn_2`` but does not use
+        I/O — it returns the question text for the web API.
+        """
+        summary = summarize_ingestion(ingestion, language)
+
+        # Same inference as _run_turn_2: figure out what we already know
+        combined = user_response or ""
+        already_has_scale = parse_user_scale(combined) is not None
+        already_has_data = parse_data_type(combined) is not None
+
+        if self._offline or self._backend is None:
+            parts: list[str] = []
+            if not already_has_scale:
+                parts.append(
+                    "How many people will use this at the same time? "
+                    "Over a typical day?"
+                )
+            if not already_has_data:
+                parts.append(
+                    "What will users upload or send to your app? "
+                    "PDFs, images, spreadsheets, text?"
+                )
+            if not parts:
+                parts.append(
+                    "What are you most worried about — speed, crashes, "
+                    "data handling, or something else?"
+                )
+            return "\n".join(parts)
+
+        # LLM path
+        warnings: list[str] = []
+        return self._llm_generate_question_turn2(summary, user_response, warnings)
+
+    def process_turn_2(
+        self,
+        turn1_response: str,
+        turn2_response: str,
+        ingestion: IngestionResult,
+        language: str = "python",
+    ) -> InterfaceResult:
+        """Parse both turns and return the final InterfaceResult.
+
+        This wraps ``_extract_constraints`` and ``_synthesize_intent``
+        without interactive I/O — all constraint extraction is from text
+        only (no follow-up prompts).
+        """
+        summary = summarize_ingestion(ingestion, language)
+        warnings: list[str] = []
+
+        # Extract constraints from text only (no prompting)
+        combined = f"{turn1_response} {turn2_response}"
+        raw_answers = [turn1_response, turn2_response]
+
+        deployment_context = parse_deployment_context(combined)
+        data_sensitivity = parse_data_sensitivity(combined)
+        growth_expectation = parse_growth_expectation(combined)
+        user_scale = parse_user_scale(combined)
+        data_type = parse_data_type(combined)
+        usage_pattern = parse_usage_pattern(combined)
+        max_payload_mb = parse_max_payload(combined)
+        availability_requirement = infer_availability(usage_pattern)
+
+        constraints = OperationalConstraints(
+            user_scale=user_scale,
+            usage_pattern=usage_pattern,
+            max_payload_mb=max_payload_mb,
+            data_type=data_type,
+            deployment_context=deployment_context,
+            availability_requirement=availability_requirement,
+            data_sensitivity=data_sensitivity,
+            growth_expectation=growth_expectation,
+            raw_answers=raw_answers,
+        )
+
+        # Synthesize intent
+        intent = self._synthesize_intent(
+            summary, turn1_response, turn2_response, warnings,
+        )
+
+        return InterfaceResult(
+            intent=intent,
+            constraints=constraints,
+            project_summary=summary,
+            token_usage={
+                "input_tokens": self._total_input_tokens,
+                "output_tokens": self._total_output_tokens,
+            },
+            warnings=warnings,
+        )
+
     # ── Scenario Review Helpers ──
 
     def _handle_skip_selection(
