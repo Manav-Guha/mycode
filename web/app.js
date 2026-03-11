@@ -321,6 +321,14 @@ function renderReport(report, summary) {
         html += `<div class="report-summary">${escapeHtml(report.summary)}</div>`;
     }
 
+    // Notes (confidence, data-type methodology)
+    if (report.confidence_note) {
+        html += `<div class="report-note">${escapeHtml(report.confidence_note)}</div>`;
+    }
+    if (report.data_type_note) {
+        html += `<div class="report-note">${escapeHtml(report.data_type_note)}</div>`;
+    }
+
     // Findings
     const findings = report.findings || [];
     if (findings.length > 0) {

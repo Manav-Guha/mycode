@@ -23,6 +23,8 @@ from typing import Callable, Optional, Protocol
 
 from mycode.constraints import (
     OperationalConstraints,
+    _format_data_type_detail,
+    extract_data_type_keywords,
     infer_availability,
     parse_data_sensitivity,
     parse_data_type,
@@ -654,6 +656,7 @@ class ConversationalInterface:
         # "200 users" would be misread as 200 MB).
         user_scale = parse_user_scale(combined)
         data_type = parse_data_type(combined)
+        data_type_source = combined  # text that data_type was parsed from
         usage_pattern = parse_usage_pattern(combined)
         max_payload_mb: float | None = None
 
@@ -679,6 +682,7 @@ class ConversationalInterface:
                 )
                 raw_answers.append(answer)
                 data_type = parse_data_type(answer)
+                data_type_source = answer
 
             if usage_pattern is None:
                 answer = self._io.prompt(
@@ -706,11 +710,19 @@ class ConversationalInterface:
         # ── Derive availability from usage pattern ──
         availability_requirement = infer_availability(usage_pattern)
 
+        # Build human-readable detail for mixed data types
+        data_type_detail = None
+        if data_type == "mixed":
+            kws = extract_data_type_keywords(data_type_source)
+            if kws:
+                data_type_detail = _format_data_type_detail(kws)
+
         return OperationalConstraints(
             user_scale=user_scale,
             usage_pattern=usage_pattern,
             max_payload_mb=max_payload_mb,
             data_type=data_type,
+            data_type_detail=data_type_detail,
             deployment_context=deployment_context,
             availability_requirement=availability_requirement,
             data_sensitivity=data_sensitivity,
@@ -1063,14 +1075,26 @@ class ConversationalInterface:
         user_scale = parse_user_scale(combined)
         data_type = parse_data_type(combined)
         usage_pattern = parse_usage_pattern(combined)
-        max_payload_mb = parse_max_payload(combined)
         availability_requirement = infer_availability(usage_pattern)
+
+        # max_payload_mb is NOT inferred from turn text — bare numbers like
+        # "10 users" would be misread as 10 MB.  The CLI always asks this
+        # explicitly (_extract_constraints line 695); the web path relies on
+        # follow-up questions via get_followup_question().
+
+        # Build human-readable detail for mixed data types
+        data_type_detail = None
+        if data_type == "mixed":
+            kws = extract_data_type_keywords(combined)
+            if kws:
+                data_type_detail = _format_data_type_detail(kws)
 
         constraints = OperationalConstraints(
             user_scale=user_scale,
             usage_pattern=usage_pattern,
-            max_payload_mb=max_payload_mb,
+            max_payload_mb=None,
             data_type=data_type,
+            data_type_detail=data_type_detail,
             deployment_context=deployment_context,
             availability_requirement=availability_requirement,
             data_sensitivity=data_sensitivity,
@@ -1093,6 +1117,107 @@ class ConversationalInterface:
             },
             warnings=warnings,
         )
+
+    # ── Web Constraint Follow-ups ──
+    #
+    # The CLI path (_extract_constraints) prompts the user interactively for
+    # any constraints that weren't inferred from turn text.  The web path
+    # can't block on I/O, so these methods expose the same follow-up logic
+    # as a request/response cycle the route handler can drive turn-by-turn.
+
+    # The questions mirror _extract_constraints lines 662-704 exactly.
+    _FOLLOWUP_FIELDS = ("user_scale", "data_type", "usage_pattern", "max_payload_mb")
+
+    _FOLLOWUP_QUESTIONS: dict[str, str] = {
+        "user_scale": (
+            "How many users do you expect at the same time? "
+            "(a number, or 'not sure')"
+        ),
+        "data_type": (
+            "What kind of data does your project handle?\n"
+            "  1. Tabular data (CSV, spreadsheets, databases)\n"
+            "  2. Text / documents\n"
+            "  3. Images / media / files\n"
+            "  4. API responses / JSON\n"
+            "  5. Mixed / various\n"
+            "(enter a number or describe it)"
+        ),
+        "usage_pattern": (
+            "How will people use it?\n"
+            "  1. Steady, continuous use throughout the day\n"
+            "  2. Bursts of heavy use at peak times\n"
+            "  3. Occasional, on-demand use\n"
+            "  4. Growing usage over time\n"
+            "(enter a number or describe it)"
+        ),
+        "max_payload_mb": (
+            "What's the largest input your project handles?\n"
+            "  1. Small (under 1 MB)\n"
+            "  2. Medium (1–50 MB)\n"
+            "  3. Large (over 50 MB)\n"
+            "(enter a number, a size like '50 MB', or 'not sure')"
+        ),
+    }
+
+    _FOLLOWUP_PARSERS: dict[str, Callable[[str], object]] = {
+        "user_scale": parse_user_scale,
+        "data_type": parse_data_type,
+        "usage_pattern": parse_usage_pattern,
+        "max_payload_mb": parse_max_payload,
+    }
+
+    @staticmethod
+    def get_followup_question(
+        constraints: OperationalConstraints,
+    ) -> tuple[str | None, str | None]:
+        """Return the next follow-up question for a missing constraint.
+
+        Returns ``(field_name, question_text)`` for the first missing field,
+        or ``(None, None)`` if all constraints are populated.
+        """
+        for field_name in ConversationalInterface._FOLLOWUP_FIELDS:
+            if getattr(constraints, field_name) is None:
+                return (
+                    field_name,
+                    ConversationalInterface._FOLLOWUP_QUESTIONS[field_name],
+                )
+        return None, None
+
+    @staticmethod
+    def apply_followup_answer(
+        constraints: OperationalConstraints,
+        field_name: str,
+        answer: str,
+    ) -> OperationalConstraints:
+        """Parse *answer* for *field_name* and return updated constraints.
+
+        If the answer can't be parsed (e.g. the user said 'not sure'), the
+        field stays ``None``.  Availability is re-derived whenever
+        usage_pattern changes.
+        """
+        parser = ConversationalInterface._FOLLOWUP_PARSERS.get(field_name)
+        if parser is not None:
+            value = parser(answer)
+            if value is not None:
+                object.__setattr__(constraints, field_name, value)
+
+        # Keep raw_answers in sync
+        if constraints.raw_answers is not None:
+            constraints.raw_answers.append(answer)
+
+        # Re-derive availability whenever usage_pattern is set
+        if field_name == "usage_pattern" and constraints.usage_pattern is not None:
+            constraints.availability_requirement = infer_availability(
+                constraints.usage_pattern,
+            )
+
+        # Preserve user's original phrasing for mixed data types
+        if field_name == "data_type" and constraints.data_type == "mixed":
+            kws = extract_data_type_keywords(answer)
+            if kws:
+                constraints.data_type_detail = _format_data_type_detail(kws)
+
+        return constraints
 
     # ── Scenario Review Helpers ──
 

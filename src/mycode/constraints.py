@@ -50,6 +50,7 @@ class OperationalConstraints:
     usage_pattern: Optional[str] = None
     max_payload_mb: Optional[float] = None
     data_type: Optional[str] = None
+    data_type_detail: Optional[str] = None
     deployment_context: Optional[str] = None
     availability_requirement: Optional[str] = None
     data_sensitivity: Optional[str] = None
@@ -200,7 +201,7 @@ _DATA_TYPE_KEYWORDS: dict[str, list[str]] = {
     ],
     "text": [
         "text", "document", "string", "log", "email",
-        "chat", "message", "markdown", "pdf",
+        "chat", "message", "markdown", "pdf", "txt",
     ],
     "images": [
         "image", "photo", "picture", "video", "media",
@@ -240,21 +241,77 @@ def parse_data_type(text: str) -> Optional[str]:
     if not scores:
         return None
 
-    # When keywords clearly span multiple distinct categories the user is
-    # describing mixed data (e.g. "PDFs, JPEGs, XLS documents").  Trigger
-    # "mixed" when 3+ categories match, or when 2 categories both have
-    # strong signal (score >= 2 each).  A single incidental keyword hit in
-    # a second category (e.g. "uploading CSV files" where "upload" used to
-    # touch images) should not override the dominant category.
+    # When keywords span two or more distinct categories the user is
+    # describing mixed data (e.g. "PDFs, TXT, XLS" hits text + tabular).
     non_mixed = {k: v for k, v in scores.items() if k != "mixed"}
-    if len(non_mixed) >= 3:
+    if len(non_mixed) >= 2:
         return "mixed"
-    if len(non_mixed) == 2:
-        vals = sorted(non_mixed.values())
-        if vals[0] >= 2:
-            return "mixed"
 
     return max(scores, key=scores.get)
+
+
+_GENERIC_DATA_KEYWORDS: frozenset[str] = frozenset({
+    "text", "document", "image", "media", "string", "photo", "picture",
+    "video", "audio", "message", "log", "email", "chat",
+})
+"""Category-level words too vague for a user-facing detail label.
+
+When the user says "PDFs, JPEGs, XLS documents", the matched keywords are
+``pdf``, ``jpeg``, ``xls``, ``document``.  We want the detail to read
+"PDF, JPEG and XLS files" — not "PDF, JPEG, XLS and document files".
+Generic words are kept only when no specific keywords were found.
+"""
+
+
+def extract_data_type_keywords(text: str) -> list[str]:
+    """Return the specific file-type / data-type keywords found in *text*.
+
+    Used to build a human-readable description that preserves the user's
+    original phrasing (e.g. ``["PDFs", "XLS"]`` instead of ``"mixed"``).
+
+    The returned strings use the ORIGINAL casing from *text* — not the
+    lower-case keyword form — so they read naturally in reports.
+    Generic category words (``"document"``, ``"image"``, …) are dropped
+    when more specific terms are present.
+    """
+    if not text:
+        return []
+    text_lower = text.lower()
+    all_keywords: list[str] = []
+    for keywords in _DATA_TYPE_KEYWORDS.values():
+        all_keywords.extend(keywords)
+
+    found: list[str] = []
+    seen_lower: set[str] = set()
+    for kw in all_keywords:
+        if kw in text_lower and kw not in seen_lower:
+            seen_lower.add(kw)
+            idx = text_lower.index(kw)
+            found.append(text[idx : idx + len(kw)])
+
+    # Drop generic words only when enough specific terms remain to be
+    # meaningful.  "PDFs, JPEGs, XLS documents" → drop "documents" (3
+    # specific remain).  "TXT and images" → keep "images" (only 1 specific
+    # without it).
+    specific = [w for w in found if w.lower() not in _GENERIC_DATA_KEYWORDS]
+    if len(specific) >= 2:
+        return specific
+    return found
+
+
+def _format_data_type_detail(keywords: list[str]) -> str:
+    """Format extracted keywords into a readable phrase.
+
+    ``["PDFs", "XLS"]`` → ``"PDFs and XLS files"``
+    ``["csv"]`` → ``"CSV files"``
+    """
+    if not keywords:
+        return ""
+    # Uppercase short extensions (pdf → PDF, xls → XLS, csv → CSV)
+    parts = [kw.upper() if len(kw) <= 4 and kw.isalpha() else kw for kw in keywords]
+    if len(parts) == 1:
+        return f"{parts[0]} files"
+    return ", ".join(parts[:-1]) + " and " + parts[-1] + " files"
 
 
 # ── Usage Pattern ──

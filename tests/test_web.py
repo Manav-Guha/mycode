@@ -599,7 +599,8 @@ class TestConverseHandler:
             jobs_module.store = old_store
             routes_module.store = old_store
 
-    def test_converse_turn_3_done(self, simple_ingestion):
+    def test_converse_turn_3_asks_followups(self, simple_ingestion):
+        """Turn 3 extracts text constraints, then asks follow-ups for gaps."""
         from mycode.web.jobs import JobStore
         from mycode.web.routes import handle_converse
         import mycode.web.routes as routes_module
@@ -616,11 +617,90 @@ class TestConverseHandler:
         jobs_module.store = s
         routes_module.store = s
         try:
+            # Turn 3: "10 users, JSON payloads" → user_scale=10, data_type=api_responses
+            # usage_pattern and max_payload_mb are still None → follow-up
             resp = handle_converse(job.id, 3, "10 users, JSON payloads, single server")
+            assert not resp.done
+            assert resp.question  # should ask about usage_pattern
+            assert "how will people" in resp.question.lower() or "use it" in resp.question.lower()
+        finally:
+            jobs_module.store = old_store
+            routes_module.store = old_store
+
+    def test_converse_followups_reach_done(self, simple_ingestion):
+        """Answering all follow-ups eventually sets done=True."""
+        from mycode.web.jobs import JobStore
+        from mycode.web.routes import handle_converse
+        import mycode.web.routes as routes_module
+        import mycode.web.jobs as jobs_module
+
+        s = JobStore()
+        job = s.create()
+        job.status = "preflight_complete"
+        job.ingestion = simple_ingestion
+        job.language = "python"
+        job.turn1_response = "It's an inventory management API"
+
+        old_store = jobs_module.store
+        jobs_module.store = s
+        routes_module.store = s
+        try:
+            # Turn 3: provide scale + data type
+            resp = handle_converse(job.id, 3, "10 users, JSON payloads, single server")
+            assert not resp.done
+
+            # Answer follow-ups until done (max 4 safety cap)
+            turn = resp.turn + 1
+            answers = ["1", "2", "1", "1"]  # numbered choices for remaining fields
+            for answer in answers:
+                if resp.done:
+                    break
+                resp = handle_converse(job.id, turn, answer)
+                turn = resp.turn + 1
+
             assert resp.done
-            assert resp.turn == 3
             assert resp.constraints is not None
             assert resp.operational_intent
+            assert job.status == "conversation_done"
+        finally:
+            jobs_module.store = old_store
+            routes_module.store = old_store
+
+    def test_converse_payload_always_asked(self, simple_ingestion):
+        """max_payload_mb is never inferred from turn text — always a follow-up."""
+        from mycode.web.jobs import JobStore
+        from mycode.web.routes import handle_converse
+        import mycode.web.routes as routes_module
+        import mycode.web.jobs as jobs_module
+
+        s = JobStore()
+        job = s.create()
+        job.status = "preflight_complete"
+        job.ingestion = simple_ingestion
+        job.language = "python"
+        job.turn1_response = "It's an inventory management API deployed on cloud"
+
+        old_store = jobs_module.store
+        jobs_module.store = s
+        routes_module.store = s
+        try:
+            # Turn 3: all text-inferable constraints present, but not payload
+            resp = handle_converse(
+                job.id, 3,
+                "50 users, steady use all day, JSON API data",
+            )
+            assert not resp.done
+            # The only remaining follow-up should be max_payload_mb
+            assert "largest input" in resp.question.lower()
+
+            # Answer the payload question → conversation done
+            resp = handle_converse(job.id, 4, "2")  # medium = 50 MB
+            assert resp.done
+            assert resp.constraints is not None
+            assert resp.constraints["user_scale"] == 50
+            assert resp.constraints["usage_pattern"] == "sustained"
+            assert resp.constraints["data_type"] == "api_responses"
+            assert resp.constraints["max_payload_mb"] == 50.0
             assert job.status == "conversation_done"
         finally:
             jobs_module.store = old_store
@@ -642,7 +722,7 @@ class TestConverseHandler:
         jobs_module.store = s
         routes_module.store = s
         try:
-            resp = handle_converse(job.id, 99, "")
+            resp = handle_converse(job.id, 0, "")
             assert resp.error
             assert "Invalid turn" in resp.error
         finally:
@@ -868,12 +948,23 @@ class TestFullConversationFlow:
             assert r2.question
             assert not r2.done
 
-            # Turn 3: Answer Turn 2, get constraints
+            # Turn 3: Answer Turn 2 — text constraints extracted, follow-ups begin
             r3 = handle_converse(job.id, 3, "5 users, JSON data, deployed on AWS, runs all day")
-            assert r3.done
-            assert r3.constraints is not None
-            assert r3.constraints.get("user_scale") == 5
-            assert r3.operational_intent
+            assert not r3.done  # max_payload_mb always asked explicitly
+
+            # Answer follow-ups until done
+            turn = r3.turn + 1
+            resp = r3
+            for answer in ["2", "2", "2", "2"]:  # safety cap
+                if resp.done:
+                    break
+                resp = handle_converse(job.id, turn, answer)
+                turn = resp.turn + 1
+
+            assert resp.done
+            assert resp.constraints is not None
+            assert resp.constraints.get("user_scale") == 5
+            assert resp.operational_intent
             assert job.status == "conversation_done"
         finally:
             jobs_module.store = old_store

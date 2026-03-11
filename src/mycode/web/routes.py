@@ -256,7 +256,15 @@ def _run_inference(ingestion: IngestionResult, language: str) -> InferencePredic
 
 
 def handle_converse(job_id: str, turn: int, user_response: str) -> ConverseResponse:
-    """Handle one turn of the conversational interface."""
+    """Handle one turn of the conversational interface.
+
+    Turns 1-2 mirror the CLI's two open-ended questions.  Turn 3 extracts
+    constraints from text, then checks for gaps.  Turns 4+ ask one explicit
+    follow-up per missing constraint (user_scale, data_type, usage_pattern,
+    max_payload_mb) — the same questions the CLI asks in
+    ``_extract_constraints``.  The conversation is ``done`` once all
+    follow-ups have been answered (or there were none to ask).
+    """
     job = store.get(job_id)
     if job is None:
         return ConverseResponse(error=f"Job {job_id} not found.")
@@ -304,7 +312,8 @@ def handle_converse(job_id: str, turn: int, user_response: str) -> ConverseRespo
         )
 
     elif turn == 3:
-        # Process Turn 2 response, extract constraints
+        # Process Turn 2 response, extract constraints from text
+        job.turn2_response = user_response
         result = interface.process_turn_2(
             turn1_response=job.turn1_response,
             turn2_response=user_response,
@@ -315,30 +324,61 @@ def handle_converse(job_id: str, turn: int, user_response: str) -> ConverseRespo
         job.interface_result = result
         job.constraints = result.constraints
         job.intent_string = result.intent.as_intent_string()
-        job.status = "conversation_done"
 
-        constraints_dict = None
-        if result.constraints:
-            constraints_dict = {
-                "user_scale": result.constraints.user_scale,
-                "usage_pattern": result.constraints.usage_pattern,
-                "max_payload_mb": result.constraints.max_payload_mb,
-                "data_type": result.constraints.data_type,
-                "deployment_context": result.constraints.deployment_context,
-                "availability_requirement": result.constraints.availability_requirement,
-                "data_sensitivity": result.constraints.data_sensitivity,
-                "growth_expectation": result.constraints.growth_expectation,
-            }
+        # Check if there are missing constraints that need follow-up
+        return _followup_or_done(job, turn)
 
-        return ConverseResponse(
-            job_id=job_id,
-            turn=3,
-            constraints=constraints_dict,
-            operational_intent=job.intent_string,
-            done=True,
-        )
+    elif turn >= 4:
+        # Follow-up answer for a specific constraint field
+        if job.constraints is not None and job.pending_followup_field:
+            ConversationalInterface.apply_followup_answer(
+                job.constraints, job.pending_followup_field, user_response,
+            )
+            job.pending_followup_field = ""
+
+        return _followup_or_done(job, turn)
 
     return ConverseResponse(job_id=job_id, error=f"Invalid turn number: {turn}")
+
+
+def _followup_or_done(job: Job, current_turn: int) -> ConverseResponse:
+    """Ask the next follow-up question, or finalise the conversation."""
+    if job.constraints is not None:
+        field_name, question = ConversationalInterface.get_followup_question(
+            job.constraints,
+        )
+        if field_name is not None:
+            job.pending_followup_field = field_name
+            return ConverseResponse(
+                job_id=job.id,
+                turn=current_turn,
+                question=question,
+                done=False,
+            )
+
+    # All constraints filled (or as filled as they'll get) — done
+    job.status = "conversation_done"
+
+    constraints_dict = None
+    if job.constraints:
+        constraints_dict = {
+            "user_scale": job.constraints.user_scale,
+            "usage_pattern": job.constraints.usage_pattern,
+            "max_payload_mb": job.constraints.max_payload_mb,
+            "data_type": job.constraints.data_type,
+            "deployment_context": job.constraints.deployment_context,
+            "availability_requirement": job.constraints.availability_requirement,
+            "data_sensitivity": job.constraints.data_sensitivity,
+            "growth_expectation": job.constraints.growth_expectation,
+        }
+
+    return ConverseResponse(
+        job_id=job.id,
+        turn=current_turn,
+        constraints=constraints_dict,
+        operational_intent=job.intent_string,
+        done=True,
+    )
 
 
 # ── Analyze ──

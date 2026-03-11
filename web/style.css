@@ -386,6 +386,15 @@ footer {
     margin-bottom: 1rem;
 }
 
+.report-note {
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-left: 2px solid var(--border);
+}
+
 .report-stats {
     display: flex;
     gap: 1rem;

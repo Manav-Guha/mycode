@@ -84,6 +84,8 @@ class Job:
     # Conversation state
     conversation_summary: str = ""
     turn1_response: str = ""
+    turn2_response: str = ""
+    pending_followup_field: str = ""
 
 
 # ── Job Store ──

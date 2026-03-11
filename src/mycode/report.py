@@ -161,6 +161,8 @@ class DiagnosticReport:
     user_scale: int | None = None
     _usage_pattern: str = ""
     _data_type: str = ""
+    _data_type_detail: str = ""
+    _data_type_note: str = ""
     _max_payload_mb: float | None = None
     baseline_failed: bool = False
     _baseline_report_text: str = ""
@@ -212,6 +214,10 @@ class DiagnosticReport:
         # Confidence note
         if self.confidence_note:
             sections.append(f"\n{self.confidence_note}")
+
+        # Data-type methodology note
+        if self._data_type_note:
+            sections.append(f"\n{self._data_type_note}")
 
         # Dependency coverage
         total_deps = self.recognized_dep_count + len(self.unrecognized_deps)
@@ -622,6 +628,7 @@ class DiagnosticReport:
             "plain_summary": self.plain_summary,
             "project_description": self.project_description,
             "confidence_note": self.confidence_note,
+            "data_type_note": self._data_type_note,
             "statistics": {
                 "scenarios_run": self.scenarios_run,
                 "scenarios_passed": self.scenarios_passed,
@@ -865,8 +872,25 @@ class ReportGenerator:
                 report._usage_pattern = constraints.usage_pattern
             if constraints.data_type:
                 report._data_type = constraints.data_type
+            if constraints.data_type_detail:
+                report._data_type_detail = constraints.data_type_detail
             if constraints.max_payload_mb is not None:
                 report._max_payload_mb = constraints.max_payload_mb
+
+            # Build data-type methodology note
+            if constraints.data_type and constraints.data_type != "mixed":
+                report._data_type_note = _build_data_type_note(
+                    constraints.data_type,
+                    constraints.data_type_detail or "",
+                )
+            elif constraints.data_type == "mixed":
+                detail = constraints.data_type_detail or "mixed data types"
+                report._data_type_note = (
+                    f"You indicated {detail} — myCode ran all scenario "
+                    f"categories at equal priority. Format-specific stress "
+                    f"testing (malformed inputs, encoding edge cases) is "
+                    f"planned for v2."
+                )
 
         # 1. Analyze execution results → findings + degradation
         self._analyze_execution(execution, report)
@@ -1994,16 +2018,20 @@ class ReportGenerator:
         if report.user_scale is not None:
             ctx_parts.append(f"{report.user_scale:,} concurrent users")
         if report._data_type:
-            _data_labels = {
-                "tabular": "tabular data",
-                "text": "text and documents",
-                "images": "images and media",
-                "api_responses": "API responses",
-                "mixed": "PDFs, text, and images",
-            }
-            ctx_parts.append(
-                f"handling {_data_labels.get(report._data_type, report._data_type)}"
-            )
+            if report._data_type_detail:
+                # Use the user's original file-type phrasing
+                ctx_parts.append(f"handling {report._data_type_detail}")
+            else:
+                _data_labels = {
+                    "tabular": "tabular data",
+                    "text": "text and documents",
+                    "images": "images and media",
+                    "api_responses": "API responses",
+                    "mixed": "mixed data types",
+                }
+                ctx_parts.append(
+                    f"handling {_data_labels.get(report._data_type, report._data_type)}"
+                )
         if report._usage_pattern:
             _usage_labels = {
                 "sustained": "steady usage",
@@ -2551,6 +2579,39 @@ def _generate_project_description(
         return f"Your project built with {dep_str}"
 
     return "your project"
+
+
+_DATA_TYPE_HUMAN_LABELS: dict[str, str] = {
+    "text": "text and documents",
+    "tabular": "tabular data",
+    "images": "images and media",
+    "api_responses": "API responses",
+}
+
+_DATA_TYPE_FOCUS_LABELS: dict[str, str] = {
+    "text": "file I/O, encoding, and data volume",
+    "tabular": "data volume and memory profiling",
+    "images": "memory ceiling and concurrency",
+    "api_responses": "concurrency and I/O",
+}
+
+
+def _build_data_type_note(data_type: str, detail: str) -> str:
+    """Build a transparency note about file-type scenario prioritisation."""
+    label = detail or _DATA_TYPE_HUMAN_LABELS.get(data_type, data_type)
+    focus = _DATA_TYPE_FOCUS_LABELS.get(data_type, "")
+    if focus:
+        note = (
+            f"Based on your data type ({label}), myCode prioritised "
+            f"{focus} scenarios. Format-specific stress testing "
+            f"(malformed inputs, encoding edge cases) is planned for v2."
+        )
+    else:
+        note = (
+            f"Based on your data type ({label}), myCode ran all scenario "
+            f"categories. Format-specific stress testing is planned for v2."
+        )
+    return note
 
 
 def _build_confidence_note(

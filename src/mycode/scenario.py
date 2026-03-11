@@ -56,6 +56,17 @@ JAVASCRIPT_CATEGORIES = SHARED_CATEGORIES | frozenset({
 
 ALL_CATEGORIES = PYTHON_CATEGORIES | JAVASCRIPT_CATEGORIES
 
+# ── File-type → category boost mapping ──
+# When the user states a data type, these categories become more relevant.
+# Categories NOT in the boost set are deprioritised (high → medium).
+# "mixed" is intentionally absent — all categories stay at natural priority.
+_DATA_TYPE_BOOST: dict[str, frozenset[str]] = {
+    "text": frozenset({"blocking_io", "edge_case_input", "data_volume_scaling"}),
+    "tabular": frozenset({"data_volume_scaling", "memory_profiling"}),
+    "images": frozenset({"memory_profiling", "concurrent_execution"}),
+    "api_responses": frozenset({"concurrent_execution", "blocking_io"}),
+}
+
 
 class CouplingBehaviorType(str, Enum):
     """Classification of coupling point functions by behavior."""
@@ -1318,6 +1329,20 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             if constraints.data_type and scenario.category == "data_volume_scaling":
                 # If data type is specified, add it to test_config for harness use
                 scenario.test_config["constraint_data_type"] = constraints.data_type
+
+            # ── 4. File-type priority adjustment ──
+            # Boost categories most relevant to the user's stated data type.
+            # "mixed" leaves all priorities untouched (all categories apply).
+            if constraints.data_type and constraints.data_type != "mixed":
+                _boost = _DATA_TYPE_BOOST.get(constraints.data_type)
+                if _boost is not None:
+                    if scenario.category in _boost:
+                        if scenario.priority == "medium":
+                            scenario.priority = "high"
+                    else:
+                        # Categories outside the boost set are less relevant
+                        if scenario.priority == "high":
+                            scenario.priority = "medium"
 
         return scenarios
 
