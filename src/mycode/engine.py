@@ -937,6 +937,7 @@ import time
 import traceback
 import tracemalloc
 import importlib
+import gc
 
 CONFIG = json.loads(open(sys.argv[1]).read())
 
@@ -1074,6 +1075,7 @@ for _sz in _sizes:
         else:
             _ = [x * 2 for x in _data]
     _measure_step("data_size_%d" % _sz, {"data_size": _sz}, _run)
+    gc.collect()
 '''
 
 _BODY_MEMORY_PROFILING = '''\
@@ -1097,6 +1099,7 @@ for _b in range(0, _iterations, _batch):
                     except Exception:
                         pass
     _measure_step("batch_%d" % _b, {"batch_start": _b, "batch_count": _count}, _run)
+    gc.collect()
 '''
 
 _BODY_EDGE_CASE_INPUT = '''\
@@ -1122,6 +1125,7 @@ if _callables:
                 except Exception as _exc:
                     _record_error(_exc, _e["name"])
         _measure_step("edge_%s" % _case_name, {"edge_case": _case_name}, _run)
+        gc.collect()
 else:
     _measure_step("edge_no_callables", {}, lambda: None)
 '''
@@ -1143,6 +1147,7 @@ for _lvl in _levels:
                 except Exception as _exc:
                     _record_error(_exc, "concurrent_worker")
     _measure_step("concurrent_%d" % _lvl, {"concurrent_count": _lvl}, _run)
+    gc.collect()
 '''
 
 _BODY_BLOCKING_IO = '''\
@@ -1162,6 +1167,7 @@ for _sz in _sizes:
                 except Exception as _exc:
                     _record_error(_exc, _e["name"])
     _measure_step("io_size_%d" % _sz, {"data_size": _sz}, _run)
+    gc.collect()
 '''
 
 _BODY_GIL_CONTENTION = '''\
@@ -1188,6 +1194,7 @@ for _tc in _thread_counts:
                 except Exception as _exc:
                     _record_error(_exc, "gil_worker")
     _measure_step("gil_threads_%d" % _tc, {"thread_count": _tc}, _run)
+    gc.collect()
 '''
 
 _BODY_GENERIC = '''\
@@ -1202,6 +1209,7 @@ for _i in range(_iterations):
                 except Exception as _exc:
                     _record_error(_exc, _e["name"])
     _measure_step("iteration_%d" % _i, {"iteration": _i}, _run)
+    gc.collect()
 '''
 
 # Category -> body mapping
