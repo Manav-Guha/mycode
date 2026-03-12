@@ -2248,7 +2248,7 @@ class ReportGenerator:
         def _fmt(step_name: str) -> str:
             desc = _describe_step(step_name)
             if desc:
-                return f" at {step_name} ({desc})"
+                return f" at {desc}"
             level = _step_level(step_name)
             if level is not None:
                 return f" at {level:,} operations"
