@@ -494,6 +494,15 @@ class ExecutionEngine:
             scenario.name, result.status, len(result.steps),
             result.total_errors, result.total_execution_time_ms,
         )
+
+        # Log stderr on crash so errors are visible in server logs
+        if result.status == "failed" and result.steps:
+            stderr_snip = getattr(result.steps[0], "stderr_snippet", "")
+            if stderr_snip:
+                logger.warning(
+                    "Scenario '%s' stderr:\n%s", scenario.name, stderr_snip[:2000],
+                )
+
         return result
 
     def _build_harness_config(self, scenario: StressTestScenario) -> dict:
