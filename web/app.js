@@ -7,6 +7,8 @@ const API = MYCODE_CONFIG.API_URL;
 let currentJobId = null;
 let converseTurn = 1;
 let pollTimer = null;
+let elapsedTimer = null;
+let elapsedStart = null;
 
 // ── Helpers ──
 
@@ -29,6 +31,32 @@ async function apiPost(path, formData) {
 async function apiGet(path) {
     const res = await fetch(`${API}${path}`);
     return res.json();
+}
+
+function formatElapsed(seconds) {
+    const s = Math.floor(seconds);
+    if (s < 60) return s + "s";
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    if (m < 60) return m + "m " + rem + "s";
+    const h = Math.floor(m / 60);
+    return h + "h " + (m % 60) + "m";
+}
+
+function startElapsedTimer() {
+    elapsedStart = Date.now();
+    $("progress-elapsed").textContent = "0s";
+    elapsedTimer = setInterval(() => {
+        const seconds = (Date.now() - elapsedStart) / 1000;
+        $("progress-elapsed").textContent = formatElapsed(seconds);
+    }, 1000);
+}
+
+function stopElapsedTimer() {
+    if (elapsedTimer) {
+        clearInterval(elapsedTimer);
+        elapsedTimer = null;
+    }
 }
 
 // ── Input ──
@@ -264,6 +292,7 @@ async function startAnalysis() {
     }
 
     hide("run-btn");
+    startElapsedTimer();
     pollProgress();
 }
 
@@ -275,9 +304,11 @@ function pollProgress() {
 
             if (data.status === "completed") {
                 clearInterval(pollTimer);
+                stopElapsedTimer();
                 fetchReport();
             } else if (data.status === "failed") {
                 clearInterval(pollTimer);
+                stopElapsedTimer();
                 $("progress-text").textContent = "Failed: " + (data.error || "Unknown error");
                 $("progress-fill").style.background = "var(--red)";
             }

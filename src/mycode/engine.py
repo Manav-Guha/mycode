@@ -15,7 +15,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from mycode.ingester import IngestionResult
 from mycode.interface import TerminalIO, UserIO
@@ -317,11 +317,17 @@ class ExecutionEngine:
     def execute(
         self,
         scenarios: list[StressTestScenario],
+        on_progress: Optional[Callable[[int, int, str], None]] = None,
     ) -> ExecutionEngineResult:
         """Execute all scenarios and return aggregated results.
 
         Each scenario is executed independently. A failure in one scenario
         does not prevent subsequent scenarios from running.
+
+        Args:
+            scenarios: Scenarios to execute.
+            on_progress: Optional callback(completed, total, current_name)
+                called after each scenario finishes.
         """
         if not scenarios:
             return ExecutionEngineResult(warnings=["No scenarios to execute."])
@@ -338,6 +344,8 @@ class ExecutionEngine:
             self._io.display(
                 f"[{idx}/{total}] Running scenario: {scenario.name}..."
             )
+            if on_progress:
+                on_progress(idx - 1, total, scenario.name)
             try:
                 result = self._execute_scenario(scenario)
                 results.append(result)
@@ -355,6 +363,8 @@ class ExecutionEngine:
                 warnings.append(
                     f"Scenario '{scenario.name}' encountered an engine error: {e}"
                 )
+            if on_progress:
+                on_progress(idx, total, "")
 
         total_ms = (time.perf_counter() - start) * 1000
         completed = sum(1 for r in results if r.status == "completed")

@@ -97,10 +97,16 @@ def run_analysis(job: Job) -> None:
             io=NullIO(),
         )
 
-        # Wrap execute to track per-scenario progress
-        execution = engine.execute(scenarios=approved)
+        def _on_progress(completed: int, total: int, current: str) -> None:
+            job.progress_scenarios_complete = completed
+            job.progress_scenarios_total = total
+            job.progress_current_scenario = current
 
-        # Update progress after execution completes
+        execution = engine.execute(
+            scenarios=approved,
+            on_progress=_on_progress,
+        )
+
         job.progress_scenarios_complete = (
             execution.scenarios_completed
             + execution.scenarios_failed

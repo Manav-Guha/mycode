@@ -367,6 +367,18 @@ footer {
     color: var(--text-secondary);
 }
 
+.progress-right {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+#progress-elapsed {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
 .progress-scenario {
     font-family: var(--font-mono);
     color: var(--text-muted);
