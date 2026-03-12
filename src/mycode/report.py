@@ -92,6 +92,7 @@ class Finding:
     _error_count: int = 0
     _load_level: Optional[int] = None
     _failure_reason: str = ""
+    _finding_type: str = ""  # scenario_failed, resource_limit_hit, errors_during, failure_indicators
 
 
 @dataclass
@@ -361,9 +362,7 @@ class DiagnosticReport:
         if f.grouped_findings:
             names = []
             for gf in f.grouped_findings:
-                parts = gf.title.split(": ", 1)
-                raw = parts[1] if len(parts) > 1 else gf.title
-                names.append(_humanize_scenario_name(raw))
+                names.append(gf.title)
             shown = names[:5]
             extra = len(names) - 5
             also_line = ", ".join(shown)
@@ -1054,13 +1053,14 @@ class ReportGenerator:
                 if consequence:
                     desc = f"{desc} {consequence}"
                 f = Finding(
-                    title=f"Scenario failed: {_humanize_title_name(sr.scenario_name)}",
+                    title=_humanize_title_name(sr.scenario_name),
                     severity="critical",
                     category=sr.scenario_category,
                     description=desc,
                     details=load_detail.strip() if load_detail else "",
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
+                f._finding_type = "scenario_failed"
                 f._peak_memory_mb = sr_peak_memory
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
@@ -1079,13 +1079,14 @@ class ReportGenerator:
                 if consequence:
                     base_desc = f"{base_desc} {consequence}"
                 f = Finding(
-                    title=f"Resource limit hit: {_humanize_title_name(sr.scenario_name)}",
+                    title=_humanize_title_name(sr.scenario_name),
                     severity="critical",
                     category=sr.scenario_category,
                     description=base_desc,
                     details=cap_detail,
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
+                f._finding_type = "resource_limit_hit"
                 f._peak_memory_mb = sr_peak_memory
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
@@ -1104,13 +1105,14 @@ class ReportGenerator:
                 if consequence:
                     base_desc = f"{base_desc} {consequence}"
                 f = Finding(
-                    title=f"Errors during: {_humanize_title_name(sr.scenario_name)}",
+                    title=_humanize_title_name(sr.scenario_name),
                     severity="warning",
                     category=sr.scenario_category,
                     description=base_desc,
                     details=err_detail,
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
+                f._finding_type = "errors_during"
                 f._peak_memory_mb = sr_peak_memory
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
@@ -1124,7 +1126,7 @@ class ReportGenerator:
                     for t in sr.failure_indicators_triggered
                 ]
                 f = Finding(
-                    title=f"Failure indicators triggered: {_humanize_title_name(sr.scenario_name)}",
+                    title=_humanize_title_name(sr.scenario_name),
                     severity="warning",
                     category=sr.scenario_category,
                     description=(
@@ -1133,6 +1135,7 @@ class ReportGenerator:
                     details=load_detail.strip() if load_detail else "",
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
+                f._finding_type = "failure_indicators"
                 f._peak_memory_mb = sr_peak_memory
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
@@ -2311,7 +2314,10 @@ class ReportGenerator:
 
     @staticmethod
     def _finding_pattern(finding: Finding) -> str:
-        """Extract a groupable pattern from a finding's title prefix."""
+        """Extract a groupable pattern from a finding's type."""
+        if finding._finding_type:
+            return finding._finding_type
+        # Legacy fallback: parse from title prefix (for tests / older data)
         title = finding.title
         if title.startswith("Scenario failed:"):
             return "scenario_failed"
@@ -2902,14 +2908,34 @@ def _describe_scenario(scenario_name: str) -> str:
     return ""
 
 
+# Hand-curated display names for non-obvious scenario templates.
+# Key is the template portion (after dep prefix), value is the
+# consequence-oriented label.  The dep name is appended in parentheses
+# by _humanize_title_name().
+_CURATED_TITLE_MAP: dict[str, str] = {
+    "apply_performance_cliff": "Sudden Slowdown on Large Operations",
+    "settingwithcopy_warning_ignored": "Silent Data Corruption Risk",
+    "memory_error_on_operations": "Memory Crash on Data Operations",
+    "silent_dtype_coercion": "Silent Data Type Changes",
+    "silent_overflow": "Silent Number Overflow",
+    "broadcasting_shape_mismatch": "Array Shape Mismatch",
+    "numpy_2_breaking_changes": "NumPy 2.0 Compatibility",
+    "dtype_edge_cases": "Unusual Data Format Handling",
+    "edge_case_dtypes": "Unusual Data Format Handling",
+    "read_csv_encoding_crash": "CSV Encoding Crash",
+    "empty_dataframe_operations": "Empty Data Edge Cases",
+}
+
+
 def _humanize_title_name(scenario_name: str) -> str:
     """Convert a scenario name to a title-friendly label for finding headers.
 
+    Checks ``_CURATED_TITLE_MAP`` first for hand-written labels, then
+    falls back to mechanical conversion.
+
+    ``pandas_apply_performance_cliff_check`` → ``Sudden Slowdown on Large Operations (pandas)``
     ``pandas_data_volume_scaling`` → ``Data Volume Scaling (pandas)``
-    ``numpy_concurrent_array_access`` → ``Concurrent Array Access (numpy)``
-    ``streamlit_version_discrepancy`` → ``Version Compatibility (streamlit)``
     ``unrecognized_deps_generic_stress`` → ``General Stress Test``
-    ``coupling_api_fetch_data`` → ``API Component Coupling``
     """
     name = scenario_name.lower()
 
@@ -2917,37 +2943,33 @@ def _humanize_title_name(scenario_name: str) -> str:
     if name.startswith("unrecognized_deps_"):
         return "General Stress Test"
 
+    # Coupling scenarios
+    if name.startswith("coupling_"):
+        return "Component Coupling"
+
     # Version discrepancy
     if name.endswith("_version_discrepancy"):
         dep = name.rsplit("_version_discrepancy", 1)[0]
         return f"Version Compatibility ({dep})"
 
-    # Edge-case check scenarios
-    if name.endswith("_check"):
-        remainder = name.rsplit("_check", 1)[0]
-        dep_parts = remainder.split("_", 1)
-        dep = dep_parts[0]
-        template = dep_parts[1] if len(dep_parts) > 1 else remainder
-        label = template.replace("_", " ").title()
-        return f"{label} ({dep})"
+    # Strip _check suffix if present
+    base = name.rsplit("_check", 1)[0] if name.endswith("_check") else name
 
-    # Coupling scenarios
-    if name.startswith("coupling_"):
-        return "Component Coupling"
-
-    # Standard pattern: dep_template_name
-    parts = name.split("_")
-    # Try to find the template key in _TEMPLATE_DESCRIPTIONS
+    # Try to find a (dep, template) split using _TEMPLATE_DESCRIPTIONS
+    # or _CURATED_TITLE_MAP.  Try progressively shorter prefixes.
+    parts = base.split("_")
     for start in range(1, len(parts)):
         template_key = "_".join(parts[start:])
+        dep = "_".join(parts[:start])
+        if template_key in _CURATED_TITLE_MAP:
+            return f"{_CURATED_TITLE_MAP[template_key]} ({dep})"
         if template_key in _TEMPLATE_DESCRIPTIONS:
-            dep = "_".join(parts[:start])
             label = template_key.replace("_", " ").title()
             return f"{label} ({dep})"
 
     # Fallback: first part as dep, rest as label
     dep = parts[0]
-    template = "_".join(parts[1:]) if len(parts) > 1 else name
+    template = "_".join(parts[1:]) if len(parts) > 1 else base
     label = template.replace("_", " ").title()
     if dep and label:
         return f"{label} ({dep})"

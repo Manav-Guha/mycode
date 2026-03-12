@@ -247,7 +247,7 @@ class TestFindingExtraction:
         report = gen.generate(failing_execution, simple_ingestion, profile_matches)
 
         critical = [f for f in report.findings if f.severity == "critical"]
-        failed_findings = [f for f in critical if "failed" in f.title.lower()]
+        failed_findings = [f for f in critical if f._finding_type == "scenario_failed"]
         assert len(failed_findings) >= 1
         assert any("sqlalchemy" in f.title.lower() for f in failed_findings)
 
@@ -258,7 +258,7 @@ class TestFindingExtraction:
         report = gen.generate(failing_execution, simple_ingestion, profile_matches)
 
         cap_findings = [
-            f for f in report.findings if "resource" in f.title.lower()
+            f for f in report.findings if f._finding_type == "resource_limit_hit"
         ]
         assert len(cap_findings) >= 1
         assert cap_findings[0].severity == "critical"
@@ -271,7 +271,7 @@ class TestFindingExtraction:
 
         error_findings = [
             f for f in report.findings
-            if f.severity == "warning" and "error" in f.title.lower()
+            if f.severity == "warning" and f._finding_type == "errors_during"
         ]
         assert len(error_findings) >= 1
 
@@ -283,7 +283,7 @@ class TestFindingExtraction:
 
         indicator_findings = [
             f for f in report.findings
-            if "indicator" in f.title.lower()
+            if f._finding_type == "failure_indicators"
         ]
         assert len(indicator_findings) >= 1
         assert "memory usage grows without limit" in indicator_findings[0].description
@@ -296,7 +296,7 @@ class TestFindingExtraction:
 
         error_findings = [
             f for f in report.findings
-            if "errors during" in f.title.lower()
+            if f._finding_type == "errors_during"
         ]
         assert len(error_findings) >= 1
         assert "out-of-memory error" in error_findings[0].details
@@ -1024,17 +1024,17 @@ class TestFindingGrouping:
         report = DiagnosticReport(
             findings=[
                 Finding(
-                    title="Resource limit hit: coupling_api_fetch_data",
+                    title="Data Volume Scaling (pandas)",
                     severity="critical",
-                    category="concurrent_execution",
+                    category="data_volume_scaling",
                     description="Resource cap exceeded.",
                     grouped_findings=[
                         Finding(
-                            title="Resource limit hit: coupling_api_send",
+                            title="Array Size Scaling (numpy)",
                             severity="critical",
                         ),
                         Finding(
-                            title="Resource limit hit: coupling_api_post",
+                            title="Matrix Operation Scaling (numpy)",
                             severity="critical",
                         ),
                     ],
@@ -1044,8 +1044,8 @@ class TestFindingGrouping:
         )
         text = report.as_text()
         assert "(and 2 similar)" in text
-        # Scenario names are humanized in Also: lines
-        assert "Also: Send, Post" in text
+        # Grouped finding titles appear in Also: lines
+        assert "Also: Array Size Scaling (numpy), Matrix Operation Scaling (numpy)" in text
 
     def test_grouping_preserves_ungrouped(self):
         """Version flag findings (unique titles) should not be grouped."""

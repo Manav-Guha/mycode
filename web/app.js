@@ -344,7 +344,22 @@ async function fetchReport() {
         return;
     }
 
-    hide("progress-container");
+    // Replace progress bar with run summary
+    const scenarioCount = (data.pipeline_summary && data.pipeline_summary.scenarios_run) || 0;
+    const elapsed = elapsedStart ? formatElapsed((Date.now() - elapsedStart) / 1000) : "";
+    const summaryParts = [];
+    if (elapsed) summaryParts.push(elapsed);
+    if (scenarioCount) summaryParts.push(scenarioCount + " scenario" + (scenarioCount !== 1 ? "s" : ""));
+    const summaryText = summaryParts.length
+        ? "Scan completed in " + summaryParts.join(" across ")
+        : "Scan completed";
+    $("progress-fill").style.width = "100%";
+    $("progress-fill").style.background = "var(--green)";
+    $("progress-pct").textContent = "";
+    $("progress-elapsed").textContent = "";
+    $("progress-text").textContent = summaryText;
+    $("progress-scenario").textContent = "";
+
     show("report-section");
     renderReport(data.report, data.pipeline_summary);
 }
