@@ -17,6 +17,10 @@ from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import Any
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 # Check for FastAPI availability before importing
