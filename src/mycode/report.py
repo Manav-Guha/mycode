@@ -1414,19 +1414,28 @@ class ReportGenerator:
                 if ratio <= 1.0:
                     # Within stated capacity → CRITICAL
                     finding.severity = "critical"
-                    fraction_note = ""
-                    if load_level < user_scale and user_scale > 0:
+                    if load_level < user_scale:
                         fraction_note = (
                             f" {_format_user_fraction(load_level, user_scale)}"
                         )
-                    finding.description = (
-                        f"You said {user_scale:,} users. "
-                        f"This breaks at just {load_level:,} concurrent "
-                        f"users — well below your expected {user_scale:,}. "
-                        f"This is a problem you need to fix before launch."
-                        f"{fraction_note} "
-                        f"{finding.description}"
-                    )
+                        finding.description = (
+                            f"You said {user_scale:,} users. "
+                            f"This breaks at just {load_level:,} concurrent "
+                            f"users — well below your expected "
+                            f"{user_scale:,}. "
+                            f"This is a problem you need to fix before "
+                            f"launch.{fraction_note} "
+                            f"{finding.description}"
+                        )
+                    else:
+                        # Breaks at exactly user's stated capacity
+                        finding.description = (
+                            f"You said {user_scale:,} users. "
+                            f"This breaks at exactly {load_level:,} "
+                            f"concurrent users — right at your expected "
+                            f"capacity. You have no safety margin. "
+                            f"{finding.description}"
+                        )
                 elif ratio <= 3.0:
                     # Beyond but ≤3x → WARNING
                     finding.severity = "warning"
@@ -2977,7 +2986,10 @@ def _describe_step(step_name: str) -> str:
 
     m = re.match(r"batch_(\d+)", step_name)
     if m:
-        return f"iteration {int(m.group(1)):,}"
+        n = int(m.group(1))
+        if n == 0:
+            return "first iteration"
+        return f"iteration {n:,}"
 
     m = re.match(r"io_size_(\d+)", step_name)
     if m:
