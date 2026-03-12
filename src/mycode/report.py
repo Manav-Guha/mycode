@@ -2362,11 +2362,13 @@ class ReportGenerator:
         """
         from collections import defaultdict
 
-        # Group by (category, pattern)
-        buckets: dict[tuple[str, str], list[Finding]] = defaultdict(list)
+        # Group by (category, pattern, primary_dep) so findings from
+        # different dependency domains are never grouped together.
+        buckets: dict[tuple[str, str, str], list[Finding]] = defaultdict(list)
         for f in findings:
             pattern = ReportGenerator._finding_pattern(f)
-            key = (f.category, pattern)
+            primary_dep = f.affected_dependencies[0] if f.affected_dependencies else ""
+            key = (f.category, pattern, primary_dep)
             buckets[key].append(f)
 
         result: list[Finding] = []
@@ -2873,6 +2875,31 @@ def _describe_scenario(scenario_name: str) -> str:
         return "handling simultaneous operations"
     if "scaling" in name or "volume" in name:
         return "processing larger amounts of data"
+
+    # Edge-case / check scenarios: strip dep prefix and _check suffix,
+    # then humanize what's left so raw identifiers never reach the user.
+    if name.endswith("_check"):
+        remainder = name.rsplit("_check", 1)[0]
+        # Strip leading dep prefix (first component)
+        dep_parts = remainder.split("_", 1)
+        if len(dep_parts) > 1:
+            remainder = dep_parts[1]
+        return f"checking for {remainder.replace('_', ' ')}"
+
+    # Version discrepancy scenarios
+    if name.endswith("_version_discrepancy"):
+        dep = name.rsplit("_version_discrepancy", 1)[0]
+        return f"testing {dep} version compatibility"
+
+    # Generic stress for unrecognized deps
+    if "generic_stress" in name:
+        dep = name.split("_")[0] if "_" in name else name
+        return f"general stress testing of {dep}"
+
+    # Last resort: strip dep prefix and humanize the template name
+    dep_parts = name.split("_", 1)
+    if len(dep_parts) > 1 and dep_parts[1]:
+        return dep_parts[1].replace("_", " ")
 
     return ""
 

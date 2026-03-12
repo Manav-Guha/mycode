@@ -1069,6 +1069,33 @@ class TestFindingGrouping:
         assert all(f.group_count == 1 for f in result)
 
 
+    def test_no_group_different_dependencies(self):
+        """Same category/pattern/metrics but different deps → not grouped."""
+        findings = [
+            Finding(
+                title="Errors during: pandas_data_volume_scaling",
+                severity="warning",
+                category="data_volume_scaling",
+                affected_dependencies=["pandas"],
+                _peak_memory_mb=54.8,
+                _execution_time_ms=200.0,
+                _error_count=26,
+            ),
+            Finding(
+                title="Errors during: numpy_array_size_scaling",
+                severity="warning",
+                category="data_volume_scaling",
+                affected_dependencies=["numpy"],
+                _peak_memory_mb=54.8,
+                _execution_time_ms=200.0,
+                _error_count=26,
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 2
+        assert all(f.group_count == 1 for f in result)
+
+
 class TestMetricsSimilar:
     """Direct tests for _metrics_similar."""
 
@@ -1871,8 +1898,22 @@ class TestPlainSummaryHelpers:
         assert "calculations" in _describe_scenario("coupling_compute_transform")
         assert "state" in _describe_scenario("coupling_state_setters_group_1")
 
-    def test_describe_scenario_unknown_returns_empty(self):
-        assert _describe_scenario("completely_unknown_thing") == ""
+    def test_describe_scenario_unknown_humanizes_fallback(self):
+        # Unknown scenarios should produce readable text, not empty string
+        result = _describe_scenario("completely_unknown_thing")
+        assert "_" not in result  # no snake_case in output
+        assert result  # non-empty
+
+    def test_describe_scenario_check_suffix(self):
+        result = _describe_scenario("pandas_settingwithcopy_warning_ignored_check")
+        assert "checking for" in result
+        assert "_" not in result
+
+    def test_describe_scenario_version_discrepancy(self):
+        result = _describe_scenario("streamlit_version_discrepancy")
+        assert "streamlit" in result
+        assert "version" in result
+        assert "_" not in result
 
     def test_describe_step_patterns(self):
         assert _describe_step("data_size_10000") == "10,000 items"
