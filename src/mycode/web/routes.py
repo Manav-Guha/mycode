@@ -170,7 +170,7 @@ def handle_preflight(
         # Profile match names
         profile_names = [m.dependency_name for m in matches if m.profile is not None]
 
-        job.status = "preflight_complete" if viability.viable else "preflight_failed"
+        job.status = "preflight_complete"
 
         return PreflightResponse(
             job_id=job.id,

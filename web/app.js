@@ -77,9 +77,10 @@ async function runPreflight(formData) {
         renderPreflight(data);
         show("preflight-content");
 
-        if (data.viability && data.viability.viable) {
-            beginConversation();
+        if (data.viability && !data.viability.viable) {
+            showViabilityWarning(data.viability);
         }
+        beginConversation();
     } catch (err) {
         hide("preflight-loading");
         $("preflight-content").innerHTML =
@@ -138,6 +139,21 @@ function renderPreflight(data) {
 }
 
 // ── Conversation ──
+
+function showViabilityWarning(viability) {
+    const pct = Math.round((viability.install_rate || 0) * 100);
+    let msg = `Warning: only ${pct}% of dependencies installed.`;
+    if (viability.reason) {
+        msg += " " + viability.reason;
+    }
+    msg += " Test results may be limited.";
+
+    const banner = $("viability-banner");
+    if (banner) {
+        banner.className = "viability-banner warn";
+        banner.textContent = msg;
+    }
+}
 
 function beginConversation() {
     converseTurn = 1;
