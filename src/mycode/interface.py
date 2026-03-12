@@ -24,6 +24,7 @@ from typing import Callable, Optional, Protocol
 from mycode.constraints import (
     OperationalConstraints,
     _format_data_type_detail,
+    _is_skip,
     extract_data_type_keywords,
     infer_availability,
     parse_data_sensitivity,
@@ -403,6 +404,73 @@ class ConversationalInterface:
         except Exception:
             return ""
 
+    # ── Input Validation Constants ──
+
+    _CLARIFICATIONS: dict[str, str] = {
+        "user_scale": (
+            "I didn't catch that — please enter a number "
+            "(e.g. 10, 100, 5k) or 'not sure'."
+        ),
+        "data_type": (
+            "I didn't catch that — please pick a number from 1-5 "
+            "or describe the data (e.g. CSV, images, JSON)."
+        ),
+        "usage_pattern": (
+            "I didn't catch that — please pick a number from 1-4 "
+            "or describe the usage (e.g. steady, burst, occasional, growing)."
+        ),
+        "max_payload_mb": (
+            "I didn't catch that — please pick a number from 1-3 "
+            "or enter a size (e.g. 10 MB, 2 GB)."
+        ),
+    }
+
+    _DEFAULTS: dict[str, tuple[object, str]] = {
+        "user_scale": (10, "10 concurrent users"),
+        "data_type": ("mixed", "mixed data types"),
+        "usage_pattern": ("sustained", "steady, continuous use"),
+        "max_payload_mb": (50.0, "medium-sized inputs (up to 50 MB)"),
+    }
+
+    def _ask_validated(
+        self,
+        question: str,
+        field_name: str,
+        parser: Callable[[str], object],
+    ) -> object:
+        """Ask a constrained question with one retry and a fallback default.
+
+        1. Ask the question.
+        2. If the user says 'not sure' / 'skip' etc., return None (explicit opt-out).
+        3. If the parser can't extract a value, re-ask once with a clarification.
+        4. If the second attempt also fails, default to a safe value and tell the user.
+        """
+        answer = self._io.prompt(question)
+        if _is_skip(answer):
+            return None
+        result = parser(answer)
+        if result is not None:
+            return result
+
+        # Re-ask once with clarification
+        clarification = self._CLARIFICATIONS.get(field_name, question)
+        answer = self._io.prompt(clarification)
+        if _is_skip(answer):
+            return None
+        result = parser(answer)
+        if result is not None:
+            return result
+
+        # Default and notify
+        default_value, default_label = self._DEFAULTS.get(
+            field_name, (None, "no constraint"),
+        )
+        if default_value is not None:
+            self._io.display(
+                f"No worries — defaulting to {default_label}."
+            )
+        return default_value
+
     def review_scenarios(
         self,
         scenarios: list[StressTestScenario],
@@ -663,49 +731,50 @@ class ConversationalInterface:
         # ── Ask explicit questions for parameters still None ──
         if self._offline:
             if user_scale is None:
-                answer = self._io.prompt(
+                user_scale = self._ask_validated(
                     "How many users do you expect at the same time? "
-                    "(a number, or 'not sure')"
+                    "(a number, or 'not sure')",
+                    "user_scale",
+                    parse_user_scale,
                 )
-                raw_answers.append(answer)
-                user_scale = parse_user_scale(answer)
 
             if data_type is None:
-                answer = self._io.prompt(
+                data_type = self._ask_validated(
                     "What kind of data does your project handle?\n"
                     "  1. Tabular data (CSV, spreadsheets, databases)\n"
                     "  2. Text / documents\n"
                     "  3. Images / media / files\n"
                     "  4. API responses / JSON\n"
                     "  5. Mixed / various\n"
-                    "(enter a number or describe it)"
+                    "(enter a number or describe it)",
+                    "data_type",
+                    parse_data_type,
                 )
-                raw_answers.append(answer)
-                data_type = parse_data_type(answer)
-                data_type_source = answer
+                if data_type is not None:
+                    data_type_source = str(data_type)
 
             if usage_pattern is None:
-                answer = self._io.prompt(
+                usage_pattern = self._ask_validated(
                     "How will people use it?\n"
                     "  1. Steady, continuous use throughout the day\n"
                     "  2. Bursts of heavy use at peak times\n"
                     "  3. Occasional, on-demand use\n"
                     "  4. Growing usage over time\n"
-                    "(enter a number or describe it)"
+                    "(enter a number or describe it)",
+                    "usage_pattern",
+                    parse_usage_pattern,
                 )
-                raw_answers.append(answer)
-                usage_pattern = parse_usage_pattern(answer)
 
             if max_payload_mb is None:
-                answer = self._io.prompt(
+                max_payload_mb = self._ask_validated(
                     "What's the largest input your project handles?\n"
                     "  1. Small (under 1 MB)\n"
                     "  2. Medium (1–50 MB)\n"
                     "  3. Large (over 50 MB)\n"
-                    "(enter a number, a size like '50 MB', or 'not sure')"
+                    "(enter a number, a size like '50 MB', or 'not sure')",
+                    "max_payload_mb",
+                    parse_max_payload,
                 )
-                raw_answers.append(answer)
-                max_payload_mb = parse_max_payload(answer)
 
         # ── Derive availability from usage pattern ──
         availability_requirement = infer_availability(usage_pattern)
@@ -1188,18 +1257,47 @@ class ConversationalInterface:
         constraints: OperationalConstraints,
         field_name: str,
         answer: str,
-    ) -> OperationalConstraints:
+        is_retry: bool = False,
+    ) -> tuple[OperationalConstraints, bool, str]:
         """Parse *answer* for *field_name* and return updated constraints.
 
-        If the answer can't be parsed (e.g. the user said 'not sure'), the
-        field stays ``None``.  Availability is re-derived whenever
-        usage_pattern changes.
+        Returns ``(constraints, parsed_ok, message)``.
+
+        - ``parsed_ok`` is True when the value was successfully extracted
+          (or the user explicitly skipped with 'not sure').
+        - When ``parsed_ok`` is False and ``is_retry`` is False, the caller
+          should re-ask with the clarification in ``message``.
+        - When ``parsed_ok`` is False and ``is_retry`` is True, a default is
+          applied and ``message`` explains what was assumed.
         """
         parser = ConversationalInterface._FOLLOWUP_PARSERS.get(field_name)
+        parsed_ok = False
+        message = ""
+
         if parser is not None:
-            value = parser(answer)
-            if value is not None:
-                object.__setattr__(constraints, field_name, value)
+            if _is_skip(answer):
+                parsed_ok = True  # explicit opt-out
+            else:
+                value = parser(answer)
+                if value is not None:
+                    object.__setattr__(constraints, field_name, value)
+                    parsed_ok = True
+                elif not is_retry:
+                    # First failure — ask to retry
+                    message = ConversationalInterface._CLARIFICATIONS.get(
+                        field_name, "",
+                    )
+                else:
+                    # Second failure — apply default
+                    default_value, default_label = (
+                        ConversationalInterface._DEFAULTS.get(
+                            field_name, (None, "no constraint"),
+                        )
+                    )
+                    if default_value is not None:
+                        object.__setattr__(constraints, field_name, default_value)
+                        message = f"No worries — defaulting to {default_label}."
+                    parsed_ok = True
 
         # Keep raw_answers in sync
         if constraints.raw_answers is not None:
@@ -1217,7 +1315,7 @@ class ConversationalInterface:
             if kws:
                 constraints.data_type_detail = _format_data_type_detail(kws)
 
-        return constraints
+        return constraints, parsed_ok, message
 
     # ── Scenario Review Helpers ──
 

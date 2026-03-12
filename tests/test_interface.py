@@ -904,3 +904,206 @@ class TestInterfaceLLMInit:
         interface = ConversationalInterface(offline=True, io=io)
         assert interface._offline is True
         assert interface._backend is None
+
+
+# ── Input Validation Tests ──
+
+
+class TestInputValidation:
+    """Tests for re-ask and default behavior on bad input."""
+
+    def test_valid_input_accepted_first_try(self, simple_ingestion):
+        """Valid answers are accepted without re-asking."""
+        io = MockIO(responses=[
+            "It's a web app",
+            "speed matters",
+            "20",           # user_scale — valid
+            "1",            # data_type — valid (tabular)
+            "2",            # usage_pattern — valid (burst)
+            "1",            # max_payload — valid (small)
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion, language="python")
+
+        assert result.constraints.user_scale == 20
+        assert result.constraints.data_type == "tabular"
+        assert result.constraints.usage_pattern == "burst"
+        assert result.constraints.max_payload_mb == 1.0
+        # No re-ask prompts — exactly 6 prompts total
+        assert len(io.prompts) == 6
+
+    def test_bad_input_re_asked_once(self, simple_ingestion):
+        """Invalid input triggers one re-ask with clarification."""
+        io = MockIO(responses=[
+            "web app",
+            "speed",
+            "banana",       # user_scale — invalid (first attempt)
+            "50",           # user_scale — valid (second attempt)
+            "1",            # data_type
+            "1",            # usage_pattern
+            "2",            # max_payload
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion, language="python")
+
+        assert result.constraints.user_scale == 50
+        # 7 prompts: 2 turns + 4 constraints + 1 re-ask
+        assert len(io.prompts) == 7
+        # The re-ask prompt should mention "didn't catch that"
+        assert any("didn't catch that" in p for p in io.prompts)
+
+    def test_two_bad_inputs_defaults_with_notification(self, simple_ingestion):
+        """Two invalid inputs → default applied and user notified."""
+        io = MockIO(responses=[
+            "web app",
+            "speed",
+            "banana",       # user_scale — invalid (first)
+            "also banana",  # user_scale — invalid (second) → defaults to 10
+            "1",            # data_type
+            "1",            # usage_pattern
+            "2",            # max_payload
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion, language="python")
+
+        assert result.constraints.user_scale == 10  # default
+        # User should be notified about the default
+        assert any("defaulting to" in d.lower() for d in io.displays)
+
+    def test_skip_word_accepted_without_reask(self, simple_ingestion):
+        """'not sure' is accepted as opt-out, no re-ask."""
+        io = MockIO(responses=[
+            "web app",
+            "speed",
+            "not sure",     # user_scale — explicit skip
+            "1",            # data_type
+            "1",            # usage_pattern
+            "not sure",     # max_payload — explicit skip
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion, language="python")
+
+        assert result.constraints.user_scale is None
+        assert result.constraints.max_payload_mb is None
+        # No re-asks — exactly 6 prompts
+        assert len(io.prompts) == 6
+
+    def test_data_type_reask_then_default(self, simple_ingestion):
+        """data_type defaults to 'mixed' after two failures."""
+        io = MockIO(responses=[
+            "web app",
+            "speed",
+            "10",           # user_scale — valid
+            "banana",       # data_type — invalid
+            "still banana", # data_type — invalid → defaults to mixed
+            "1",            # usage_pattern
+            "2",            # max_payload
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion, language="python")
+
+        assert result.constraints.data_type == "mixed"
+        assert any("mixed data types" in d.lower() for d in io.displays)
+
+    def test_usage_pattern_reask_then_valid(self, simple_ingestion):
+        """usage_pattern re-asked once, valid on second try."""
+        io = MockIO(responses=[
+            "web app",
+            "speed",
+            "10",           # user_scale
+            "1",            # data_type
+            "xyz",          # usage_pattern — invalid
+            "steady",       # usage_pattern — valid on retry
+            "2",            # max_payload
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion, language="python")
+
+        assert result.constraints.usage_pattern == "sustained"
+
+    def test_max_payload_defaults_to_medium(self, simple_ingestion):
+        """max_payload_mb defaults to 50.0 after two failures."""
+        io = MockIO(responses=[
+            "web app",
+            "speed",
+            "10",           # user_scale
+            "1",            # data_type
+            "1",            # usage_pattern
+            "bananas",      # max_payload — invalid
+            "more bananas", # max_payload — invalid → defaults to 50
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        result = interface.run(simple_ingestion, language="python")
+
+        assert result.constraints.max_payload_mb == 50.0
+        assert any("50 MB" in d for d in io.displays)
+
+
+class TestWebFollowupValidation:
+    """Tests for apply_followup_answer retry logic (web path)."""
+
+    def test_valid_answer_returns_parsed_ok(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "user_scale", "50",
+        )
+        assert ok is True
+        assert constraints.user_scale == 50
+        assert msg == ""
+
+    def test_invalid_first_attempt_returns_clarification(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "user_scale", "banana",
+        )
+        assert ok is False
+        assert "didn't catch that" in msg
+        assert constraints.user_scale is None
+
+    def test_invalid_retry_applies_default(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "user_scale", "banana", is_retry=True,
+        )
+        assert ok is True
+        assert constraints.user_scale == 10  # default
+        assert "defaulting to" in msg.lower()
+
+    def test_skip_word_returns_parsed_ok(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "data_type", "not sure",
+        )
+        assert ok is True
+        assert constraints.data_type is None  # skipped
+
+    def test_data_type_retry_defaults_to_mixed(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "data_type", "xyz", is_retry=True,
+        )
+        assert ok is True
+        assert constraints.data_type == "mixed"
+
+    def test_usage_pattern_retry_defaults_to_sustained(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "usage_pattern", "xyz", is_retry=True,
+        )
+        assert ok is True
+        assert constraints.usage_pattern == "sustained"
+
+    def test_max_payload_retry_defaults_to_medium(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "max_payload_mb", "xyz", is_retry=True,
+        )
+        assert ok is True
+        assert constraints.max_payload_mb == 50.0

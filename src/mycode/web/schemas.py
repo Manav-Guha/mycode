@@ -102,6 +102,7 @@ class ConverseResponse:
     constraints: Optional[dict] = None
     operational_intent: str = ""
     done: bool = False
+    message: str = ""  # informational (e.g. "Defaulting to ...")
     error: str = ""
 
 

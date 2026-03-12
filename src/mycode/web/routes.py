@@ -331,10 +331,36 @@ def handle_converse(job_id: str, turn: int, user_response: str) -> ConverseRespo
     elif turn >= 4:
         # Follow-up answer for a specific constraint field
         if job.constraints is not None and job.pending_followup_field:
-            ConversationalInterface.apply_followup_answer(
-                job.constraints, job.pending_followup_field, user_response,
+            constraints, parsed_ok, message = (
+                ConversationalInterface.apply_followup_answer(
+                    job.constraints,
+                    job.pending_followup_field,
+                    user_response,
+                    is_retry=job.followup_is_retry,
+                )
             )
+            job.constraints = constraints
+
+            if not parsed_ok:
+                # Re-ask with clarification (first failure only)
+                job.followup_is_retry = True
+                return ConverseResponse(
+                    job_id=job_id,
+                    turn=turn,
+                    question=message,
+                    done=False,
+                )
+
+            # Parse succeeded (or defaulted) — reset retry state
+            default_message = message  # non-empty when a default was applied
             job.pending_followup_field = ""
+            job.followup_is_retry = False
+
+            # If a default was applied, include the notification
+            result = _followup_or_done(job, turn)
+            if default_message and not result.message:
+                result.message = default_message
+            return result
 
         return _followup_or_done(job, turn)
 

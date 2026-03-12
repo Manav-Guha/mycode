@@ -86,6 +86,7 @@ class Job:
     turn1_response: str = ""
     turn2_response: str = ""
     pending_followup_field: str = ""
+    followup_is_retry: bool = False  # True when current field is being re-asked
 
 
 # ── Job Store ──
