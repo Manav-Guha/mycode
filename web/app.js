@@ -23,22 +23,30 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-function highlightConsequence(text) {
+function highlightConsequence(text, severity) {
     // Split into sentences, highlight consequence sentences in red.
-    // Consequence sentences start with "This means", "In practice,",
-    // or contain "your app will" / "your app's".
     const sentences = text.match(/[^.!]+[.!]+/g) || [text];
-    return sentences.map(s => {
+    let matched = false;
+    const parts = sentences.map((s, i) => {
         const lower = s.trimStart().toLowerCase();
         const isConsequence = lower.startsWith("this means") ||
             lower.startsWith("in practice,") ||
             lower.includes("your app will") ||
-            lower.includes("your app's");
+            lower.includes("your app's") ||
+            lower.includes("memory usage grows") ||
+            lower.includes("showed failures in");
         if (isConsequence) {
-            return `<span class="consequence">${escapeHtml(s)}</span>`;
+            matched = true;
+            return { html: `<span class="consequence">${escapeHtml(s)}</span>` };
         }
-        return escapeHtml(s);
-    }).join("");
+        return { html: escapeHtml(s), idx: i };
+    });
+    // Warning fallback: if no consequence matched, highlight last sentence
+    if (!matched && severity === "warning" && sentences.length > 1) {
+        const last = sentences.length - 1;
+        parts[last] = { html: `<span class="consequence">${escapeHtml(sentences[last])}</span>` };
+    }
+    return parts.map(p => p.html).join("");
 }
 
 async function apiPost(path, formData) {
@@ -453,7 +461,7 @@ function renderFinding(f) {
     html += `</div>`;
 
     if (f.description) {
-        html += `<div class="finding-description">${highlightConsequence(f.description)}</div>`;
+        html += `<div class="finding-description">${highlightConsequence(f.description, severity)}</div>`;
     }
     if (f.details) {
         html += `<div class="finding-details">${escapeHtml(f.details)}</div>`;
