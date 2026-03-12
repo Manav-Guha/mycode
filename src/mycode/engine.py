@@ -569,10 +569,16 @@ class ExecutionEngine:
         else:
             target_modules = self._get_target_modules(scenario)
 
+        # Inject per-step timeout into resource_limits for the harness.
+        # Default 60s per step prevents any single step from hanging.
+        rl = dict(config.get("resource_limits", {}))
+        if "step_timeout_seconds" not in rl:
+            rl["step_timeout_seconds"] = 60
+
         harness_config: dict = {
             "category": scenario.category,
             "parameters": config.get("parameters", {}),
-            "resource_limits": config.get("resource_limits", {}),
+            "resource_limits": rl,
             "measurements": config.get("measurements", []),
             "target_modules": target_modules,
             "synthetic_data": config.get("synthetic_data", {}),
@@ -998,6 +1004,9 @@ _step_errors = []
 _import_errors = []
 _modules = {}
 _callables = []
+_harness_start = time.perf_counter()
+_step_timeout_s = CONFIG.get("resource_limits", {}).get("step_timeout_seconds", 60)
+_scenario_timeout_s = CONFIG.get("resource_limits", {}).get("timeout_seconds", 300)
 
 # ── Module Import ──
 for _mod_name in CONFIG.get("target_modules", []):
@@ -1035,24 +1044,58 @@ def _record_error(exc, target=""):
         "target": target,
     })
 
+class _StepTimeout(Exception):
+    pass
+
 def _measure_step(step_name, params, func):
     """Execute func and record resource measurements."""
     global _step_errors
+    # Skip remaining steps if we have used >80% of the scenario timeout
+    _elapsed_total = time.perf_counter() - _harness_start
+    if _elapsed_total > _scenario_timeout_s * 0.8:
+        _steps.append({
+            "step_name": step_name,
+            "parameters": params,
+            "execution_time_ms": 0,
+            "memory_peak_mb": 0,
+            "error_count": 1,
+            "errors": [{"type": "Skipped", "message": "Skipped — scenario time budget exceeded"}],
+            "resource_cap_hit": "timeout",
+        })
+        return
     _step_errors = []
     tracemalloc.reset_peak()
     _t0 = time.perf_counter()
     _cap = ""
+    # Per-step timeout via SIGALRM (Unix only, main thread)
+    _alarm_set = False
+    try:
+        import signal
+        def _alarm_handler(_signum, _frame):
+            raise _StepTimeout("Step exceeded %ds limit" % _step_timeout_s)
+        _old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+        signal.alarm(_step_timeout_s)
+        _alarm_set = True
+    except (ImportError, AttributeError, ValueError):
+        pass  # Windows or non-main thread — skip alarm
     try:
         func()
     except MemoryError:
         _cap = "memory"
         _step_errors.append({"type": "MemoryError", "message": "Memory limit exceeded"})
+    except _StepTimeout:
+        _cap = "timeout"
+        _step_errors.append({"type": "StepTimeout", "message": "Step exceeded %ds limit" % _step_timeout_s})
     except Exception as _e:
         _step_errors.append({
             "type": type(_e).__name__,
             "message": str(_e)[:500],
             "traceback": traceback.format_exc()[-1000:],
         })
+    finally:
+        if _alarm_set:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, _old_handler)
     _elapsed = (time.perf_counter() - _t0) * 1000
     _, _peak = tracemalloc.get_traced_memory()
     _steps.append({
