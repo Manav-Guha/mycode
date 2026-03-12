@@ -17,9 +17,9 @@ RUN apt-get update \
 
 # Install myCode from local source
 COPY . /opt/mycode
-RUN pip install --no-cache-dir /opt/mycode
+RUN pip install --no-cache-dir "/opt/mycode[web]"
 
 # Create workspace directory
 RUN mkdir -p /workspace
 
-ENTRYPOINT ["mycode"]
+CMD ["uvicorn", "mycode.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
