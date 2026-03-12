@@ -2977,7 +2977,7 @@ def _describe_step(step_name: str) -> str:
 
     m = re.match(r"batch_(\d+)", step_name)
     if m:
-        return f"batch {int(m.group(1)):,}"
+        return f"iteration {int(m.group(1)):,}"
 
     m = re.match(r"io_size_(\d+)", step_name)
     if m:
@@ -3367,7 +3367,7 @@ def _describe_errors_with_context(f: "Finding", scenario_name: str = "") -> str:
 
 
 # Step name prefixes that are repetition counters, not load levels.
-_ITERATION_PREFIXES = frozenset({"iteration", "repeat", "run", "attempt", "try"})
+_ITERATION_PREFIXES = frozenset({"iteration", "repeat", "run", "attempt", "try", "batch"})
 
 
 def _step_level(step_name: str) -> Optional[int]:

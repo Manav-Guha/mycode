@@ -2538,7 +2538,7 @@ class TestConstraintContextualisation:
         assert f.severity == "warning"
 
     def test_batch_finding_no_ratio(self):
-        """batch_N findings describe load level without user-scale ratio."""
+        """batch_N findings are iteration counters — no load context injected."""
         from mycode.constraints import OperationalConstraints
 
         report = DiagnosticReport(
@@ -2559,8 +2559,9 @@ class TestConstraintContextualisation:
         gen._contextualise_findings(report, constraints)
 
         f = report.findings[0]
+        # batch_N is an iteration counter, not a load level — no ratio, no load context
         assert "You said" not in f.description
-        assert "batch 500" in f.description
+        assert "Slow at scale." in f.description
 
     def test_concurrent_finding_still_gets_ratio(self):
         """Concurrency findings still get the ratio against user_scale."""
