@@ -33,9 +33,18 @@ _RESULTS_END = "__MYCODE_RESULTS_END__"
 # Truncation limits
 _SNIPPET_MAX = 2000
 
-# Hard per-scenario timeout cap — prevents any single scenario from hanging
-# the entire run, regardless of what resource_limits say.
-_SCENARIO_TIMEOUT_CAP = 300
+# Per-category timeout caps — data-heavy scenarios get more time, others less.
+# Prevents any single scenario from hanging the entire run.
+_SCENARIO_TIMEOUT_CAP = 300  # default for unlisted categories
+
+_CATEGORY_TIMEOUT_CAPS: dict[str, int] = {
+    "data_volume_scaling": 600,
+    "memory_profiling": 600,
+    "edge_case_input": 300,
+    "concurrent_execution": 300,
+    "blocking_io": 300,
+    "gil_contention": 120,
+}
 
 # Default parallel workers for scenario execution
 _DEFAULT_MAX_WORKERS = 4
@@ -416,8 +425,9 @@ class ExecutionEngine:
         timeout = resource_limits.get(
             "timeout_seconds", self.session.resource_caps.timeout_seconds,
         )
-        # Enforce hard cap — no single scenario may exceed _SCENARIO_TIMEOUT_CAP
-        timeout = min(timeout, _SCENARIO_TIMEOUT_CAP)
+        # Enforce per-category cap — data-heavy categories get more time
+        cap = _CATEGORY_TIMEOUT_CAPS.get(scenario.category, _SCENARIO_TIMEOUT_CAP)
+        timeout = min(timeout, cap)
 
         logger.info(
             "Executing scenario: %s [%s] (timeout=%ds)",

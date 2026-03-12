@@ -831,23 +831,25 @@ class TestScenarioExecution:
         assert remaining == []
 
     def test_timeout_capped_when_config_exceeds_cap(self, tmp_path):
-        """Config timeout of 600 exceeds the 300s cap → should be capped."""
+        """Config timeout of 900 exceeds the category cap → should be capped."""
+        from mycode.engine import _CATEGORY_TIMEOUT_CAPS
         session = _make_session(tmp_path)
         harness_stdout = _make_harness_output(steps=[_make_step_data()])
         session.run_in_session.return_value = SessionResult(
             returncode=0, stdout=harness_stdout, stderr="",
         )
 
+        # data_volume_scaling has a 600s cap
         scenario = _make_scenario(test_config={
             "parameters": {},
-            "resource_limits": {"timeout_seconds": 600},
+            "resource_limits": {"timeout_seconds": 900},
         })
         engine = ExecutionEngine(session, _make_ingestion())
         engine._execute_scenario(scenario)
 
         call_kwargs = session.run_in_session.call_args
         actual = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
-        assert actual == _SCENARIO_TIMEOUT_CAP
+        assert actual == _CATEGORY_TIMEOUT_CAPS["data_volume_scaling"]
 
     def test_timeout_preserved_when_under_cap(self, tmp_path):
         """Config timeout of 15 is under the 30s cap → should be preserved."""
@@ -869,21 +871,23 @@ class TestScenarioExecution:
         assert actual == 15
 
     def test_default_timeout_from_session_capped(self, tmp_path):
-        """Session default timeout of 600 exceeds cap → should be capped to 300."""
+        """Session default timeout of 900 exceeds category cap → should be capped."""
+        from mycode.engine import _CATEGORY_TIMEOUT_CAPS
         session = _make_session(tmp_path)
-        session.resource_caps = ResourceCaps(timeout_seconds=600)
+        session.resource_caps = ResourceCaps(timeout_seconds=900)
         harness_stdout = _make_harness_output(steps=[_make_step_data()])
         session.run_in_session.return_value = SessionResult(
             returncode=0, stdout=harness_stdout, stderr="",
         )
 
+        # data_volume_scaling category → 600s cap
         scenario = _make_scenario(test_config={"parameters": {}, "resource_limits": {}})
         engine = ExecutionEngine(session, _make_ingestion())
         engine._execute_scenario(scenario)
 
         call_kwargs = session.run_in_session.call_args
         actual = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
-        assert actual == _SCENARIO_TIMEOUT_CAP
+        assert actual == _CATEGORY_TIMEOUT_CAPS["data_volume_scaling"]
 
     def test_scenario_timeout_cap_value(self):
         """_SCENARIO_TIMEOUT_CAP should be 300 seconds."""

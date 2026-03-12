@@ -904,10 +904,14 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 if cat not in valid_categories:
                     continue
                 raw_params = template.get("parameters", {})
+                # Data-heavy categories get longer timeouts
+                cat_timeout = 600 if cat in (
+                    "data_volume_scaling", "memory_profiling",
+                ) else 300
                 tc: dict = {
                     "parameters": _normalize_template_params(raw_params, cat),
                     "measurements": _infer_measurements(cat),
-                    "resource_limits": {"memory_mb": 512, "timeout_seconds": 300},
+                    "resource_limits": {"memory_mb": 512, "timeout_seconds": cat_timeout},
                 }
                 # Server frameworks: route to standalone body to avoid blocking
                 if profile.server_framework:
