@@ -11,8 +11,10 @@ Pure Python. No LLM dependency.
 import json
 import logging
 import sys
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -34,6 +36,9 @@ _SNIPPET_MAX = 2000
 # Hard per-scenario timeout cap — prevents any single scenario from hanging
 # the entire run, regardless of what resource_limits say.
 _SCENARIO_TIMEOUT_CAP = 300
+
+# Default parallel workers for scenario execution
+_DEFAULT_MAX_WORKERS = 4
 
 # JavaScript-specific categories — executed via Node.js harness
 _JS_CATEGORIES = frozenset({
@@ -318,53 +323,77 @@ class ExecutionEngine:
         self,
         scenarios: list[StressTestScenario],
         on_progress: Optional[Callable[[int, int, str], None]] = None,
+        max_workers: int = _DEFAULT_MAX_WORKERS,
     ) -> ExecutionEngineResult:
         """Execute all scenarios and return aggregated results.
 
-        Each scenario is executed independently. A failure in one scenario
-        does not prevent subsequent scenarios from running.
+        Scenarios run concurrently using a thread pool. Each scenario
+        launches a subprocess via session.run_in_session, so there are
+        no shared-state conflicts between scenarios.
 
         Args:
             scenarios: Scenarios to execute.
             on_progress: Optional callback(completed, total, current_name)
-                called after each scenario finishes.
+                called as each scenario completes (out of order).
+            max_workers: Maximum concurrent scenario threads.
         """
         if not scenarios:
             return ExecutionEngineResult(warnings=["No scenarios to execute."])
 
-        logger.info("Starting execution of %d scenarios", len(scenarios))
+        total = len(scenarios)
+        logger.info(
+            "Starting execution of %d scenarios (%d workers)",
+            total, min(max_workers, total),
+        )
         sys.stderr.flush()
 
-        results: list[ScenarioResult] = []
+        # Thread-safe collection for results (ordered by completion)
+        lock = threading.Lock()
+        completed_count = 0
+        # Pre-allocate results list to preserve scenario order
+        ordered_results: list[Optional[ScenarioResult]] = [None] * total
         warnings: list[str] = []
         start = time.perf_counter()
 
-        total = len(scenarios)
-        for idx, scenario in enumerate(scenarios, 1):
+        def _run_one(idx: int, scenario: StressTestScenario) -> None:
+            nonlocal completed_count
             self._io.display(
-                f"[{idx}/{total}] Running scenario: {scenario.name}..."
+                f"[{idx + 1}/{total}] Running scenario: {scenario.name}..."
             )
-            if on_progress:
-                on_progress(idx - 1, total, scenario.name)
             try:
                 result = self._execute_scenario(scenario)
-                results.append(result)
             except Exception as e:
                 logger.error(
                     "Scenario '%s' engine error: %s", scenario.name, e,
                 )
-                results.append(ScenarioResult(
+                result = ScenarioResult(
                     scenario_name=scenario.name,
                     scenario_category=scenario.category,
                     status="failed",
                     summary=f"Engine error: {type(e).__name__}: {str(e)[:500]}",
                     failure_reason="unknown",
-                ))
-                warnings.append(
-                    f"Scenario '{scenario.name}' encountered an engine error: {e}"
                 )
-            if on_progress:
-                on_progress(idx, total, "")
+                with lock:
+                    warnings.append(
+                        f"Scenario '{scenario.name}' encountered an engine error: {e}"
+                    )
+
+            with lock:
+                ordered_results[idx] = result
+                completed_count += 1
+                if on_progress:
+                    on_progress(completed_count, total, scenario.name)
+
+        with ThreadPoolExecutor(max_workers=min(max_workers, total)) as pool:
+            futures = {
+                pool.submit(_run_one, idx, scenario): idx
+                for idx, scenario in enumerate(scenarios)
+            }
+            # Wait for all to complete; exceptions handled inside _run_one
+            for future in as_completed(futures):
+                future.result()  # re-raises if _run_one itself crashed
+
+        results = [r for r in ordered_results if r is not None]
 
         total_ms = (time.perf_counter() - start) * 1000
         completed = sum(1 for r in results if r.status == "completed")
