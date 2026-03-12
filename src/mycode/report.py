@@ -1008,7 +1008,7 @@ class ReportGenerator:
             # ── Harness failures → incomplete tests (myCode limitation) ──
             if sr.failure_reason:
                 f = Finding(
-                    title=f"Could not test: {sr.scenario_name}",
+                    title=f"Could not test: {_humanize_title_name(sr.scenario_name)}",
                     severity="info",
                     category=sr.scenario_category,
                     description=sr.summary or "Test could not run.",
@@ -1023,7 +1023,7 @@ class ReportGenerator:
             # ── Environment-only failures → incomplete tests ──
             if self._is_environment_only(sr):
                 f = Finding(
-                    title=f"Could not test: {sr.scenario_name}",
+                    title=f"Could not test: {_humanize_title_name(sr.scenario_name)}",
                     severity="info",
                     category=sr.scenario_category,
                     description=(
@@ -1054,7 +1054,7 @@ class ReportGenerator:
                 if consequence:
                     desc = f"{desc} {consequence}"
                 f = Finding(
-                    title=f"Scenario failed: {sr.scenario_name}",
+                    title=f"Scenario failed: {_humanize_title_name(sr.scenario_name)}",
                     severity="critical",
                     category=sr.scenario_category,
                     description=desc,
@@ -1079,7 +1079,7 @@ class ReportGenerator:
                 if consequence:
                     base_desc = f"{base_desc} {consequence}"
                 f = Finding(
-                    title=f"Resource limit hit: {sr.scenario_name}",
+                    title=f"Resource limit hit: {_humanize_title_name(sr.scenario_name)}",
                     severity="critical",
                     category=sr.scenario_category,
                     description=base_desc,
@@ -1104,7 +1104,7 @@ class ReportGenerator:
                 if consequence:
                     base_desc = f"{base_desc} {consequence}"
                 f = Finding(
-                    title=f"Errors during: {sr.scenario_name}",
+                    title=f"Errors during: {_humanize_title_name(sr.scenario_name)}",
                     severity="warning",
                     category=sr.scenario_category,
                     description=base_desc,
@@ -1124,7 +1124,7 @@ class ReportGenerator:
                     for t in sr.failure_indicators_triggered
                 ]
                 f = Finding(
-                    title=f"Failure indicators triggered: {sr.scenario_name}",
+                    title=f"Failure indicators triggered: {_humanize_title_name(sr.scenario_name)}",
                     severity="warning",
                     category=sr.scenario_category,
                     description=(
@@ -1415,16 +1415,12 @@ class ReportGenerator:
                     # Within stated capacity → CRITICAL
                     finding.severity = "critical"
                     if load_level < user_scale:
-                        fraction_note = (
-                            f" {_format_user_fraction(load_level, user_scale)}"
-                        )
                         finding.description = (
                             f"You said {user_scale:,} users. "
                             f"This breaks at just {load_level:,} concurrent "
-                            f"users — well below your expected "
-                            f"{user_scale:,}. "
+                            f"users — well below your expected capacity. "
                             f"This is a problem you need to fix before "
-                            f"launch.{fraction_note} "
+                            f"launch. "
                             f"{finding.description}"
                         )
                     else:
@@ -2893,6 +2889,8 @@ def _describe_scenario(scenario_name: str) -> str:
 
     # Generic stress for unrecognized deps
     if "generic_stress" in name:
+        if name.startswith("unrecognized_deps"):
+            return "general stress testing of unrecognized dependencies"
         dep = name.split("_")[0] if "_" in name else name
         return f"general stress testing of {dep}"
 
@@ -2902,6 +2900,58 @@ def _describe_scenario(scenario_name: str) -> str:
         return dep_parts[1].replace("_", " ")
 
     return ""
+
+
+def _humanize_title_name(scenario_name: str) -> str:
+    """Convert a scenario name to a title-friendly label for finding headers.
+
+    ``pandas_data_volume_scaling`` → ``Data Volume Scaling (pandas)``
+    ``numpy_concurrent_array_access`` → ``Concurrent Array Access (numpy)``
+    ``streamlit_version_discrepancy`` → ``Version Compatibility (streamlit)``
+    ``unrecognized_deps_generic_stress`` → ``General Stress Test``
+    ``coupling_api_fetch_data`` → ``API Component Coupling``
+    """
+    name = scenario_name.lower()
+
+    # Unrecognized deps — no meaningful dep prefix
+    if name.startswith("unrecognized_deps_"):
+        return "General Stress Test"
+
+    # Version discrepancy
+    if name.endswith("_version_discrepancy"):
+        dep = name.rsplit("_version_discrepancy", 1)[0]
+        return f"Version Compatibility ({dep})"
+
+    # Edge-case check scenarios
+    if name.endswith("_check"):
+        remainder = name.rsplit("_check", 1)[0]
+        dep_parts = remainder.split("_", 1)
+        dep = dep_parts[0]
+        template = dep_parts[1] if len(dep_parts) > 1 else remainder
+        label = template.replace("_", " ").title()
+        return f"{label} ({dep})"
+
+    # Coupling scenarios
+    if name.startswith("coupling_"):
+        return "Component Coupling"
+
+    # Standard pattern: dep_template_name
+    parts = name.split("_")
+    # Try to find the template key in _TEMPLATE_DESCRIPTIONS
+    for start in range(1, len(parts)):
+        template_key = "_".join(parts[start:])
+        if template_key in _TEMPLATE_DESCRIPTIONS:
+            dep = "_".join(parts[:start])
+            label = template_key.replace("_", " ").title()
+            return f"{label} ({dep})"
+
+    # Fallback: first part as dep, rest as label
+    dep = parts[0]
+    template = "_".join(parts[1:]) if len(parts) > 1 else name
+    label = template.replace("_", " ").title()
+    if dep and label:
+        return f"{label} ({dep})"
+    return label or scenario_name
 
 
 def _humanize_scenario_name(scenario_name: str) -> str:
