@@ -12,7 +12,7 @@ FROM python:3.11-slim
 
 # Install Node.js for JavaScript project support
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends nodejs npm \
+    && apt-get install -y --no-install-recommends git nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Install myCode from local source
