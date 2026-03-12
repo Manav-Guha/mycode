@@ -276,6 +276,29 @@ class SessionManager:
             logger.warning("Failed to list installed packages: %s", e)
         return packages
 
+    def get_venv_packages(self) -> dict[str, str]:
+        """Get installed packages from the session venv (not the host Python).
+
+        Must be called after setup(). Returns {name: version} dict.
+        """
+        if not self.venv_python:
+            return {}
+        packages = {}
+        try:
+            result = subprocess.run(
+                [str(self.venv_python), "-m", "pip", "list", "--format=json"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                for pkg in json.loads(result.stdout):
+                    packages[pkg["name"]] = pkg["version"]
+            logger.debug("Venv has %d packages installed", len(packages))
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, OSError) as e:
+            logger.warning("Failed to list venv packages: %s", e)
+        return packages
+
     def _find_dependency_files(self) -> dict[str, str]:
         """Find dependency specification files in the project."""
         dep_files = {}

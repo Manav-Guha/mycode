@@ -96,8 +96,8 @@ def handle_preflight(
         job.session = session
 
         # Stage 3: Ingestion
-        env = session.environment_info
-        installed = env.installed_packages if env else {}
+        # Use venv packages (where deps were actually installed), not host
+        installed = session.get_venv_packages()
 
         if language == "python":
             ingester = ProjectIngester(

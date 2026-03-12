@@ -523,8 +523,8 @@ def _run_ingestion(
     """Stage 3: Run the appropriate ingester on the project copy."""
     stage_start = time.monotonic()
     try:
-        env = session.environment_info
-        installed = env.installed_packages if env else {}
+        # Use venv packages (where deps were actually installed), not host
+        installed = session.get_venv_packages()
 
         if language == "python":
             ingester = ProjectIngester(
