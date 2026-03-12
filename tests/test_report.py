@@ -3288,3 +3288,36 @@ class TestRuntimeContextFindings:
         )
         text = report.as_text()
         assert "Streamlit" in text or "live API" in text or "planned for v2" in text
+
+    def test_identical_error_scenario_routed_to_incomplete(self):
+        """Scenario reclassified by identical-error detection goes to incomplete_tests."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="pandas_memory_profiling_over_time",
+                    scenario_category="memory_profiling",
+                    status="skipped",
+                    failure_reason="runtime_context_required",
+                    steps=[
+                        StepResult(step_name="module_import", error_count=1,
+                                   errors=[{"type": "ModuleNotFoundError", "message": "yfinance"}]),
+                    ] + [
+                        StepResult(step_name=f"batch_{i}", error_count=30,
+                                   errors=[{"type": "TypeError", "message": "err"}] * 30)
+                        for i in range(10)
+                    ],
+                    total_errors=301,
+                    summary="Every test step produced 30 identical error(s).",
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        # Should be in incomplete_tests, NOT in findings
+        assert len(report.incomplete_tests) == 1
+        assert report.incomplete_tests[0]._failure_reason == "runtime_context_required"
+        assert len(report.findings) == 0
+        # Should not count as failed
+        assert report.scenarios_failed == 0

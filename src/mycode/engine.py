@@ -824,6 +824,38 @@ class ExecutionEngine:
             ))
             total_errors += len(import_errors)
 
+        # ── Post-execution check: identical errors at every step ──
+        # If every test step (excluding module_import and time-budget skips)
+        # has errors, and the error count is the same across all of them,
+        # this is NOT a scaling failure — it's a function that fails
+        # identically regardless of load, indicating runtime context
+        # dependence.
+        test_steps = [
+            s for s in steps
+            if s.step_name != "module_import"
+            and s.resource_cap_hit != "timeout"
+        ]
+        if (
+            len(test_steps) >= 3
+            and all(s.error_count > 0 for s in test_steps)
+            and len({s.error_count for s in test_steps}) == 1
+        ):
+            return ScenarioResult(
+                scenario_name=scenario.name,
+                scenario_category=scenario.category,
+                status="skipped",
+                failure_reason="runtime_context_required",
+                steps=steps,
+                total_errors=total_errors,
+                peak_memory_mb=peak_memory,
+                probe_skipped=probe_skipped,
+                summary=(
+                    f"Every test step produced {test_steps[0].error_count} "
+                    f"identical error(s) — not a scaling failure. Functions "
+                    f"likely require runtime context (server, database, API)."
+                ),
+            )
+
         # Determine status
         has_cap_hit = any(s.resource_cap_hit for s in steps)
         if has_cap_hit:
@@ -1213,6 +1245,13 @@ for _entry in list(_callables):
                     break
         elif _pt == "OSError" and "connection refused" in _pl:
             _is_ctx = True
+        if not _is_ctx and _pt in ("TypeError", "NameError"):
+            for _fkw in ("streamlit", "yfinance", "plotly", "figure",
+                         "st.", "flask", "django", "fastapi", "sqlalchemy",
+                         "session", "request", "app_context"):
+                if _fkw in _pl:
+                    _is_ctx = True
+                    break
         if _is_ctx:
             _probe_error = {"type": _pt, "message": _pm}
         else:

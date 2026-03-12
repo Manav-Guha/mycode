@@ -1995,3 +1995,198 @@ class TestProbeAndSkip:
         import ast
         # Should not raise SyntaxError
         ast.parse(full_harness)
+
+
+class TestIdenticalErrorDetection:
+    """Tests for the post-execution identical-error-at-every-step detection."""
+
+    def _make_steps_output(self, error_counts, import_errors=None):
+        """Build harness JSON output with given error counts per step."""
+        steps = []
+        for i, ec in enumerate(error_counts):
+            steps.append({
+                "step_name": f"batch_{i}",
+                "parameters": {"batch_start": i * 5, "batch_count": 5},
+                "execution_time_ms": 10.0,
+                "memory_peak_mb": 2.0,
+                "error_count": ec,
+                "errors": [
+                    {"type": "TypeError", "message": f"err {j}"}
+                    for j in range(ec)
+                ],
+                "resource_cap_hit": "",
+            })
+        return json.dumps({
+            "steps": steps,
+            "import_errors": import_errors or [],
+            "probe_skipped": [],
+        })
+
+    def test_identical_errors_reclassified(self, tmp_path):
+        """10 steps all with 30 errors → runtime_context_required."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        # 10 batches, each with 30 identical errors (the Financial Dashboard pattern)
+        output = self._make_steps_output([30] * 10, import_errors=[
+            {"type": "ModuleNotFoundError", "message": "No module named 'yfinance'"},
+        ])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="pandas_memory_profiling_over_time",
+            category="memory_profiling",
+            description="Memory profiling test",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.status == "skipped"
+        assert sr.failure_reason == "runtime_context_required"
+        assert "identical" in sr.summary.lower()
+
+    def test_identical_errors_without_import_error(self, tmp_path):
+        """Identical errors at every step even without module_import → reclassified."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output([5] * 5)
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="data_volume_scaling_numpy",
+            category="data_volume_scaling",
+            description="Data volume test",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.status == "skipped"
+        assert sr.failure_reason == "runtime_context_required"
+
+    def test_varying_errors_not_reclassified(self, tmp_path):
+        """Error counts that vary across steps → real scaling issue, NOT reclassified."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        # Errors increase with data size — genuine scaling failure
+        output = self._make_steps_output([0, 2, 5, 8, 15])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="data_volume_scaling_pandas",
+            category="data_volume_scaling",
+            description="Data volume test",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+        assert sr.status != "skipped"
+
+    def test_some_steps_zero_errors_not_reclassified(self, tmp_path):
+        """Some steps pass, some fail → not identical, NOT reclassified."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output([0, 0, 3, 3, 3])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+
+    def test_two_steps_not_enough_for_detection(self, tmp_path):
+        """Only 2 test steps with same errors → NOT reclassified (need ≥3)."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output([5, 5])
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+
+    def test_timeout_steps_excluded_from_check(self, tmp_path):
+        """Time-budget-exceeded steps are excluded from the identical-error check."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        # 5 real steps with identical errors + 2 timeout skips
+        steps = []
+        for i in range(5):
+            steps.append({
+                "step_name": f"batch_{i}",
+                "parameters": {},
+                "execution_time_ms": 10.0,
+                "memory_peak_mb": 2.0,
+                "error_count": 10,
+                "errors": [{"type": "TypeError", "message": "err"}] * 10,
+                "resource_cap_hit": "",
+            })
+        for i in range(5, 7):
+            steps.append({
+                "step_name": f"batch_{i}",
+                "parameters": {},
+                "execution_time_ms": 0,
+                "memory_peak_mb": 0,
+                "error_count": 1,
+                "errors": [{"type": "Skipped", "message": "time budget exceeded"}],
+                "resource_cap_hit": "timeout",
+            })
+
+        output = json.dumps({
+            "steps": steps,
+            "import_errors": [],
+            "probe_skipped": [],
+        })
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="memory_profiling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        # The 5 real steps have identical errors → reclassified
+        assert sr.status == "skipped"
+        assert sr.failure_reason == "runtime_context_required"
