@@ -200,6 +200,7 @@ class ScenarioResult:
     resource_cap_hit: bool = False
     summary: str = ""
     failure_reason: str = ""
+    probe_skipped: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -773,6 +774,26 @@ class ExecutionEngine:
                 total_errors=1,
             )
 
+        # Extract probe results
+        probe_skipped = data.get("probe_skipped", [])
+
+        # If all callables were probed out (no steps, only probe results),
+        # return a result that routes to the runtime context section.
+        if not data.get("steps") and probe_skipped:
+            names = [p.get("name", "unknown") for p in probe_skipped]
+            return ScenarioResult(
+                scenario_name=scenario.name,
+                scenario_category=scenario.category,
+                status="skipped",
+                failure_reason="runtime_context_required",
+                probe_skipped=probe_skipped,
+                summary=(
+                    f"{len(probe_skipped)} function(s) require runtime context "
+                    f"that myCode cannot simulate: {', '.join(names[:3])}"
+                    + (f" (+{len(names) - 3} more)" if len(names) > 3 else "")
+                ),
+            )
+
         # Build steps from parsed data
         steps: list[StepResult] = []
         total_errors = 0
@@ -823,6 +844,10 @@ class ExecutionEngine:
         if has_cap_hit:
             caps = {s.resource_cap_hit for s in steps if s.resource_cap_hit}
             parts.append(f"resource cap hit: {', '.join(sorted(caps))}")
+        if probe_skipped:
+            parts.append(
+                f"{len(probe_skipped)} function(s) skipped (runtime context)"
+            )
 
         return ScenarioResult(
             scenario_name=scenario.name,
@@ -833,6 +858,7 @@ class ExecutionEngine:
             total_errors=total_errors,
             resource_cap_hit=has_cap_hit,
             summary=". ".join(parts) + "." if parts else "No results.",
+            probe_skipped=probe_skipped,
         )
 
     @staticmethod
@@ -1140,13 +1166,85 @@ def _call_safely(entry, args=None):
         except TypeError:
             _f(*([None] * len(_params)))
 
+# ── Probe: detect runtime-context-dependent functions ──
+_probe_results = []
+_probed_callables = []
+
+_CONTEXT_ATTRS = ("st.", "flask.", "fastapi.", "request.", "session",
+                  "app.", "current_app", "g.", "login_manager")
+
+for _entry in list(_callables):
+    _probe_ok = False
+    _probe_error = None
+    _probe_alarm = False
+    try:
+        import signal as _psig
+        def _probe_handler(_sn, _fr):
+            raise _StepTimeout("Probe timeout")
+        _old_probe_h = _psig.signal(_psig.SIGALRM, _probe_handler)
+        _psig.alarm(5)
+        _probe_alarm = True
+    except (ImportError, AttributeError, ValueError):
+        pass
+    try:
+        _call_safely(_entry)
+        _probe_ok = True
+    except _StepTimeout:
+        _probe_error = {"type": "Timeout", "message": "Function did not return within 5s probe — likely waiting for server or connection"}
+    except Exception as _pe:
+        _pt = type(_pe).__name__
+        _pm = str(_pe)[:500]
+        _pl = (_pt + " " + _pm).lower()
+        _is_ctx = False
+        if _pt in ("ImportError", "ModuleNotFoundError"):
+            _is_ctx = True
+        elif _pt == "AttributeError":
+            for _pat in _CONTEXT_ATTRS:
+                if _pat in _pl:
+                    _is_ctx = True
+                    break
+        elif _pt in ("ConnectionError", "ConnectionRefusedError", "ConnectionResetError"):
+            _is_ctx = True
+        elif _pt == "RuntimeError":
+            for _pat in ("event loop", "application context", "working outside",
+                         "no current event loop", "missing server", "thread"):
+                if _pat in _pl:
+                    _is_ctx = True
+                    break
+        elif _pt == "OSError" and "connection refused" in _pl:
+            _is_ctx = True
+        if _is_ctx:
+            _probe_error = {"type": _pt, "message": _pm}
+        else:
+            _probe_ok = True
+    finally:
+        if _probe_alarm:
+            _psig.alarm(0)
+            _psig.signal(_psig.SIGALRM, _old_probe_h)
+    if _probe_ok:
+        _probed_callables.append(_entry)
+    else:
+        _probe_results.append({
+            "name": _entry["name"],
+            "error": _probe_error,
+        })
+
+_callables = _probed_callables
+
+# If all callables were probed out, skip the stress test body
+if not _callables and _probe_results:
+    print("__MYCODE_RESULTS_START__")
+    print(json.dumps({"steps": [], "import_errors": _import_errors, "probe_skipped": _probe_results}))
+    print("__MYCODE_RESULTS_END__")
+    sys.exit(0)
+
 # ── Test Body ──
 '''
 
 _HARNESS_POSTAMBLE = '''
 # ── Output ──
 print("__MYCODE_RESULTS_START__")
-print(json.dumps({"steps": _steps, "import_errors": _import_errors}))
+print(json.dumps({"steps": _steps, "import_errors": _import_errors, "probe_skipped": _probe_results}))
 print("__MYCODE_RESULTS_END__")
 '''
 

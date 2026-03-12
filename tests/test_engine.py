@@ -1847,3 +1847,151 @@ class TestClassifyHarnessFailure:
             status="completed",
         )
         assert sr.failure_reason == ""
+
+
+# ── Probe-and-Skip Tests ──
+
+
+class TestProbeAndSkip:
+    """Tests for the runtime context probe in harness preamble."""
+
+    def test_probe_code_in_preamble(self):
+        """Preamble contains probe section."""
+        assert "_probe_results" in _HARNESS_PREAMBLE
+        assert "_probed_callables" in _HARNESS_PREAMBLE
+        assert "_CONTEXT_ATTRS" in _HARNESS_PREAMBLE
+        assert "Probe timeout" in _HARNESS_PREAMBLE
+
+    def test_postamble_includes_probe_results(self):
+        """Postamble outputs probe_skipped in JSON."""
+        assert "probe_skipped" in _HARNESS_POSTAMBLE
+        assert "probe_results" in _HARNESS_POSTAMBLE
+
+    def test_parse_all_probed_out(self, tmp_path):
+        """When all callables fail probe, result is skipped with runtime_context_required."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        probe_output = json.dumps({
+            "steps": [],
+            "import_errors": [],
+            "probe_skipped": [
+                {"name": "app.render_dashboard", "error": {"type": "AttributeError", "message": "st.session_state"}},
+                {"name": "app.load_data", "error": {"type": "ConnectionError", "message": "Connection refused"}},
+            ],
+        })
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{probe_output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.status == "skipped"
+        assert sr.failure_reason == "runtime_context_required"
+        assert len(sr.probe_skipped) == 2
+        assert sr.probe_skipped[0]["name"] == "app.render_dashboard"
+
+    def test_parse_partial_probe_out(self, tmp_path):
+        """When some callables are probed out but steps still run, probe_skipped is populated."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = json.dumps({
+            "steps": [
+                {
+                    "step_name": "data_size_100",
+                    "parameters": {"data_size": 100},
+                    "execution_time_ms": 5.0,
+                    "memory_peak_mb": 1.0,
+                    "error_count": 0,
+                    "errors": [],
+                    "resource_cap_hit": "",
+                },
+            ],
+            "import_errors": [],
+            "probe_skipped": [
+                {"name": "app.render_dashboard", "error": {"type": "AttributeError", "message": "st.session_state"}},
+            ],
+        })
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        # Scenario ran (not skipped), but has probe_skipped
+        assert sr.status == "completed"
+        assert sr.failure_reason == ""
+        assert len(sr.probe_skipped) == 1
+        assert "runtime context" in sr.summary.lower()
+
+    def test_parse_no_probes_skipped(self, tmp_path):
+        """Normal scenario with no probe failures."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = json.dumps({
+            "steps": [
+                {
+                    "step_name": "data_size_100",
+                    "parameters": {"data_size": 100},
+                    "execution_time_ms": 5.0,
+                    "memory_peak_mb": 1.0,
+                    "error_count": 0,
+                    "errors": [],
+                    "resource_cap_hit": "",
+                },
+            ],
+            "import_errors": [],
+            "probe_skipped": [],
+        })
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.status == "completed"
+        assert sr.probe_skipped == []
+        assert "runtime context" not in sr.summary.lower()
+
+    def test_scenario_result_probe_skipped_default(self):
+        """ScenarioResult.probe_skipped defaults to empty list."""
+        sr = ScenarioResult(
+            scenario_name="test",
+            scenario_category="test_cat",
+            status="completed",
+        )
+        assert sr.probe_skipped == []
+
+    def test_harness_syntax_valid(self):
+        """The updated preamble with probe code is syntactically valid."""
+        from mycode.engine import _BODY_GENERIC
+        full_harness = _HARNESS_PREAMBLE + "\n" + _BODY_GENERIC + "\n" + _HARNESS_POSTAMBLE
+        import ast
+        # Should not raise SyntaxError
+        ast.parse(full_harness)

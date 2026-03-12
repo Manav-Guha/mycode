@@ -671,6 +671,13 @@ _FAILURE_REASON_EXPLANATIONS: dict[str, str] = {
         "This can happen with non-standard project structures or monorepos."
     ),
     "timeout": "These tests exceeded the time limit.",
+    "runtime_context_required": (
+        "These functions require runtime context (e.g. a running Streamlit "
+        "server, database connection, or live API) that myCode cannot simulate "
+        "in isolation. This is not a code problem — these functions work "
+        "correctly in their intended environment. Live application testing is "
+        "planned for v2."
+    ),
     "unknown": "These tests could not run due to unexpected issues.",
 }
 
@@ -680,6 +687,7 @@ _FAILURE_REASON_HEADERS: dict[str, str] = {
     "harness_generation_error": "Test Script Generation Issue",
     "module_import_failure": "Module Import Issue",
     "timeout": "Timed Out",
+    "runtime_context_required": "Requires Runtime Context",
     "unknown": "Other Issues",
     "": "Environment Issues",
 }
@@ -991,7 +999,10 @@ class ReportGenerator:
         for sr in execution.scenario_results:
             total_errors += sr.total_errors
 
-            if sr.status == "completed" and sr.total_errors == 0 and not sr.resource_cap_hit:
+            # Runtime context scenarios don't count toward pass/fail
+            if sr.failure_reason == "runtime_context_required":
+                pass  # excluded from counts
+            elif sr.status == "completed" and sr.total_errors == 0 and not sr.resource_cap_hit:
                 passed += 1
             else:
                 failed += 1
@@ -1006,11 +1017,20 @@ class ReportGenerator:
 
             # ── Harness failures → incomplete tests (myCode limitation) ──
             if sr.failure_reason:
+                if sr.failure_reason == "runtime_context_required":
+                    desc = (
+                        "This function requires runtime context (e.g. "
+                        "Streamlit server, database connection, live API) "
+                        "that myCode cannot simulate in isolation. Live "
+                        "application testing is planned for v2."
+                    )
+                else:
+                    desc = sr.summary or "Test could not run."
                 f = Finding(
                     title=f"Could not test: {_humanize_title_name(sr.scenario_name)}",
                     severity="info",
                     category=sr.scenario_category,
-                    description=sr.summary or "Test could not run.",
+                    description=desc,
                     details=self._summarize_errors(sr),
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
@@ -1018,6 +1038,26 @@ class ReportGenerator:
                 f._error_count = sr.total_errors
                 report.incomplete_tests.append(f)
                 continue
+
+            # ── Probe-skipped functions on a scenario that still ran ──
+            if sr.probe_skipped:
+                for ps in sr.probe_skipped:
+                    pf = Finding(
+                        title=f"Could not test: {ps.get('name', 'unknown')}",
+                        severity="info",
+                        category=sr.scenario_category,
+                        description=(
+                            "This function requires runtime context (e.g. "
+                            "Streamlit server, database connection, live API) "
+                            "that myCode cannot simulate in isolation. Live "
+                            "application testing is planned for v2."
+                        ),
+                        affected_dependencies=self._deps_from_name(
+                            sr.scenario_name,
+                        ),
+                    )
+                    pf._failure_reason = "runtime_context_required"
+                    report.incomplete_tests.append(pf)
 
             # ── Environment-only failures → incomplete tests ──
             if self._is_environment_only(sr):

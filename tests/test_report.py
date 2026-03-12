@@ -3166,3 +3166,125 @@ class TestProjectNameInference:
         project.mkdir()
         name = _infer_project_name(project)
         assert name == "Hello World"
+
+
+# ── Probe-and-Skip Report Tests ──
+
+
+class TestRuntimeContextFindings:
+    """Tests for runtime_context_required finding handling in reports."""
+
+    def test_runtime_context_routed_to_incomplete(self):
+        """Scenarios with runtime_context_required go to incomplete_tests."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="pandas_memory_profiling",
+                    scenario_category="memory_profiling",
+                    status="skipped",
+                    failure_reason="runtime_context_required",
+                    probe_skipped=[
+                        {"name": "app.render_dashboard", "error": {"type": "AttributeError", "message": "st.session_state"}},
+                    ],
+                    summary="1 function(s) require runtime context",
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        assert len(report.incomplete_tests) == 1
+        assert report.incomplete_tests[0]._failure_reason == "runtime_context_required"
+        assert "runtime context" in report.incomplete_tests[0].description.lower()
+        # Should NOT appear in findings
+        assert len(report.findings) == 0
+
+    def test_runtime_context_not_counted_as_failed(self):
+        """Runtime context scenarios don't count toward pass/fail totals."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="pandas_memory_profiling",
+                    scenario_category="memory_profiling",
+                    status="skipped",
+                    failure_reason="runtime_context_required",
+                    probe_skipped=[
+                        {"name": "app.load_data", "error": {"type": "ConnectionError", "message": "refused"}},
+                    ],
+                ),
+                ScenarioResult(
+                    scenario_name="data_volume_scaling_pandas",
+                    scenario_category="data_volume_scaling",
+                    status="completed",
+                    steps=[StepResult(step_name="data_size_100", error_count=0)],
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        # 1 passed, 0 failed (the skipped one doesn't count)
+        assert report.scenarios_passed == 1
+        assert report.scenarios_failed == 0
+
+    def test_partial_probe_creates_incomplete_per_function(self):
+        """Partially probed scenario creates separate incomplete findings."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="data_volume_scaling_pandas",
+                    scenario_category="data_volume_scaling",
+                    status="completed",
+                    steps=[StepResult(step_name="data_size_100", error_count=0)],
+                    probe_skipped=[
+                        {"name": "app.render_dashboard", "error": {"type": "AttributeError", "message": "st.session_state"}},
+                        {"name": "app.init_session", "error": {"type": "RuntimeError", "message": "no event loop"}},
+                    ],
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        # 1 passed (the scenario itself)
+        assert report.scenarios_passed == 1
+        # 2 incomplete findings for the probed-out functions
+        ctx_findings = [
+            f for f in report.incomplete_tests
+            if f._failure_reason == "runtime_context_required"
+        ]
+        assert len(ctx_findings) == 2
+
+    def test_runtime_context_section_renders_in_text(self):
+        """Runtime context findings render under the correct header."""
+        report = DiagnosticReport(
+            incomplete_tests=[
+                Finding(
+                    title="Could not test: app.render_dashboard",
+                    severity="info",
+                    _failure_reason="runtime_context_required",
+                    description="Requires runtime context.",
+                ),
+            ],
+        )
+        text = report.as_text()
+        assert "Requires Runtime Context" in text
+        assert "render_dashboard" in text
+
+    def test_runtime_context_explanation_in_text(self):
+        """The explanation text is rendered for runtime context group."""
+        report = DiagnosticReport(
+            incomplete_tests=[
+                Finding(
+                    title="Could not test: app.render_dashboard",
+                    severity="info",
+                    _failure_reason="runtime_context_required",
+                    description="Requires runtime context.",
+                ),
+            ],
+        )
+        text = report.as_text()
+        assert "Streamlit" in text or "live API" in text or "planned for v2" in text
