@@ -201,8 +201,8 @@
       "category": "memory_profiling",
       "description": "Repeatedly create, modify, and discard DataFrames to test memory reclamation",
       "parameters": {
-        "iterations": 20,
-        "dataframe_size_mb": 2,
+        "iterations": 100,
+        "dataframe_size_mb": 10,
         "operations_per_iteration": ["copy", "slice", "merge", "drop"],
         "measure_interval": 10
       },
