@@ -664,7 +664,7 @@ OUTPUT FORMAT: Respond with a single JSON object:
         "parameters": {{}},
         "synthetic_data": {{}},
         "measurements": ["memory_mb", "execution_time_ms", "error_count"],
-        "resource_limits": {{"memory_mb": 512, "timeout_seconds": 60}}
+        "resource_limits": {{"memory_mb": 512, "timeout_seconds": 300}}
       }},
       "expected_behavior": "What should happen under this stress.",
       "failure_indicators": ["indicator1", "indicator2"],
@@ -907,7 +907,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 tc: dict = {
                     "parameters": _normalize_template_params(raw_params, cat),
                     "measurements": _infer_measurements(cat),
-                    "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                    "resource_limits": {"memory_mb": 512, "timeout_seconds": 300},
                 }
                 # Server frameworks: route to standalone body to avoid blocking
                 if profile.server_framework:
@@ -1005,7 +1005,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                             "coupling_type": "shared_state",
                             "behavior": "state_setter",
                             "measurements": _infer_measurements(cat),
-                            "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                            "resource_limits": {"memory_mb": 512, "timeout_seconds": 300},
                         },
                         expected_behavior=(
                             f"Concurrent access to {len(cps)} state setters should "
@@ -1038,7 +1038,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                                 "coupling_type": cp.coupling_type,
                                 "behavior": "api_caller",
                                 "measurements": _infer_measurements(cat),
-                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 300},
                             },
                             expected_behavior=(
                                 f"API caller '{cp.source}' should handle latency "
@@ -1072,7 +1072,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                                 "coupling_type": cp.coupling_type,
                                 "behavior": "pure_computation",
                                 "measurements": _infer_measurements(cat),
-                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 300},
                             },
                             expected_behavior=(
                                 f"Computation '{cp.source}' should scale without "
@@ -1100,7 +1100,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                             "coupling_type": cp.coupling_type,
                             "behavior": "dom_render",
                             "measurements": _infer_measurements(cat),
-                            "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                            "resource_limits": {"memory_mb": 512, "timeout_seconds": 300},
                         }
                         if language.lower() == "javascript":
                             dom_config["skip_imports"] = True
@@ -1144,7 +1144,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                                 "coupling_type": cp.coupling_type,
                                 "behavior": "error_handler",
                                 "measurements": _infer_measurements(cat),
-                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 60},
+                                "resource_limits": {"memory_mb": 512, "timeout_seconds": 300},
                             },
                             expected_behavior=(
                                 f"Error handler '{cp.source}' should remain stable "
