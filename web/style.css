@@ -492,6 +492,10 @@ footer {
     line-height: 1.5;
 }
 
+.consequence {
+    color: var(--red);
+}
+
 .finding-details {
     margin-top: 0.5rem;
     padding: 0.5rem 0.75rem;

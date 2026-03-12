@@ -23,6 +23,24 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
+function highlightConsequence(text) {
+    // Split into sentences, highlight consequence sentences in red.
+    // Consequence sentences start with "This means", "In practice,",
+    // or contain "your app will" / "your app's".
+    const sentences = text.match(/[^.!]+[.!]+/g) || [text];
+    return sentences.map(s => {
+        const lower = s.trimStart().toLowerCase();
+        const isConsequence = lower.startsWith("this means") ||
+            lower.startsWith("in practice,") ||
+            lower.includes("your app will") ||
+            lower.includes("your app's");
+        if (isConsequence) {
+            return `<span class="consequence">${escapeHtml(s)}</span>`;
+        }
+        return escapeHtml(s);
+    }).join("");
+}
+
 async function apiPost(path, formData) {
     const res = await fetch(`${API}${path}`, { method: "POST", body: formData });
     return res.json();
@@ -435,7 +453,7 @@ function renderFinding(f) {
     html += `</div>`;
 
     if (f.description) {
-        html += `<div class="finding-description">${escapeHtml(f.description)}</div>`;
+        html += `<div class="finding-description">${highlightConsequence(f.description)}</div>`;
     }
     if (f.details) {
         html += `<div class="finding-details">${escapeHtml(f.details)}</div>`;

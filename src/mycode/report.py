@@ -2886,19 +2886,19 @@ def _describe_scenario(scenario_name: str) -> str:
         dep_parts = remainder.split("_", 1)
         if len(dep_parts) > 1:
             remainder = dep_parts[1]
-        return f"checking for {remainder.replace('_', ' ')}"
+        return f"{remainder.replace('_', ' ')} behavior"
 
     # Version discrepancy scenarios
     if name.endswith("_version_discrepancy"):
         dep = name.rsplit("_version_discrepancy", 1)[0]
-        return f"testing {dep} version compatibility"
+        return f"{dep} version compatibility"
 
     # Generic stress for unrecognized deps
     if "generic_stress" in name:
         if name.startswith("unrecognized_deps"):
-            return "general stress testing of unrecognized dependencies"
+            return "general usage patterns for unrecognized dependencies"
         dep = name.split("_")[0] if "_" in name else name
-        return f"general stress testing of {dep}"
+        return f"general usage patterns for {dep}"
 
     # Last resort: strip dep prefix and humanize the template name
     dep_parts = name.split("_", 1)
@@ -2924,6 +2924,7 @@ _CURATED_TITLE_MAP: dict[str, str] = {
     "edge_case_dtypes": "Unusual Data Format Handling",
     "read_csv_encoding_crash": "CSV Encoding Crash",
     "empty_dataframe_operations": "Empty Data Edge Cases",
+    "memory_error_on_allocation": "Memory Crash on Array Allocation",
 }
 
 
@@ -2939,9 +2940,10 @@ def _humanize_title_name(scenario_name: str) -> str:
     """
     name = scenario_name.lower()
 
-    # Unrecognized deps — no meaningful dep prefix
+    # Unrecognized deps — use affected_dependencies if available,
+    # otherwise label as "unrecognized dependencies"
     if name.startswith("unrecognized_deps_"):
-        return "General Stress Test"
+        return "General Stress Test (unrecognized dependencies)"
 
     # Coupling scenarios
     if name.startswith("coupling_"):

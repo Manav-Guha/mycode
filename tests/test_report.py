@@ -1906,7 +1906,7 @@ class TestPlainSummaryHelpers:
 
     def test_describe_scenario_check_suffix(self):
         result = _describe_scenario("pandas_settingwithcopy_warning_ignored_check")
-        assert "checking for" in result
+        assert "behavior" in result
         assert "_" not in result
 
     def test_describe_scenario_version_discrepancy(self):
@@ -1914,6 +1914,8 @@ class TestPlainSummaryHelpers:
         assert "streamlit" in result
         assert "version" in result
         assert "_" not in result
+        # Should not start with "testing" to avoid "myCode tested testing..."
+        assert not result.startswith("testing")
 
     def test_describe_step_patterns(self):
         assert _describe_step("data_size_10000") == "10,000 items"
