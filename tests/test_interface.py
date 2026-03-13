@@ -320,17 +320,18 @@ class TestConversationalInterfaceOffline:
         io = MockIO(responses=[
             "It's a web app for tracking expenses",
             "I care most about handling lots of data",
-            # Constraint questions (user_scale, data_type, usage_pattern, max_payload)
+            # Constraint questions (user_scale, data_type, usage_pattern, max_payload, timeout)
             "about 20",
             "1",
             "1",
             "2",
+            "1",
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
-        # 6 prompts: turn 1, turn 2, 4 constraint questions
-        assert len(io.prompts) == 6
+        # 7 prompts: turn 1, turn 2, 5 constraint questions
+        assert len(io.prompts) == 7
         # First prompt asks user to confirm analysis
         assert "sound right" in io.prompts[0].lower() or "project" in io.prompts[0].lower()
         # Second prompt asks targeted questions
@@ -489,7 +490,7 @@ class TestConversationalInterfaceLLM:
         io = MockIO(responses=[
             "my app", "speed",
             # Constraint questions (after LLM fallback triggers offline)
-            "not sure", "not sure", "not sure", "not sure",
+            "not sure", "not sure", "not sure", "not sure", "not sure",
         ])
         config = LLMConfig(api_key="test-key")
         interface = ConversationalInterface(
@@ -505,8 +506,8 @@ class TestConversationalInterfaceLLM:
 
         result = interface.run(simple_ingestion)
 
-        # 6 prompts: turn 1, turn 2, 4 constraint questions
-        assert len(io.prompts) == 6
+        # 7 prompts: turn 1, turn 2, 5 constraint questions
+        assert len(io.prompts) == 7
         assert "project" in io.prompts[0].lower() or "tell me" in io.prompts[0].lower()
         # Warnings should mention LLM failure
         assert any("llm" in w.lower() or "unavailable" in w.lower()
@@ -689,7 +690,7 @@ class TestConstraintExtraction:
             "1",        # data_type → tabular
             "2",        # usage_pattern → burst
             "2",        # max_payload → medium (50 MB)
-            "Budget App",
+            "1",        # timeout_per_scenario → 90s
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -710,7 +711,7 @@ class TestConstraintExtraction:
             # user_scale, data_type, usage_pattern inferred from turn text
             # max_payload always asked explicitly
             "3",        # max_payload (large = 100 MB)
-            "Medical App",
+            "1",        # timeout_per_scenario → 90s
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -756,7 +757,7 @@ class TestConstraintExtraction:
             "1",
             "3",
             "1",
-            "myproject",
+            "1",        # timeout_per_scenario → 90s
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -921,6 +922,7 @@ class TestInputValidation:
             "1",            # data_type — valid (tabular)
             "2",            # usage_pattern — valid (burst)
             "1",            # max_payload — valid (small)
+            "1",            # timeout_per_scenario — valid (90s)
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
@@ -929,8 +931,8 @@ class TestInputValidation:
         assert result.constraints.data_type == "tabular"
         assert result.constraints.usage_pattern == "burst"
         assert result.constraints.max_payload_mb == 1.0
-        # No re-ask prompts — exactly 6 prompts total
-        assert len(io.prompts) == 6
+        # No re-ask prompts — exactly 7 prompts total
+        assert len(io.prompts) == 7
 
     def test_bad_input_re_asked_once(self, simple_ingestion):
         """Invalid input triggers one re-ask with clarification."""
@@ -942,13 +944,14 @@ class TestInputValidation:
             "1",            # data_type
             "1",            # usage_pattern
             "2",            # max_payload
+            "1",            # timeout_per_scenario
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
         assert result.constraints.user_scale == 50
-        # 7 prompts: 2 turns + 4 constraints + 1 re-ask
-        assert len(io.prompts) == 7
+        # 8 prompts: 2 turns + 5 constraints + 1 re-ask
+        assert len(io.prompts) == 8
         # The re-ask prompt should mention "didn't catch that"
         assert any("didn't catch that" in p for p in io.prompts)
 
@@ -979,14 +982,15 @@ class TestInputValidation:
             "1",            # data_type
             "1",            # usage_pattern
             "not sure",     # max_payload — explicit skip
+            "not sure",     # timeout_per_scenario — explicit skip
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
         assert result.constraints.user_scale is None
         assert result.constraints.max_payload_mb is None
-        # No re-asks — exactly 6 prompts
-        assert len(io.prompts) == 6
+        # No re-asks — exactly 7 prompts
+        assert len(io.prompts) == 7
 
     def test_data_type_reask_then_default(self, simple_ingestion):
         """data_type defaults to 'mixed' after two failures."""
@@ -1107,3 +1111,85 @@ class TestWebFollowupValidation:
         )
         assert ok is True
         assert constraints.max_payload_mb == 50.0
+
+    def test_timeout_per_scenario_valid(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "timeout_per_scenario", "2",
+        )
+        assert ok is True
+        assert constraints.timeout_per_scenario == 180  # choice 2 = 3 min
+
+    def test_timeout_per_scenario_duration_string(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "timeout_per_scenario", "5 min",
+        )
+        assert ok is True
+        assert constraints.timeout_per_scenario == 300
+
+    def test_timeout_per_scenario_floor(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "timeout_per_scenario", "10",
+        )
+        assert ok is True
+        assert constraints.timeout_per_scenario == 60  # floor
+
+    def test_timeout_per_scenario_skip(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "timeout_per_scenario", "not sure",
+        )
+        assert ok is True
+        assert constraints.timeout_per_scenario is None
+
+    def test_timeout_per_scenario_defaults_to_90(self):
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
+            constraints, "timeout_per_scenario", "banana", is_retry=True,
+        )
+        assert ok is True
+        assert constraints.timeout_per_scenario == 90
+
+
+# ── Timeout Parser Unit Tests ──
+
+
+class TestTimeoutParser:
+    """Tests for parse_timeout_per_scenario."""
+
+    def test_numbered_choices(self):
+        from mycode.constraints import parse_timeout_per_scenario
+        assert parse_timeout_per_scenario("1") == 90
+        assert parse_timeout_per_scenario("2") == 180
+        assert parse_timeout_per_scenario("3") == 300
+
+    def test_duration_with_units(self):
+        from mycode.constraints import parse_timeout_per_scenario
+        assert parse_timeout_per_scenario("2 min") == 120
+        assert parse_timeout_per_scenario("120s") == 120
+        assert parse_timeout_per_scenario("5 minutes") == 300
+        assert parse_timeout_per_scenario("3m") == 180
+
+    def test_plain_seconds(self):
+        from mycode.constraints import parse_timeout_per_scenario
+        assert parse_timeout_per_scenario("120") == 120
+        assert parse_timeout_per_scenario("300") == 300
+
+    def test_floor_enforcement(self):
+        from mycode.constraints import parse_timeout_per_scenario
+        assert parse_timeout_per_scenario("10") == 60
+        assert parse_timeout_per_scenario("30s") == 60
+        assert parse_timeout_per_scenario("0.5 min") == 60
+
+    def test_skip_words(self):
+        from mycode.constraints import parse_timeout_per_scenario
+        assert parse_timeout_per_scenario("not sure") is None
+        assert parse_timeout_per_scenario("skip") is None
+        assert parse_timeout_per_scenario("") is None

@@ -922,3 +922,50 @@ class TestCRAStartupTimeout:
             result = start_server(session, detection)
             assert result.success is False
             assert "120s" in result.error
+
+
+# ── Streamlit Dependency Fallback Tests ──
+
+
+class TestStreamlitDepFallback:
+    """Tests for dependency-based Streamlit detection fallback."""
+
+    def test_streamlit_detected_from_deps_without_st_calls(self, tmp_path):
+        """Streamlit dep in requirements but no st. AST calls — fallback detects it."""
+        app_py = tmp_path / "app.py"
+        app_py.write_text("import streamlit\nstreamlit.write('hello')\n")
+
+        fa = _make_file_analysis("app.py", imports=[
+            ImportInfo(module="streamlit"),
+        ])
+        ingestion = _make_ingestion([fa], str(tmp_path))
+        ingestion.dependencies = [DependencyInfo(name="streamlit")]
+
+        result = _detect_python_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "streamlit"
+        assert result.entry_file == "app.py"
+
+    def test_streamlit_dep_fallback_picks_preferred_entry(self, tmp_path):
+        """Streamlit dep but no import info — falls back to preferred entry file."""
+        app_py = tmp_path / "app.py"
+        app_py.write_text("print('hello')\n")
+
+        ingestion = _make_ingestion([], str(tmp_path))
+        ingestion.dependencies = [DependencyInfo(name="streamlit")]
+
+        result = _detect_python_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "streamlit"
+        assert result.entry_file == "app.py"
+
+    def test_no_streamlit_dep_no_fallback(self, tmp_path):
+        """Without streamlit dep, fallback doesn't trigger."""
+        app_py = tmp_path / "app.py"
+        app_py.write_text("print('hello')\n")
+
+        ingestion = _make_ingestion([], str(tmp_path))
+        ingestion.dependencies = [DependencyInfo(name="pandas")]
+
+        result = _detect_python_framework(ingestion, tmp_path)
+        assert result is None

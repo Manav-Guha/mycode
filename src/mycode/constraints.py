@@ -55,6 +55,7 @@ class OperationalConstraints:
     availability_requirement: Optional[str] = None
     data_sensitivity: Optional[str] = None
     growth_expectation: Optional[str] = None
+    timeout_per_scenario: Optional[int] = None
     raw_answers: list[str] = field(default_factory=list)
 
     def as_summary(self) -> str:
@@ -97,6 +98,8 @@ class OperationalConstraints:
             parts.append(f"Data sensitivity: {self.data_sensitivity}")
         if self.growth_expectation:
             parts.append(f"Growth: {self.growth_expectation}")
+        if self.timeout_per_scenario is not None:
+            parts.append(f"Time limit per test: {self.timeout_per_scenario}s")
         return ". ".join(parts) if parts else "No specific constraints provided"
 
 
@@ -438,6 +441,59 @@ def parse_max_payload(text: str) -> Optional[float]:
         value = float(plain_match.group(1))
         if value > 0:
             return value
+
+    return None
+
+
+# ── Timeout Per Scenario ──
+
+_TIMEOUT_FLOOR = 60
+
+_TIMEOUT_CHOICES: dict[str, int] = {
+    "1": 90,    # default
+    "2": 180,   # 3 minutes
+    "3": 300,   # 5 minutes
+}
+
+
+def parse_timeout_per_scenario(text: str) -> Optional[int]:
+    """Extract per-scenario timeout in seconds.
+
+    Handles numbered choices, explicit durations with units
+    (``"2 min"``, ``"120s"``, ``"5 minutes"``), and plain numbers
+    (assumed seconds).  Enforces a 60-second floor.
+
+    Returns ``None`` when the input is a skip word or empty.
+    """
+    text_lower = text.lower().strip()
+
+    if _is_skip(text_lower):
+        return None
+
+    # Numbered choice
+    stripped = text_lower.rstrip(".").strip()
+    if stripped in _TIMEOUT_CHOICES:
+        return _TIMEOUT_CHOICES[stripped]
+
+    # Number + unit: "2 min", "120s", "5 minutes", "3m"
+    unit_match = re.search(
+        r'(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|m|sec(?:ond)?s?|s)\b', text_lower,
+    )
+    if unit_match:
+        value = float(unit_match.group(1))
+        unit = unit_match.group(2)
+        if unit.startswith("m"):
+            seconds = int(value * 60)
+        else:
+            seconds = int(value)
+        return max(seconds, _TIMEOUT_FLOOR)
+
+    # Plain number — assume seconds
+    plain_match = re.search(r'\b(\d+)\b', text_lower)
+    if plain_match:
+        value = int(plain_match.group(1))
+        if value > 0:
+            return max(value, _TIMEOUT_FLOOR)
 
     return None
 

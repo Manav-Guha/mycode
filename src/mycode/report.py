@@ -677,6 +677,10 @@ _FAILURE_REASON_EXPLANATIONS: dict[str, str] = {
         "This can happen with non-standard project structures or monorepos."
     ),
     "timeout": "These tests exceeded the time limit.",
+    "user_timeout": (
+        "These tests reached your time limit. Re-run with a longer "
+        "limit for deeper testing."
+    ),
     "runtime_context_required": (
         "These functions require runtime context (e.g. a running Streamlit "
         "server, database connection, or live API) that myCode cannot "
@@ -707,6 +711,7 @@ _FAILURE_REASON_HEADERS: dict[str, str] = {
     "browser_framework": "Browser Framework",
     "module_import_failure": "Module Import Issue",
     "timeout": "Timed Out",
+    "user_timeout": "Reached Your Time Limit",
     "runtime_context_required": "Requires Runtime Context",
     "unknown": "Other Issues",
     "": "Environment Issues",
@@ -1054,8 +1059,8 @@ class ReportGenerator:
         for sr in execution.scenario_results:
             total_errors += sr.total_errors
 
-            # Runtime context scenarios don't count toward pass/fail
-            if sr.failure_reason == "runtime_context_required":
+            # Runtime context and user-timeout scenarios don't count toward pass/fail
+            if sr.failure_reason == "runtime_context_required" or sr.hit_user_timeout:
                 pass  # excluded from counts
             elif sr.status == "completed" and sr.total_errors == 0 and not sr.resource_cap_hit:
                 passed += 1
@@ -1069,6 +1074,23 @@ class ReportGenerator:
             sr_exec_time = max(
                 (s.execution_time_ms for s in sr.steps), default=0.0,
             )
+
+            # ── User timeout → INFO finding with re-run suggestion ──
+            if sr.hit_user_timeout:
+                f = Finding(
+                    title=f"Reached time limit: {_humanize_title_name(sr.scenario_name)}",
+                    severity="info",
+                    category=sr.scenario_category,
+                    description=(
+                        "This test reached your time limit before "
+                        "completing. Re-run with a longer limit for "
+                        "deeper testing."
+                    ),
+                    affected_dependencies=self._deps_from_name(sr.scenario_name),
+                )
+                f._failure_reason = "user_timeout"
+                report.incomplete_tests.append(f)
+                continue
 
             # ── Harness failures → incomplete tests (myCode limitation) ──
             if sr.failure_reason:

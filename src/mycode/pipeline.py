@@ -465,7 +465,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             # ── Stage 8: Execution ──
             _run_execution(
                 session, ingestion, approved, result, language,
-                io=config.io,
+                io=config.io, constraints=constraints,
             )
 
             # ── Stage 8.5: HTTP Load Testing ──
@@ -944,6 +944,7 @@ def _run_execution(
     result: PipelineResult,
     language: str = "python",
     io: Optional[UserIO] = None,
+    constraints: Optional[OperationalConstraints] = None,
 ) -> None:
     """Stage 8: Execute approved scenarios."""
     stage_start = time.monotonic()
@@ -959,7 +960,7 @@ def _run_execution(
     try:
         engine = ExecutionEngine(
             session=session, ingestion=ingestion, language=language,
-            io=io,
+            io=io, constraints=constraints,
         )
         execution = engine.execute(scenarios=approved_scenarios)
         result.execution = execution

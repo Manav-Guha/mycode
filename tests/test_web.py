@@ -693,14 +693,20 @@ class TestConverseHandler:
             # The only remaining follow-up should be max_payload_mb
             assert "largest input" in resp.question.lower()
 
-            # Answer the payload question → conversation done
+            # Answer the payload question → timeout question next
             resp = handle_converse(job.id, 4, "2")  # medium = 50 MB
+            assert not resp.done
+            assert "timing out" in resp.question.lower() or "how long" in resp.question.lower()
+
+            # Answer the timeout question → conversation done
+            resp = handle_converse(job.id, 5, "1")  # 90s default
             assert resp.done
             assert resp.constraints is not None
             assert resp.constraints["user_scale"] == 50
             assert resp.constraints["usage_pattern"] == "sustained"
             assert resp.constraints["data_type"] == "api_responses"
             assert resp.constraints["max_payload_mb"] == 50.0
+            assert resp.constraints["timeout_per_scenario"] == 90
             assert job.status == "conversation_done"
         finally:
             jobs_module.store = old_store

@@ -32,6 +32,7 @@ from mycode.constraints import (
     parse_deployment_context,
     parse_growth_expectation,
     parse_max_payload,
+    parse_timeout_per_scenario,
     parse_usage_pattern,
     parse_user_scale,
 )
@@ -423,6 +424,10 @@ class ConversationalInterface:
             "I didn't catch that — please pick a number from 1-3 "
             "or enter a size (e.g. 10 MB, 2 GB)."
         ),
+        "timeout_per_scenario": (
+            "I didn't catch that — please pick a number from 1-3 "
+            "or enter a duration (e.g. 90s, 2 min, 5 minutes)."
+        ),
     }
 
     _DEFAULTS: dict[str, tuple[object, str]] = {
@@ -430,6 +435,7 @@ class ConversationalInterface:
         "data_type": ("mixed", "mixed data types"),
         "usage_pattern": ("sustained", "steady, continuous use"),
         "max_payload_mb": (50.0, "medium-sized inputs (up to 50 MB)"),
+        "timeout_per_scenario": (90, "90 seconds per test"),
     }
 
     def _ask_validated(
@@ -776,6 +782,16 @@ class ConversationalInterface:
                     parse_max_payload,
                 )
 
+            timeout_per_scenario = self._ask_validated(
+                "How long should each test run before timing out?\n"
+                "  1. 90 seconds (default)\n"
+                "  2. 3 minutes\n"
+                "  3. 5 minutes\n"
+                "(enter a number, a duration like '2 min', or 'not sure')",
+                "timeout_per_scenario",
+                parse_timeout_per_scenario,
+            )
+
         # ── Derive availability from usage pattern ──
         availability_requirement = infer_availability(usage_pattern)
 
@@ -796,6 +812,7 @@ class ConversationalInterface:
             availability_requirement=availability_requirement,
             data_sensitivity=data_sensitivity,
             growth_expectation=growth_expectation,
+            timeout_per_scenario=timeout_per_scenario if self._offline else None,
             raw_answers=raw_answers,
         )
 
@@ -1195,7 +1212,7 @@ class ConversationalInterface:
     # as a request/response cycle the route handler can drive turn-by-turn.
 
     # The questions mirror _extract_constraints lines 662-704 exactly.
-    _FOLLOWUP_FIELDS = ("user_scale", "data_type", "usage_pattern", "max_payload_mb")
+    _FOLLOWUP_FIELDS = ("user_scale", "data_type", "usage_pattern", "max_payload_mb", "timeout_per_scenario")
 
     _FOLLOWUP_QUESTIONS: dict[str, str] = {
         "user_scale": (
@@ -1226,6 +1243,13 @@ class ConversationalInterface:
             "  3. Large (over 50 MB)\n"
             "(enter a number, a size like '50 MB', or 'not sure')"
         ),
+        "timeout_per_scenario": (
+            "How long should each test run before timing out?\n"
+            "  1. 90 seconds (default)\n"
+            "  2. 3 minutes\n"
+            "  3. 5 minutes\n"
+            "(enter a number, a duration like '2 min', or 'not sure')"
+        ),
     }
 
     _FOLLOWUP_PARSERS: dict[str, Callable[[str], object]] = {
@@ -1233,6 +1257,7 @@ class ConversationalInterface:
         "data_type": parse_data_type,
         "usage_pattern": parse_usage_pattern,
         "max_payload_mb": parse_max_payload,
+        "timeout_per_scenario": parse_timeout_per_scenario,
     }
 
     @staticmethod

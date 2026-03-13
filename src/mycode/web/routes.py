@@ -396,6 +396,7 @@ def _followup_or_done(job: Job, current_turn: int) -> ConverseResponse:
             "availability_requirement": job.constraints.availability_requirement,
             "data_sensitivity": job.constraints.data_sensitivity,
             "growth_expectation": job.constraints.growth_expectation,
+            "timeout_per_scenario": job.constraints.timeout_per_scenario,
         }
 
     return ConverseResponse(

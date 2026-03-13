@@ -219,6 +219,29 @@ def _detect_python_framework(
             entry_file=entry,
         )
 
+    # ── Dependency-based fallback for Streamlit ──
+    # AST detection can miss files that use `import streamlit` without
+    # the `st.` alias, or files not in file_analyses.  If streamlit is
+    # declared as a dependency, scan for any file that imports it.
+    dep_names = {d.name for d in ingestion.dependencies}
+    if "streamlit" in dep_names:
+        for fa in ingestion.file_analyses:
+            for imp in fa.imports:
+                if imp.module == "streamlit" or (
+                    imp.module and imp.module.startswith("streamlit.")
+                ):
+                    return FrameworkDetection(
+                        framework="streamlit",
+                        entry_file=fa.file_path,
+                    )
+        # Last resort — streamlit in deps, pick preferred entry file
+        for preferred in _PREFERRED_ENTRY_FILES:
+            if (project_dir / preferred).is_file():
+                return FrameworkDetection(
+                    framework="streamlit",
+                    entry_file=preferred,
+                )
+
     return None
 
 

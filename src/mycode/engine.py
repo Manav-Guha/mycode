@@ -201,6 +201,7 @@ class ScenarioResult:
     summary: str = ""
     failure_reason: str = ""
     probe_skipped: list[dict] = field(default_factory=list)
+    hit_user_timeout: bool = False
 
 
 @dataclass
@@ -437,6 +438,7 @@ class ExecutionEngine:
         ingestion: IngestionResult,
         language: str = "python",
         io: Optional[UserIO] = None,
+        constraints: Optional["OperationalConstraints"] = None,
     ):
         if not session._setup_complete:
             raise EngineError(
@@ -446,6 +448,10 @@ class ExecutionEngine:
         self.ingestion = ingestion
         self.language = language.lower()
         self._io: UserIO = io or TerminalIO()
+        self._timeout_override: Optional[int] = (
+            constraints.timeout_per_scenario
+            if constraints is not None else None
+        )
 
     def _check_node_available(self) -> bool:
         """Check if Node.js is available in the session environment."""
@@ -624,9 +630,17 @@ class ExecutionEngine:
         cap = _CATEGORY_TIMEOUT_CAPS.get(scenario.category, _SCENARIO_TIMEOUT_CAP)
         timeout = min(timeout, cap)
 
+        # User-controlled override from conversational interface
+        user_cap = self._timeout_override
+        hit_user_cap = False
+        if user_cap is not None and timeout > user_cap:
+            timeout = user_cap
+            hit_user_cap = True
+
         logger.info(
-            "Executing scenario: %s [%s] (timeout=%ds)",
+            "Executing scenario: %s [%s] (timeout=%ds%s)",
             scenario.name, scenario.category, timeout,
+            " [user cap]" if hit_user_cap else "",
         )
         sys.stderr.flush()
 
@@ -732,6 +746,10 @@ class ExecutionEngine:
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+        # Mark when scenario was capped by the user's timeout
+        if hit_user_cap and result.failure_reason == "timeout":
+            result.hit_user_timeout = True
 
         logger.info(
             "Scenario '%s' %s: %d steps, %d errors, %.0f ms",

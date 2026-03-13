@@ -96,6 +96,7 @@ def run_analysis(job: Job) -> None:
             ingestion=ingestion,
             language=language,
             io=NullIO(),
+            constraints=constraints,
         )
 
         def _on_progress(completed: int, total: int, current: str) -> None:
@@ -108,15 +109,20 @@ def run_analysis(job: Job) -> None:
             on_progress=_on_progress,
         )
 
-        job.progress_scenarios_complete = (
+        callable_done = (
             execution.scenarios_completed
             + execution.scenarios_failed
             + execution.scenarios_skipped
         )
+        job.progress_scenarios_complete = callable_done
         job.progress_current_scenario = ""
 
         # ── Stage 8.5: HTTP Load Testing ──
+        # Add 1 to total for the HTTP testing phase so the progress bar
+        # doesn't show 100% while HTTP tests are still running.
         job.progress_stage = "http_testing"
+        job.progress_scenarios_total = callable_done + 1
+        job.progress_current_scenario = "HTTP endpoint testing..."
         try:
             execution = run_http_testing_phase(
                 session=session,
@@ -130,6 +136,7 @@ def run_analysis(job: Job) -> None:
             )
         except Exception as exc:
             logger.warning("HTTP testing failed for job %s: %s", job.id, exc)
+        job.progress_scenarios_complete = callable_done + 1
 
         job.progress_stage = "report_generation"
 

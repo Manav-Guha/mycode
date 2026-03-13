@@ -2690,3 +2690,52 @@ class TestBrowserOnlySkip:
         ]
         result = engine.execute(scenarios)
         assert result.scenario_results[0].failure_reason != "browser_framework"
+
+
+# ── User Timeout Override Tests ──
+
+
+class TestUserTimeoutOverride:
+    """Tests for user-controlled timeout via constraints."""
+
+    def test_timeout_override_stored(self):
+        """Engine stores timeout override from constraints."""
+        from mycode.constraints import OperationalConstraints
+        session = MagicMock()
+        session._setup_complete = True
+        session.resource_caps = MagicMock(timeout_seconds=300)
+        ingestion = MagicMock()
+        constraints = OperationalConstraints(timeout_per_scenario=120)
+        engine = ExecutionEngine(
+            session=session, ingestion=ingestion, constraints=constraints,
+        )
+        assert engine._timeout_override == 120
+
+    def test_no_constraints_no_override(self):
+        """Engine with no constraints has no timeout override."""
+        session = MagicMock()
+        session._setup_complete = True
+        session.resource_caps = MagicMock(timeout_seconds=300)
+        ingestion = MagicMock()
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        assert engine._timeout_override is None
+
+    def test_hit_user_timeout_flag(self):
+        """ScenarioResult.hit_user_timeout is set when user cap triggers."""
+        result = ScenarioResult(
+            scenario_name="test",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="timeout",
+            hit_user_timeout=True,
+        )
+        assert result.hit_user_timeout is True
+
+    def test_hit_user_timeout_default_false(self):
+        """ScenarioResult.hit_user_timeout defaults to False."""
+        result = ScenarioResult(
+            scenario_name="test",
+            scenario_category="data_volume_scaling",
+            status="completed",
+        )
+        assert result.hit_user_timeout is False

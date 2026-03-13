@@ -3563,3 +3563,56 @@ class TestBrowserFrameworkSuppression:
             if f._failure_reason == "browser_framework"
         ]
         assert len(browser_incomplete) == 1
+
+
+# ── Session 19: User Timeout in Report ──
+
+
+class TestUserTimeoutInReport:
+    """Tests for hit_user_timeout scenarios in report generation."""
+
+    def test_user_timeout_creates_info_finding(self):
+        """Scenarios hitting user timeout get 'Reached time limit' finding."""
+        sr = ScenarioResult(
+            scenario_name="data_volume_scaling_pandas",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="timeout",
+            hit_user_timeout=True,
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+        )
+        user_timeout = [
+            f for f in report.incomplete_tests
+            if f._failure_reason == "user_timeout"
+        ]
+        assert len(user_timeout) == 1
+        assert "time limit" in user_timeout[0].title.lower()
+        assert "re-run" in user_timeout[0].description.lower()
+
+    def test_user_timeout_excluded_from_pass_fail(self):
+        """User-timeout scenarios are not counted as passed or failed."""
+        sr = ScenarioResult(
+            scenario_name="test_scenario",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="timeout",
+            hit_user_timeout=True,
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+        )
+        # The report should show 0 passed, 0 failed (user timeout excluded)
+        assert report.scenarios_passed == 0
+        assert report.scenarios_failed == 0
