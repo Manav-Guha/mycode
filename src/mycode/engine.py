@@ -263,7 +263,9 @@ _CONTEXT_ERROR_TYPES = frozenset({
 
 # Error types that indicate data shape issues (testable, not context)
 _DATA_ERROR_TYPES = frozenset({
-    "TypeError", "ValueError",
+    "TypeError", "ValueError", "KeyError",
+    "EmptyDataError", "ParserError",          # pandas data format errors
+    "IndexError", "ZeroDivisionError",        # computation errors
 })
 
 # Keywords in error messages that indicate context even for TypeError/NameError
@@ -296,8 +298,9 @@ def _identical_errors_are_context(test_steps: list["StepResult"]) -> bool:
                 error_messages.append(msg.lower())
 
     if not error_types:
-        # No typed errors — can't determine, default to context
-        return True
+        # No typed errors — can't determine, default to NOT context
+        # (safer to report findings than suppress them)
+        return False
 
     # Find the dominant error type
     dominant_type = max(error_types, key=error_types.get)
@@ -335,8 +338,10 @@ def _identical_errors_are_context(test_steps: list["StepResult"]) -> bool:
                 return True
         return False
 
-    # Unknown error types — default to context to preserve existing behavior
-    return True
+    # Unknown error types — default to NOT context.  If the error type is
+    # unrecognized, it's safer to report the errors as findings than to
+    # suppress them as "could not test."
+    return False
 
 
 def _classify_harness_failure(stderr: str, scenario_name: str = "") -> str:

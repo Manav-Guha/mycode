@@ -2394,6 +2394,88 @@ class TestIdenticalErrorDetection:
         assert sr.status == "skipped"
         assert sr.failure_reason == "runtime_context_required"
 
+    def test_keyerror_not_reclassified(self, tmp_path):
+        """KeyError at every step is a data structure issue, NOT runtime context."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output(
+            [6] * 4,
+            error_type="KeyError",
+            error_message="'missing_column'",
+        )
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+        assert sr.status != "skipped"
+
+    def test_unknown_error_type_not_reclassified(self, tmp_path):
+        """Unrecognized error type should NOT default to runtime context."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output(
+            [4] * 5,
+            error_type="CustomAppError",
+            error_message="something went wrong",
+        )
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+        assert sr.status != "skipped"
+
+    def test_no_error_type_not_reclassified(self, tmp_path):
+        """Errors with no type field should NOT default to runtime context."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        # Build steps with errors that have empty type
+        output = self._make_steps_output(
+            [3] * 4,
+            error_type="",
+            error_message="something failed",
+        )
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+        assert sr.status != "skipped"
+
 
 class TestBrowserOnlySkip:
     """Test that browser-only projects skip callable harnesses."""
