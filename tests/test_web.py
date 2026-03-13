@@ -969,3 +969,107 @@ class TestFullConversationFlow:
         finally:
             jobs_module.store = old_store
             routes_module.store = old_store
+
+
+# ── Worker HTTP Testing Integration ──
+
+
+class TestWorkerHTTPIntegration:
+    """Verify that run_analysis calls run_http_testing_phase between execution and report."""
+
+    @patch("mycode.web.worker.run_http_testing_phase")
+    @patch("mycode.web.worker.ReportGenerator")
+    @patch("mycode.web.worker.ExecutionEngine")
+    @patch("mycode.web.worker.ScenarioGenerator")
+    def test_http_testing_called_after_execution(
+        self, mock_scen_gen, mock_engine_cls, mock_report_cls, mock_http_phase
+    ):
+        from mycode.web.worker import run_analysis
+        from mycode.web.jobs import Job
+        from mycode.engine import ExecutionEngineResult
+
+        job = Job(id="test_http")
+        job.status = "preflight_complete"
+        job.language = "python"
+        job.ingestion = MagicMock()
+        job.session = MagicMock()
+        job.matches = []
+
+        # Scenario gen returns one scenario
+        mock_gen_instance = MagicMock()
+        mock_gen_instance.generate.return_value = MagicMock(scenarios=[MagicMock()])
+        mock_scen_gen.return_value = mock_gen_instance
+
+        # Execution engine returns a result
+        exec_result = MagicMock(spec=ExecutionEngineResult)
+        exec_result.scenarios_completed = 1
+        exec_result.scenarios_failed = 0
+        exec_result.scenarios_skipped = 0
+        exec_result.warnings = []
+        mock_engine_instance = MagicMock()
+        mock_engine_instance.execute.return_value = exec_result
+        mock_engine_cls.return_value = mock_engine_instance
+
+        # HTTP phase returns augmented result
+        augmented = MagicMock(spec=ExecutionEngineResult)
+        mock_http_phase.return_value = augmented
+
+        # Report gen returns a report
+        mock_report_instance = MagicMock()
+        mock_report_instance.generate.return_value = MagicMock()
+        mock_report_cls.return_value = mock_report_instance
+
+        run_analysis(job)
+
+        # HTTP testing phase was called with the execution result
+        mock_http_phase.assert_called_once()
+        call_kwargs = mock_http_phase.call_args
+        assert call_kwargs.kwargs["session"] == job.session
+        assert call_kwargs.kwargs["ingestion"] == job.ingestion
+        assert call_kwargs.kwargs["execution"] == exec_result
+        assert call_kwargs.kwargs["language"] == "python"
+
+        # Report gen received the augmented execution result (from HTTP phase)
+        report_call = mock_report_instance.generate.call_args
+        assert report_call.kwargs["execution"] == augmented
+
+    @patch("mycode.web.worker.run_http_testing_phase", side_effect=Exception("boom"))
+    @patch("mycode.web.worker.ReportGenerator")
+    @patch("mycode.web.worker.ExecutionEngine")
+    @patch("mycode.web.worker.ScenarioGenerator")
+    def test_http_testing_failure_non_fatal(
+        self, mock_scen_gen, mock_engine_cls, mock_report_cls, mock_http_phase
+    ):
+        """HTTP testing failure should not prevent report generation."""
+        from mycode.web.worker import run_analysis
+        from mycode.web.jobs import Job
+
+        job = Job(id="test_http_fail")
+        job.status = "preflight_complete"
+        job.language = "python"
+        job.ingestion = MagicMock()
+        job.session = MagicMock()
+        job.matches = []
+
+        mock_gen_instance = MagicMock()
+        mock_gen_instance.generate.return_value = MagicMock(scenarios=[MagicMock()])
+        mock_scen_gen.return_value = mock_gen_instance
+
+        exec_result = MagicMock()
+        exec_result.scenarios_completed = 1
+        exec_result.scenarios_failed = 0
+        exec_result.scenarios_skipped = 0
+        exec_result.warnings = []
+        mock_engine_instance = MagicMock()
+        mock_engine_instance.execute.return_value = exec_result
+        mock_engine_cls.return_value = mock_engine_instance
+
+        mock_report_instance = MagicMock()
+        mock_report_instance.generate.return_value = MagicMock()
+        mock_report_cls.return_value = mock_report_instance
+
+        run_analysis(job)
+
+        # Job still completed despite HTTP testing failure
+        assert job.status == "completed"
+        mock_report_instance.generate.assert_called_once()

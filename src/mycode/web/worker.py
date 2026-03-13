@@ -13,6 +13,7 @@ from typing import Optional
 
 from mycode.constraints import OperationalConstraints
 from mycode.engine import ExecutionEngine
+from mycode.http_load_driver import run_http_testing_phase
 from mycode.ingester import IngestionResult
 from mycode.interface import InterfaceResult, OperationalIntent, UserIO
 from mycode.library import ProfileMatch
@@ -113,6 +114,23 @@ def run_analysis(job: Job) -> None:
             + execution.scenarios_skipped
         )
         job.progress_current_scenario = ""
+
+        # ── Stage 8.5: HTTP Load Testing ──
+        job.progress_stage = "http_testing"
+        try:
+            execution = run_http_testing_phase(
+                session=session,
+                ingestion=ingestion,
+                execution=execution,
+                language=language,
+                constraints=constraints,
+                on_progress=lambda msg: setattr(
+                    job, "progress_current_scenario", msg
+                ),
+            )
+        except Exception as exc:
+            logger.warning("HTTP testing failed for job %s: %s", job.id, exc)
+
         job.progress_stage = "report_generation"
 
         # ── Stage 9: Report Generation ──
