@@ -1498,6 +1498,70 @@ class TestJSCouplingBodies:
             )
 
 
+class TestNodeAvailabilityCheck:
+    """Test Node.js availability check for JS projects."""
+
+    def test_node_unavailable_returns_all_failed(self, tmp_path):
+        """When Node.js is not available, all JS scenarios should fail immediately."""
+        session = _make_session(tmp_path)
+        # Simulate node --version failing
+        session.run_in_session.return_value = SessionResult(
+            returncode=-1, stdout="", stderr="No such file or directory: 'node'",
+        )
+        engine = ExecutionEngine(session, _make_ingestion(), language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="react_dom_data_volume",
+                category="data_volume_scaling",
+                description="Test",
+            ),
+            StressTestScenario(
+                name="coupling_render_App",
+                category="state_management_degradation",
+                description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+
+        assert len(result.scenario_results) == 2
+        for sr in result.scenario_results:
+            assert sr.status == "failed"
+            assert sr.failure_reason == "dependency_unavailable"
+            assert "node.js" in sr.summary.lower()
+        assert any("node.js" in w.lower() for w in result.warnings)
+
+    def test_node_available_proceeds_normally(self, tmp_path):
+        """When Node.js is available, execution proceeds."""
+        session = _make_session(tmp_path)
+        # First call: node --version check succeeds
+        # Subsequent calls: harness execution
+        version_result = SessionResult(
+            returncode=0, stdout="v18.19.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        engine = ExecutionEngine(session, _make_ingestion(), language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_scenario",
+                category="data_volume_scaling",
+                description="Test",
+                test_config={"behavior": "pure_computation"},
+            ),
+        ]
+        result = engine.execute(scenarios)
+
+        # Should have proceeded past the check
+        assert len(result.scenario_results) == 1
+        assert result.scenario_results[0].failure_reason != "dependency_unavailable"
+
+
 class TestPyCouplingBodies:
     """Test standalone Python coupling body templates."""
 

@@ -35,6 +35,7 @@ from mycode.report import (
     _format_ms,
     _human_metric,
     _human_time,
+    _humanize_title_name,
     _is_significant_degradation,
     _is_significant_finding,
 )
@@ -622,6 +623,64 @@ class TestOfflineSummary:
         report = gen.generate(degrading_execution, simple_ingestion, profile_matches)
 
         assert "degradation" in report.summary.lower()
+
+    def test_all_scenarios_failed_summary(self, simple_ingestion):
+        """When all scenarios are incomplete, summary says 'could not execute'."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="react_dom_data_volume",
+                    scenario_category="data_volume_scaling",
+                    status="failed",
+                    summary="Harness did not produce structured output. Exit code: -5.",
+                    failure_reason="unknown",
+                    steps=[],
+                ),
+                ScenarioResult(
+                    scenario_name="coupling_render_App",
+                    scenario_category="state_management_degradation",
+                    status="failed",
+                    summary="Harness did not produce structured output. Exit code: -5.",
+                    failure_reason="unknown",
+                    steps=[],
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(execution, simple_ingestion, [])
+
+        assert "could not execute" in report.summary.lower()
+        assert "completed without issues" not in report.summary.lower()
+
+    def test_partial_incomplete_summary(self):
+        """When some scenarios pass and some fail, summary notes both."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="react_dom_data_volume",
+                    scenario_category="data_volume_scaling",
+                    status="completed",
+                    steps=[StepResult(step_name="s1")],
+                    total_errors=0,
+                ),
+                ScenarioResult(
+                    scenario_name="coupling_render_App",
+                    scenario_category="state_management_degradation",
+                    status="failed",
+                    summary="Harness crash.",
+                    failure_reason="unknown",
+                    steps=[],
+                ),
+            ],
+        )
+        # Use minimal ingestion with no version discrepancies
+        ingestion = IngestionResult(project_path="/tmp/test")
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(execution, ingestion, [])
+
+        assert "could not be run" in report.summary.lower()
+        # Should say "1 of 2" not "All 2"
+        assert "1 of 2" in report.summary
 
 
 # ── LLM Summary Tests ──
@@ -3411,3 +3470,33 @@ class TestRuntimeContextFindings:
         desc = report.incomplete_tests[0].description
         assert "cannot simulate in isolation" in desc
         assert "HTTP" not in desc
+
+
+class TestCouplingTitleDifferentiation:
+    """Coupling scenarios should have distinct, behavior-specific titles."""
+
+    def test_api_coupling_title(self):
+        assert "API Coupling" in _humanize_title_name("coupling_api_fetchData")
+
+    def test_compute_coupling_title(self):
+        assert "Computation Coupling" in _humanize_title_name("coupling_compute_calculate")
+
+    def test_render_coupling_title(self):
+        assert "Render Coupling" in _humanize_title_name("coupling_render_App")
+
+    def test_error_handler_coupling_title(self):
+        assert "Error Handling" in _humanize_title_name("coupling_errorhandler_onError")
+
+    def test_state_setters_coupling_title(self):
+        result = _humanize_title_name("coupling_state_setters_group_1")
+        assert "Shared State" in result
+
+    def test_coupling_titles_are_distinct(self):
+        """Different coupling behaviors should produce different titles."""
+        titles = {
+            _humanize_title_name("coupling_api_fetchData"),
+            _humanize_title_name("coupling_compute_calculate"),
+            _humanize_title_name("coupling_render_App"),
+            _humanize_title_name("coupling_errorhandler_onError"),
+        }
+        assert len(titles) == 4, f"Expected 4 distinct titles, got {titles}"

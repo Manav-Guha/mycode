@@ -875,6 +875,35 @@ class TestDependencyExtraction:
         assert len(runtime) == 2  # express, lodash
         assert len(dev) == 1  # jest
 
+    def test_implicit_dev_packages_reclassified(self, tmp_path):
+        """CRA-style test packages in 'dependencies' should be treated as dev."""
+        (tmp_path / "index.js").write_text("console.log('hello');")
+        (tmp_path / "package.json").write_text(json.dumps({
+            "name": "react-app",
+            "dependencies": {
+                "react": "^18.0.0",
+                "react-dom": "^18.0.0",
+                "@testing-library/jest-dom": "^5.0.0",
+                "@testing-library/react": "^13.0.0",
+                "@types/react": "^18.0.0",
+                "web-vitals": "^2.0.0",
+            },
+        }))
+        ingester = JsProjectIngester(
+            tmp_path, installed_packages={}, skip_npm_check=True,
+        )
+        deps = ingester._extract_dependencies()
+        runtime = [d for d in deps if not d.is_dev]
+        dev = [d for d in deps if d.is_dev]
+        runtime_names = {d.name for d in runtime}
+        dev_names = {d.name for d in dev}
+        assert "react" in runtime_names
+        assert "react-dom" in runtime_names
+        assert "@testing-library/jest-dom" in dev_names
+        assert "@testing-library/react" in dev_names
+        assert "@types/react" in dev_names
+        assert "web-vitals" in dev_names
+
     @patch("mycode.js_ingester.JsProjectIngester._fetch_npm_version")
     def test_outdated_detection(self, mock_fetch, project_with_node_modules):
         mock_fetch.return_value = "5.0.0"

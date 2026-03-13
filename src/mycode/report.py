@@ -1709,8 +1709,16 @@ class ReportGenerator:
         # ── Overall assessment ──
         critical = [f for f in report.findings if f.severity == "critical"]
         warnings = [f for f in report.findings if f.severity == "warning"]
+        completed = report.scenarios_run - len(report.incomplete_tests)
 
-        if critical:
+        if completed == 0 and report.incomplete_tests:
+            lines.append(
+                f"myCode could not execute any stress tests for "
+                f"{project_ref}. This is typically caused by missing "
+                f"runtime dependencies or an unsupported execution "
+                f"environment."
+            )
+        elif critical:
             lines.append(
                 f"We found some problems that could affect "
                 f"{project_ref} under real-world conditions."
@@ -1721,10 +1729,18 @@ class ReportGenerator:
                 f"handles stress well, but there are a few areas to watch."
             )
         else:
-            lines.append(
-                f"{project_ref[0].upper()}{project_ref[1:]} looks solid "
-                f"under the conditions we tested."
-            )
+            if report.incomplete_tests:
+                lines.append(
+                    f"{project_ref[0].upper()}{project_ref[1:]} looks "
+                    f"solid under the conditions we tested, though "
+                    f"{len(report.incomplete_tests)} scenario(s) could "
+                    f"not be run."
+                )
+            else:
+                lines.append(
+                    f"{project_ref[0].upper()}{project_ref[1:]} looks "
+                    f"solid under the conditions we tested."
+                )
 
         # ── Top findings (up to 4, prioritized, one per scenario) ──
         #
@@ -2055,11 +2071,27 @@ class ReportGenerator:
         if not report.scenarios_run:
             return "No stress test scenarios were executed."
 
-        if not critical and not warnings:
+        # All scenarios failed to execute (crashed/incomplete)
+        completed = report.scenarios_run - len(report.incomplete_tests)
+        if completed == 0 and report.incomplete_tests:
             parts.append(
-                f"All {report.scenarios_run} stress test scenarios completed "
-                f"without issues."
+                f"myCode could not execute any of the "
+                f"{report.scenarios_run} stress test scenarios for this "
+                f"project. This is typically caused by missing runtime "
+                f"dependencies or an unsupported execution environment."
             )
+        elif not critical and not warnings:
+            if report.incomplete_tests:
+                parts.append(
+                    f"{completed} of {report.scenarios_run} stress test "
+                    f"scenarios completed without issues. "
+                    f"{len(report.incomplete_tests)} could not be run."
+                )
+            else:
+                parts.append(
+                    f"All {report.scenarios_run} stress test scenarios "
+                    f"completed without issues."
+                )
         elif critical:
             parts.append(
                 f"Found {len(critical)} critical issue(s) and "
@@ -3013,7 +3045,21 @@ def _humanize_title_name(scenario_name: str) -> str:
     if name.startswith("unrecognized_deps_"):
         return "General Stress Test (unrecognized dependencies)"
 
-    # Coupling scenarios
+    # Coupling scenarios — differentiate by behavior type
+    if name.startswith("coupling_api_"):
+        fn = _humanize_identifier(scenario_name[len("coupling_api_"):])
+        return f"API Coupling ({fn})"
+    if name.startswith("coupling_compute_"):
+        fn = _humanize_identifier(scenario_name[len("coupling_compute_"):])
+        return f"Computation Coupling ({fn})"
+    if name.startswith("coupling_render_"):
+        fn = _humanize_identifier(scenario_name[len("coupling_render_"):])
+        return f"Render Coupling ({fn})"
+    if name.startswith("coupling_errorhandler_"):
+        fn = _humanize_identifier(scenario_name[len("coupling_errorhandler_"):])
+        return f"Error Handling ({fn})"
+    if name.startswith("coupling_state_setters_group_"):
+        return "Shared State Coupling"
     if name.startswith("coupling_"):
         return "Component Coupling"
 

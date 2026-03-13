@@ -223,6 +223,26 @@ _JS_VAR_DECL_RE = re.compile(
 _JS_CALL_RE = re.compile(r"\b([a-zA-Z_$]\w*(?:\.[a-zA-Z_$]\w*)*)\s*\(")
 
 
+# ── Dev Package Detection ──
+
+# Packages commonly placed under "dependencies" by CRA and similar
+# templates that are actually dev/test tooling — not runtime deps.
+_IMPLICIT_DEV_PREFIXES = (
+    "@testing-library/",
+    "@types/",
+)
+_IMPLICIT_DEV_PACKAGES = frozenset({
+    "web-vitals",
+})
+
+
+def _is_implicit_dev_package(name: str) -> bool:
+    """Return True if a package is testing/build tooling misplaced in dependencies."""
+    if name in _IMPLICIT_DEV_PACKAGES:
+        return True
+    return any(name.startswith(p) for p in _IMPLICIT_DEV_PREFIXES)
+
+
 # ── Comment Stripping ──
 
 
@@ -902,7 +922,11 @@ class JsProjectIngester:
         for section in ("dependencies", "devDependencies", "peerDependencies"):
             is_dev = section == "devDependencies"
             for name, version in data.get(section, {}).items():
-                deps.append((name, version if isinstance(version, str) else "", is_dev))
+                # CRA and similar templates put testing packages in
+                # "dependencies" — reclassify well-known test/build packages
+                # so they don't appear as top-level project deps.
+                effective_dev = is_dev or _is_implicit_dev_package(name)
+                deps.append((name, version if isinstance(version, str) else "", effective_dev))
 
         return deps
 

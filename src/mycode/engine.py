@@ -371,6 +371,14 @@ def _classify_harness_failure(stderr: str, scenario_name: str = "") -> str:
     if "npm err" in stderr_lower or "npm error" in stderr_lower:
         return "dependency_unavailable"
 
+    # Node.js / runtime not found
+    if "no such file or directory" in stderr_lower and "node" in stderr_lower:
+        return "dependency_unavailable"
+
+    # ReferenceError in JS harness — harness generation issue
+    if "ReferenceError" in stderr:
+        return "harness_generation_error"
+
     return "unknown"
 
 
@@ -417,6 +425,21 @@ class ExecutionEngine:
         self.language = language.lower()
         self._io: UserIO = io or TerminalIO()
 
+    def _check_node_available(self) -> bool:
+        """Check if Node.js is available in the session environment."""
+        try:
+            result = self.session.run_in_session(
+                ["node", "--version"], timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip().startswith("v"):
+                logger.info("Node.js available: %s", result.stdout.strip())
+                return True
+            logger.warning("Node.js check failed: exit %d", result.returncode)
+            return False
+        except Exception as e:
+            logger.warning("Node.js check error: %s", e)
+            return False
+
     def execute(
         self,
         scenarios: list[StressTestScenario],
@@ -437,6 +460,31 @@ class ExecutionEngine:
         """
         if not scenarios:
             return ExecutionEngineResult(warnings=["No scenarios to execute."])
+
+        # Check Node.js availability for JS projects before running anything
+        if self.language == "javascript":
+            node_ok = self._check_node_available()
+            if not node_ok:
+                return ExecutionEngineResult(
+                    scenario_results=[
+                        ScenarioResult(
+                            scenario_name=s.name,
+                            scenario_category=s.category,
+                            status="failed",
+                            summary=(
+                                "Node.js is not installed in this "
+                                "environment. JavaScript stress tests "
+                                "require Node.js."
+                            ),
+                            failure_reason="dependency_unavailable",
+                        )
+                        for s in scenarios
+                    ],
+                    warnings=[
+                        "Node.js not found. Install Node.js to run "
+                        "JavaScript stress tests."
+                    ],
+                )
 
         total = len(scenarios)
         logger.info(
