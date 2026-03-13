@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from mycode.ingester import FileAnalysis, IngestionResult
+from mycode.ingester import IngestionResult
 from mycode.interface import TerminalIO, UserIO
 from mycode.scenario import StressTestScenario
 from mycode.session import SessionManager, SessionResult
@@ -485,6 +485,81 @@ class ExecutionEngine:
         has_server_framework = bool(non_dev_names & _SERVER_SIDE_PACKAGES)
         return has_browser_framework and not has_server_framework
 
+    def _deduplicate_by_function(
+        self,
+        scenarios: list[StressTestScenario],
+    ) -> list[StressTestScenario]:
+        """Remove scenarios whose target functions are already covered.
+
+        Coupling/behavior scenarios (standalone harness bodies) are never
+        deduplicated — they test coupling interactions, not individual
+        functions.  Profile-based scenarios carry ``target_functions`` in
+        their harness config; the first scenario that claims a function
+        wins.  Later scenarios get their function list trimmed to only
+        unseen functions; if nothing remains, the scenario is dropped.
+        """
+        seen_funcs: set[str] = set()
+        kept: list[StressTestScenario] = []
+
+        for scenario in scenarios:
+            config = scenario.test_config
+
+            # Standalone coupling/behavior bodies don't use target_functions
+            # — always keep them.
+            if config.get("behavior"):
+                kept.append(scenario)
+                continue
+
+            # Build the harness config to see what functions this scenario
+            # would test.  This is the same config the harness receives.
+            harness_cfg = self._build_harness_config(scenario)
+            funcs = harness_cfg.get("target_functions", [])
+
+            if not funcs:
+                # No callable functions (e.g. version discrepancy, generic
+                # stress) — keep the scenario as-is.
+                kept.append(scenario)
+                continue
+
+            # Identify functions not yet seen
+            new_funcs = [
+                f for f in funcs
+                if f"{f['module']}.{f['name']}" not in seen_funcs
+            ]
+
+            if not new_funcs:
+                # Every function already covered — drop this scenario
+                logger.debug(
+                    "Dedup: dropping scenario '%s' — all %d functions "
+                    "already covered",
+                    scenario.name, len(funcs),
+                )
+                continue
+
+            # Mark the new functions as seen
+            for f in new_funcs:
+                seen_funcs.add(f"{f['module']}.{f['name']}")
+
+            # If we trimmed some functions, inject the reduced list into
+            # the scenario's test_config so the harness only tests the
+            # remaining ones.
+            if len(new_funcs) < len(funcs):
+                scenario.test_config["_dedup_target_functions"] = new_funcs
+                logger.debug(
+                    "Dedup: trimmed scenario '%s' from %d to %d functions",
+                    scenario.name, len(funcs), len(new_funcs),
+                )
+
+            kept.append(scenario)
+
+        if len(kept) < len(scenarios):
+            logger.info(
+                "Function dedup: %d → %d scenarios",
+                len(scenarios), len(kept),
+            )
+
+        return kept
+
     def execute(
         self,
         scenarios: list[StressTestScenario],
@@ -549,6 +624,16 @@ class ExecutionEngine:
                 ],
                 warnings=[],
             )
+
+        # ── Brute-force function deduplication ──
+        # Profile-based scenarios each carry the full set of project functions
+        # in their harness config. A project with 7 functions and 14 dependency
+        # profiles would test each function 14 times — redundant, since the
+        # function's behaviour doesn't change per profile.
+        # Track which functions have been claimed by a scenario. For each
+        # subsequent scenario, strip already-seen functions. Drop scenarios
+        # whose functions are all already covered.
+        scenarios = self._deduplicate_by_function(scenarios)
 
         total = len(scenarios)
         logger.info(
@@ -800,14 +885,12 @@ class ExecutionEngine:
 
         if skip_imports:
             harness_config["target_functions"] = []
+        elif "_dedup_target_functions" in config:
+            # Pre-computed reduced function list from deduplication pass
+            harness_config["target_functions"] = config["_dedup_target_functions"]
         else:
-            # Add function info from ingestion — only include functions
-            # from files that actually import the scenario's dependencies.
-            # This prevents the function × dependency explosion where every
-            # function gets tested against every dependency profile.
-            dep_import_names = self._dep_import_names(scenario)
+            # Add function info from ingestion
             target_funcs = []
-            all_funcs = []  # fallback if dep filtering yields nothing
             for analysis in self.ingestion.file_analyses:
                 if self.language == "javascript":
                     mod = analysis.file_path
@@ -819,28 +902,14 @@ class ExecutionEngine:
                         .replace("\\", ".")
                     )
                 if mod in target_modules or not target_modules:
-                    file_funcs = [
-                        {
-                            "module": mod,
-                            "name": func.name,
-                            "args": func.args,
-                            "is_async": func.is_async,
-                        }
-                        for func in analysis.functions
-                        if not func.is_method and not func.name.startswith("_")
-                    ]
-                    all_funcs.extend(file_funcs)
-                    # If we know which deps this scenario targets, only
-                    # include functions from files that import those deps.
-                    if dep_import_names and not self._file_imports_any(
-                        analysis, dep_import_names,
-                    ):
-                        continue
-                    target_funcs.extend(file_funcs)
-            # Fall back to all functions if dep filtering found nothing
-            # (e.g. import info unavailable or dep name mismatch).
-            if not target_funcs and all_funcs:
-                target_funcs = all_funcs
+                    for func in analysis.functions:
+                        if not func.is_method and not func.name.startswith("_"):
+                            target_funcs.append({
+                                "module": mod,
+                                "name": func.name,
+                                "args": func.args,
+                                "is_async": func.is_async,
+                            })
             harness_config["target_functions"] = target_funcs[:50]
 
         # Pass harness_body override if present
@@ -1202,59 +1271,6 @@ class ExecutionEngine:
                     modules.append(mod)
 
         return modules[:20]
-
-    # ── Dependency-aware function filtering ──
-
-    # Map package names (pip) → import names (Python) for common mismatches.
-    _PKG_TO_IMPORT: dict[str, str] = {
-        "scikit-learn": "sklearn",
-        "pillow": "PIL",
-        "python-dotenv": "dotenv",
-        "beautifulsoup4": "bs4",
-        "opencv-python": "cv2",
-        "pyyaml": "yaml",
-        "python-dateutil": "dateutil",
-        "pymongo": "pymongo",
-        "attrs": "attr",
-    }
-
-    def _dep_import_names(
-        self, scenario: StressTestScenario,
-    ) -> set[str]:
-        """Return the set of import-level names for this scenario's deps.
-
-        E.g. target_dependencies=["scikit-learn", "pandas"] → {"sklearn", "pandas"}.
-        Returns empty set when there are no target deps (caller should skip
-        the filtering step).
-        """
-        deps = scenario.target_dependencies
-        if not deps:
-            return set()
-        names: set[str] = set()
-        for dep in deps:
-            lower = dep.lower()
-            if lower in self._PKG_TO_IMPORT:
-                names.add(self._PKG_TO_IMPORT[lower])
-            else:
-                # Default: replace hyphens with underscores
-                names.add(lower.replace("-", "_"))
-            # Also add the raw dep name — some packages import under their
-            # pip name (e.g. "requests", "flask").
-            names.add(lower.replace("-", "_"))
-        return names
-
-    @staticmethod
-    def _file_imports_any(
-        analysis: FileAnalysis,
-        dep_import_names: set[str],
-    ) -> bool:
-        """Return True if *analysis* imports any of the given dependency names."""
-        for imp in analysis.imports:
-            # imp.module is the top-level module, e.g. "langchain.chat_models"
-            top_level = imp.module.split(".")[0].lower()
-            if top_level in dep_import_names:
-                return True
-        return False
 
     def _check_failure_indicators(
         self,

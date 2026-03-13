@@ -39,7 +39,6 @@ from mycode.ingester import (
     FileAnalysis,
     FunctionFlow,
     FunctionInfo,
-    ImportInfo,
     IngestionResult,
 )
 from mycode.scenario import StressTestScenario
@@ -89,9 +88,7 @@ def _make_ingestion(files=None):
                     ),
                 ],
                 classes=[],
-                imports=[
-                    ImportInfo(module="flask", names=["Flask"], is_from_import=True),
-                ],
+                imports=[],
                 lines_of_code=30,
             ),
         ]
@@ -271,12 +268,40 @@ class TestExecute:
             returncode=0, stdout=harness_stdout, stderr="",
         )
 
+        # Each scenario targets a different file so function dedup doesn't
+        # collapse them into one.
         scenarios = [
-            _make_scenario(name="scenario_1"),
-            _make_scenario(name="scenario_2", category="memory_profiling"),
-            _make_scenario(name="scenario_3", category="edge_case_input"),
+            _make_scenario(name="scenario_1", test_config={
+                "target_files": ["mod_a.py"], "parameters": {},
+                "resource_limits": {}, "measurements": [],
+            }),
+            _make_scenario(name="scenario_2", category="memory_profiling", test_config={
+                "target_files": ["mod_b.py"], "parameters": {},
+                "resource_limits": {}, "measurements": [],
+            }),
+            _make_scenario(name="scenario_3", category="edge_case_input", test_config={
+                "target_files": ["mod_c.py"], "parameters": {},
+                "resource_limits": {}, "measurements": [],
+            }),
         ]
-        engine = ExecutionEngine(session, _make_ingestion())
+        ingestion = _make_ingestion(files=[
+            FileAnalysis(
+                file_path="mod_a.py",
+                functions=[FunctionInfo(name="func_a", file_path="mod_a.py", lineno=1, args=[])],
+                lines_of_code=10,
+            ),
+            FileAnalysis(
+                file_path="mod_b.py",
+                functions=[FunctionInfo(name="func_b", file_path="mod_b.py", lineno=1, args=[])],
+                lines_of_code=10,
+            ),
+            FileAnalysis(
+                file_path="mod_c.py",
+                functions=[FunctionInfo(name="func_c", file_path="mod_c.py", lineno=1, args=[])],
+                lines_of_code=10,
+            ),
+        ])
+        engine = ExecutionEngine(session, ingestion)
         result = engine.execute(scenarios)
 
         assert len(result.scenario_results) == 3
@@ -330,10 +355,28 @@ class TestExecute:
 
         session.run_in_session.side_effect = side_effect
 
-        engine = ExecutionEngine(session, _make_ingestion())
+        ingestion = _make_ingestion(files=[
+            FileAnalysis(
+                file_path="a.py",
+                functions=[FunctionInfo(name="fa", file_path="a.py", lineno=1, args=[])],
+                lines_of_code=10,
+            ),
+            FileAnalysis(
+                file_path="b.py",
+                functions=[FunctionInfo(name="fb", file_path="b.py", lineno=1, args=[])],
+                lines_of_code=10,
+            ),
+        ])
+        engine = ExecutionEngine(session, ingestion)
         result = engine.execute([
-            _make_scenario(name="fail_scenario"),
-            _make_scenario(name="ok_scenario"),
+            _make_scenario(name="fail_scenario", test_config={
+                "target_files": ["a.py"], "parameters": {},
+                "resource_limits": {}, "measurements": [],
+            }),
+            _make_scenario(name="ok_scenario", test_config={
+                "target_files": ["b.py"], "parameters": {},
+                "resource_limits": {}, "measurements": [],
+            }),
         ])
 
         assert result.scenarios_failed == 1
@@ -1172,108 +1215,87 @@ class TestHarnessConfig:
         )
         assert async_func["is_async"] is True
 
-    def test_dep_filtering_restricts_functions_to_relevant_files(self, tmp_path):
-        """Functions from files that don't import the scenario's deps are excluded."""
+    def test_function_dedup_drops_redundant_scenarios(self, tmp_path):
+        """Scenarios whose functions are all already covered get dropped."""
         session = _make_session(tmp_path)
-        ingestion = _make_ingestion(files=[
-            FileAnalysis(
-                file_path="web.py",
-                functions=[
-                    FunctionInfo(name="handle_request", file_path="web.py", lineno=1, args=[]),
-                ],
-                imports=[
-                    ImportInfo(module="flask", names=["Flask"], is_from_import=True),
-                ],
-                lines_of_code=20,
-            ),
-            FileAnalysis(
-                file_path="ml.py",
-                functions=[
-                    FunctionInfo(name="train_model", file_path="ml.py", lineno=1, args=[]),
-                ],
-                imports=[
-                    ImportInfo(module="sklearn.ensemble", names=["RandomForestClassifier"], is_from_import=True),
-                ],
-                lines_of_code=20,
-            ),
-        ])
+        ingestion = _make_ingestion()  # has hello, process_data, _private_helper
         engine = ExecutionEngine(session, ingestion)
 
-        # Scenario targeting flask — should only get handle_request
-        flask_scenario = _make_scenario(
-            name="flask_stress",
-            test_config={
-                "parameters": {},
-                "resource_limits": {},
-                "measurements": [],
-            },
-        )
-        flask_scenario.target_dependencies = ["flask"]
-        config = engine._build_harness_config(flask_scenario)
-        func_names = [f["name"] for f in config["target_functions"]]
-        assert "handle_request" in func_names
-        assert "train_model" not in func_names
+        # 3 scenarios all targeting the same file/functions
+        scenarios = [
+            _make_scenario(name="flask_stress"),
+            _make_scenario(name="pandas_stress"),
+            _make_scenario(name="numpy_stress"),
+        ]
+        result = engine._deduplicate_by_function(scenarios)
+        # Only the first should survive — the rest are redundant
+        assert len(result) == 1
+        assert result[0].name == "flask_stress"
 
-        # Scenario targeting scikit-learn — should only get train_model
-        sklearn_scenario = _make_scenario(
-            name="sklearn_stress",
-            test_config={
-                "parameters": {},
-                "resource_limits": {},
-                "measurements": [],
-            },
-        )
-        sklearn_scenario.target_dependencies = ["scikit-learn"]
-        config = engine._build_harness_config(sklearn_scenario)
-        func_names = [f["name"] for f in config["target_functions"]]
-        assert "train_model" in func_names
-        assert "handle_request" not in func_names
-
-    def test_dep_filtering_falls_back_when_no_imports_match(self, tmp_path):
-        """When no files import the target dep, all functions are included."""
+    def test_function_dedup_keeps_coupling_scenarios(self, tmp_path):
+        """Coupling/behavior scenarios are never dropped by dedup."""
         session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+        engine = ExecutionEngine(session, ingestion)
+
+        coupling = _make_scenario(
+            name="coupling_stateset_foo",
+            test_config={
+                "behavior": "state_setter",
+                "coupling_source": "foo",
+                "parameters": {},
+                "resource_limits": {},
+                "measurements": [],
+            },
+        )
+        normal = _make_scenario(name="flask_stress")
+        result = engine._deduplicate_by_function([coupling, normal])
+        assert len(result) == 2
+        names = [s.name for s in result]
+        assert "coupling_stateset_foo" in names
+        assert "flask_stress" in names
+
+    def test_function_dedup_trims_partial_overlap(self, tmp_path):
+        """When a scenario has some new functions, keep it but trim."""
+        session = _make_session(tmp_path)
+        # First file has func_a, second has func_b
         ingestion = _make_ingestion(files=[
             FileAnalysis(
-                file_path="app.py",
+                file_path="mod_a.py",
                 functions=[
-                    FunctionInfo(name="do_stuff", file_path="app.py", lineno=1, args=[]),
+                    FunctionInfo(name="func_a", file_path="mod_a.py", lineno=1, args=[]),
                 ],
-                imports=[],  # no imports at all
+                lines_of_code=10,
+            ),
+            FileAnalysis(
+                file_path="mod_b.py",
+                functions=[
+                    FunctionInfo(name="func_b", file_path="mod_b.py", lineno=1, args=[]),
+                ],
                 lines_of_code=10,
             ),
         ])
         engine = ExecutionEngine(session, ingestion)
-        scenario = _make_scenario()
-        config = engine._build_harness_config(scenario)
-        func_names = [f["name"] for f in config["target_functions"]]
-        assert "do_stuff" in func_names
 
-    def test_dep_filtering_skipped_for_no_target_deps(self, tmp_path):
-        """Scenarios with no target_dependencies include all functions."""
-        session = _make_session(tmp_path)
-        ingestion = _make_ingestion(files=[
-            FileAnalysis(
-                file_path="app.py",
-                functions=[
-                    FunctionInfo(name="func_a", file_path="app.py", lineno=1, args=[]),
-                ],
-                imports=[],
-                lines_of_code=10,
-            ),
-        ])
-        engine = ExecutionEngine(session, ingestion)
-        scenario = _make_scenario(
-            name="generic_stress",
+        # First scenario covers func_a only (via target_files)
+        s1 = _make_scenario(
+            name="first",
             test_config={
+                "target_files": ["mod_a.py"],
                 "parameters": {},
                 "resource_limits": {},
                 "measurements": [],
             },
         )
-        scenario.target_dependencies = []
-        config = engine._build_harness_config(scenario)
-        func_names = [f["name"] for f in config["target_functions"]]
-        assert "func_a" in func_names
+        # Second scenario would cover both func_a and func_b
+        s2 = _make_scenario(name="second")
+        result = engine._deduplicate_by_function([s1, s2])
+        assert len(result) == 2
+        # s2 should have been trimmed to only func_b
+        assert "_dedup_target_functions" in result[1].test_config
+        trimmed_names = [f["name"] for f in result[1].test_config["_dedup_target_functions"]]
+        assert "func_b" in trimmed_names
+        assert "func_a" not in trimmed_names
 
 
 # ── Edge Case & Robustness Tests ──
