@@ -712,6 +712,43 @@ class TestConverseHandler:
             jobs_module.store = old_store
             routes_module.store = old_store
 
+    def test_converse_confirmation_includes_timeout(self, simple_ingestion):
+        """Final converse response includes timeout_per_scenario in constraints."""
+        from mycode.web.jobs import JobStore
+        from mycode.web.routes import handle_converse
+        import mycode.web.routes as routes_module
+        import mycode.web.jobs as jobs_module
+
+        s = JobStore()
+        job = s.create()
+        job.status = "preflight_complete"
+        job.ingestion = simple_ingestion
+        job.language = "python"
+        job.turn1_response = "A data pipeline for CSV files"
+
+        old_store = jobs_module.store
+        jobs_module.store = s
+        routes_module.store = s
+        try:
+            # Turn 3: extract constraints from text
+            resp = handle_converse(job.id, 3, "10 users, steady use, tabular data")
+            turn = 4
+            # Answer all follow-up questions until done
+            while not resp.done:
+                if resp.question:
+                    resp = handle_converse(job.id, turn, "1")  # pick first option
+                    turn += 1
+
+            assert resp.done
+            assert resp.constraints is not None
+            # timeout_per_scenario MUST be in the constraints dict
+            assert "timeout_per_scenario" in resp.constraints
+            assert resp.constraints["timeout_per_scenario"] is not None
+            assert resp.constraints["timeout_per_scenario"] >= 60
+        finally:
+            jobs_module.store = old_store
+            routes_module.store = old_store
+
     def test_converse_invalid_turn(self, simple_ingestion):
         from mycode.web.jobs import JobStore
         from mycode.web.routes import handle_converse

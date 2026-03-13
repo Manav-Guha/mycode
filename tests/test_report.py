@@ -3455,14 +3455,38 @@ class TestRuntimeContextFindings:
                     description=(
                         "This function could not be tested in isolation, but "
                         "myCode tested your application under load via HTTP — "
-                        "see HTTP findings above."
+                        "see HTTP findings in this report."
                     ),
                 ),
             ],
         )
         text = report.as_text()
         assert "tested your application under load via HTTP" in text
+        assert "in this report" in text
+        assert "above" not in text.split("HTTP")[1] if "HTTP" in text else True
         assert "planned for v2" not in text
+
+    def test_runtime_context_http_description_position_neutral(self):
+        """Runtime context description uses 'in this report', never 'above'."""
+        from mycode.engine import ExecutionEngineResult, ScenarioResult
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="flask_concurrent",
+                    scenario_category="concurrent_execution",
+                    status="skipped",
+                    failure_reason="runtime_context_required",
+                ),
+            ],
+            http_ran=True,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(execution, IngestionResult(project_path="/tmp/t"), [])
+        # The runtime context description should say "in this report"
+        assert len(report.incomplete_tests) >= 1
+        ctx_finding = report.incomplete_tests[0]
+        assert "in this report" in ctx_finding.description
+        assert "above" not in ctx_finding.description
 
     def test_runtime_context_without_http_ran_no_http_reference(self):
         """When HTTP testing didn't run, no HTTP reference in message."""
