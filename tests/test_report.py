@@ -537,6 +537,78 @@ class TestVersionDiscrepancies:
         assert not any("eslint" in v for v in report.version_flags)
 
 
+# ── JS Dependency Report Language Tests ──
+
+
+class TestJsDependencyReportLanguage:
+    """Test that JS projects get 'without stress profiles' (INFO) not 'missing' (WARNING)."""
+
+    def test_js_missing_deps_are_info_not_warning(self, clean_execution):
+        """JS project with unrecognised deps should get INFO finding."""
+        ingestion = IngestionResult(
+            project_path="/tmp/x",
+            files_analyzed=1,
+            dependencies=[
+                DependencyInfo(name="@vercel/analytics", is_missing=True),
+                DependencyInfo(name="@radix-ui/react-dialog", is_missing=True),
+                DependencyInfo(name="@tanstack/react-query", is_missing=True),
+                DependencyInfo(name="next", installed_version="14.0.0"),
+                DependencyInfo(name="react", installed_version="18.2.0"),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(clean_execution, ingestion, [])
+
+        missing_findings = [
+            f for f in report.findings
+            if "without stress profiles" in f.title.lower()
+            or "missing" in f.title.lower()
+        ]
+        assert len(missing_findings) == 1
+        f = missing_findings[0]
+        assert "without stress profiles" in f.title
+        assert f.severity == "info"
+        assert "don't have myCode stress profiles" in f.description
+
+    def test_python_missing_deps_still_warning(self, clean_execution):
+        """Python project with missing deps should keep WARNING severity."""
+        ingestion = IngestionResult(
+            project_path="/tmp/x",
+            files_analyzed=1,
+            dependencies=[
+                DependencyInfo(name="pandas", is_missing=True),
+                DependencyInfo(name="numpy", is_missing=True),
+                DependencyInfo(name="flask", installed_version="2.0.0"),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(clean_execution, ingestion, [])
+
+        missing_findings = [
+            f for f in report.findings
+            if "missing" in f.title.lower()
+        ]
+        assert len(missing_findings) == 1
+        assert missing_findings[0].severity == "warning"
+        assert "declared in requirements" in missing_findings[0].description
+
+    def test_js_version_flags_say_no_profile(self, clean_execution):
+        """JS project version flags should say 'no stress profile available'."""
+        ingestion = IngestionResult(
+            project_path="/tmp/x",
+            files_analyzed=1,
+            dependencies=[
+                DependencyInfo(name="@vercel/og", is_missing=True),
+                DependencyInfo(name="next", installed_version="14.0.0"),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(clean_execution, ingestion, [])
+
+        assert any("no stress profile available" in v for v in report.version_flags)
+        assert not any("declared but not installed" in v for v in report.version_flags)
+
+
 # ── Unrecognized Dependencies Tests ──
 
 

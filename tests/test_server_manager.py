@@ -969,3 +969,177 @@ class TestStreamlitDepFallback:
 
         result = _detect_python_framework(ingestion, tmp_path)
         assert result is None
+
+
+# ── Next.js Detection Tests ──
+
+
+class TestNextjsDetection:
+    """Tests for Next.js framework detection and startup."""
+
+    def test_detects_nextjs_with_config_and_dep(self, tmp_path):
+        """next in deps + next.config.js → detected as nextjs."""
+        (tmp_path / "next.config.js").write_text("module.exports = {};")
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "page.tsx").write_text("export default function Home() {}")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="next"),
+                DependencyInfo(name="react"),
+            ],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "nextjs"
+
+    def test_detects_nextjs_with_pages_dir(self, tmp_path):
+        """next dep + pages/ dir (no config) → detected."""
+        (tmp_path / "pages").mkdir()
+        (tmp_path / "pages" / "index.js").write_text("export default function Home() {}")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="next")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "nextjs"
+        assert result.entry_file == "pages/index.js"
+
+    def test_detects_nextjs_with_app_dir(self, tmp_path):
+        """next dep + app/ dir → detected."""
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "page.tsx").write_text("export default function Home() {}")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="next")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "nextjs"
+        assert result.entry_file == "app/page.tsx"
+
+    def test_detects_nextjs_with_src_app_dir(self, tmp_path):
+        """next dep + src/app/ dir → detected."""
+        (tmp_path / "src" / "app").mkdir(parents=True)
+        (tmp_path / "src" / "app" / "page.tsx").write_text("export default function Home() {}")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="next")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "nextjs"
+        assert result.entry_file == "src/app/page.tsx"
+
+    def test_no_nextjs_without_dep(self, tmp_path):
+        """next.config.js without next dep → not detected."""
+        (tmp_path / "next.config.js").write_text("module.exports = {};")
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "page.tsx").write_text("export default function Home() {}")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="react")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is None
+
+    def test_no_nextjs_with_dep_but_no_dirs(self, tmp_path):
+        """next dep but no config/pages/app dirs → not detected."""
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="next")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is None
+
+    def test_express_takes_priority_over_nextjs(self, tmp_path):
+        """Express with app.listen should be detected instead of Next.js."""
+        (tmp_path / "next.config.js").write_text("module.exports = {};")
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "page.tsx").write_text("export default function Home() {}")
+        server_js = tmp_path / "server.js"
+        server_js.write_text(textwrap.dedent("""\
+            const express = require('express');
+            const app = express();
+            app.listen(3000);
+        """))
+        fa = _make_file_analysis("server.js", imports=[ImportInfo(module="express")])
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[fa],
+            dependencies=[
+                DependencyInfo(name="next"),
+                DependencyInfo(name="express"),
+            ],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "express"
+
+    def test_nextjs_startup_command(self):
+        """nextjs framework builds correct npx next dev command."""
+        detection = FrameworkDetection(framework="nextjs", entry_file="next.config.js")
+        cmd, env = build_startup_command(detection, 3456)
+        assert cmd == ["npx", "next", "dev", "-p", "3456"]
+        assert env == {"PORT": "3456", "NODE_ENV": "development"}
+
+    def test_nextjs_health_check_url(self):
+        """nextjs uses root URL for health check."""
+        url = _health_check_url("nextjs", 3000)
+        assert url == "http://localhost:3000/"
+
+    def test_nextjs_startup_timeout_120s(self):
+        """Next.js should have a 120s startup timeout (dev server compiles)."""
+        assert _FRAMEWORK_STARTUP_TIMEOUTS["nextjs"] == 120
+
+
+class TestNpmStartFallback:
+    """Tests for the generic npm start fallback detection."""
+
+    def test_detects_npm_start_with_start_script(self, tmp_path):
+        """package.json with 'start' script → npm-start fallback."""
+        import json as _json
+        pkg = {"name": "my-app", "scripts": {"start": "node server.js"}}
+        (tmp_path / "package.json").write_text(_json.dumps(pkg))
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="some-lib")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "npm-start"
+        assert result.entry_file == "package.json"
+
+    def test_detects_npm_start_with_dev_script(self, tmp_path):
+        """package.json with 'dev' script → npm-start fallback."""
+        import json as _json
+        pkg = {"name": "my-app", "scripts": {"dev": "next dev"}}
+        (tmp_path / "package.json").write_text(_json.dumps(pkg))
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="some-lib")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "npm-start"
+
+    def test_npm_start_command(self):
+        """npm-start framework builds correct npm start command."""
+        detection = FrameworkDetection(framework="npm-start", entry_file="package.json")
+        cmd, env = build_startup_command(detection, 4000)
+        assert cmd == ["npm", "start"]
+        assert env == {"PORT": "4000"}
+
+    def test_npm_start_health_check_url(self):
+        """npm-start uses root URL for health check."""
+        url = _health_check_url("npm-start", 3000)
+        assert url == "http://localhost:3000/"

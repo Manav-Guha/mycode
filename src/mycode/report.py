@@ -1633,6 +1633,9 @@ class ReportGenerator:
         outdated: list[DependencyInfo] = []
         missing: list[DependencyInfo] = []
 
+        # Detect JS/TS project — npm scoped packages start with @
+        is_js = any(d.name.startswith("@") for d in ingestion.dependencies)
+
         for dep in ingestion.dependencies:
             if dep.is_dev:
                 continue
@@ -1643,9 +1646,16 @@ class ReportGenerator:
                 report.version_flags.append(msg)
                 outdated.append(dep)
             elif dep.is_missing:
-                report.version_flags.append(
-                    f"{dep.name}: declared but not installed"
-                )
+                if is_js:
+                    # npm packages aren't "missing" — myCode just can't
+                    # verify them via Python importlib.  Don't alarm.
+                    report.version_flags.append(
+                        f"{dep.name}: no stress profile available"
+                    )
+                else:
+                    report.version_flags.append(
+                        f"{dep.name}: declared but not installed"
+                    )
                 missing.append(dep)
 
         # Consolidated outdated finding
@@ -1673,27 +1683,45 @@ class ReportGenerator:
                 affected_dependencies=[d.name for d in outdated[:10]],
             ))
 
-        # Consolidated missing finding
+        # Consolidated missing/unprofiled finding
         if missing:
             names = [d.name for d in missing[:5]]
             n = len(missing)
             desc = ", ".join(names)
             if n > 5:
                 desc += f", and {n - 5} more"
-            desc += (
-                f" {'is' if n == 1 else 'are'} declared in requirements "
-                "but not installed. This may cause import failures under "
-                "certain code paths."
-            )
-            report.findings.append(Finding(
-                title=(
-                    f"{n} missing "
-                    f"{'dependency' if n == 1 else 'dependencies'}"
-                ),
-                severity="warning",
-                description=desc,
-                affected_dependencies=[d.name for d in missing[:10]],
-            ))
+            if is_js:
+                desc += (
+                    f" {'is' if n == 1 else 'are'} declared in your "
+                    "project but don't have myCode stress profiles yet. "
+                    "These dependencies were tested with generic patterns "
+                    "rather than targeted scenarios."
+                )
+                report.findings.append(Finding(
+                    title=(
+                        f"{n} "
+                        f"{'dependency' if n == 1 else 'dependencies'} "
+                        f"without stress profiles"
+                    ),
+                    severity="info",
+                    description=desc,
+                    affected_dependencies=[d.name for d in missing[:10]],
+                ))
+            else:
+                desc += (
+                    f" {'is' if n == 1 else 'are'} declared in requirements "
+                    "but not installed. This may cause import failures under "
+                    "certain code paths."
+                )
+                report.findings.append(Finding(
+                    title=(
+                        f"{n} missing "
+                        f"{'dependency' if n == 1 else 'dependencies'}"
+                    ),
+                    severity="warning",
+                    description=desc,
+                    affected_dependencies=[d.name for d in missing[:10]],
+                ))
 
         # From profile version_match
         for match in profile_matches:
@@ -2287,7 +2315,7 @@ class ReportGenerator:
 
         if report.unrecognized_deps:
             user_parts.append(
-                f"\n## Untested Dependencies\n"
+                f"\n## Dependencies Without Stress Profiles\n"
                 + ", ".join(report.unrecognized_deps[:10])
             )
 

@@ -205,6 +205,18 @@ def check_importability(
 # ── Gate Logic ──
 
 
+def _is_js_project(ingestion: IngestionResult) -> bool:
+    """Return True if the project has a package.json (JS/TS project)."""
+    for fa in ingestion.file_analyses:
+        if fa.file_path == "package.json" or fa.file_path.endswith("/package.json"):
+            return True
+    # Also check dependency names for npm-style scoped packages
+    for dep in ingestion.dependencies:
+        if dep.name.startswith("@"):
+            return True
+    return False
+
+
 def run_viability_gate(
     session: SessionManager,
     ingestion: IngestionResult,
@@ -224,6 +236,16 @@ def run_viability_gate(
     Returns:
         ViabilityResult with pass/fail and diagnostics.
     """
+    # ── JS/TS branch ──
+    # npm scoped packages (@scope/name) are almost never in the recognition
+    # list, so the Python import-based gate kills nearly every modern JS
+    # project.  For JS/TS, viability = package.json has dependencies.
+    if language in ("javascript", "js") or _is_js_project(ingestion):
+        return _run_js_viability_gate(
+            session, ingestion, language, is_containerised, framework,
+        )
+
+    # ── Python path (unchanged) ──
     non_dev = [d for d in ingestion.dependencies if not d.is_dev]
     missing = [d for d in non_dev if d.is_missing]
     installed = [d for d in non_dev if not d.is_missing]
@@ -293,6 +315,98 @@ def run_viability_gate(
             "Viability gate passed: install=%.0f%% import=%.0f%% syntax=%.0f%%",
             install_rate * 100, import_rate * 100, syntax_rate * 100,
         )
+
+    return result
+
+
+def _run_js_viability_gate(
+    session: SessionManager,
+    ingestion: IngestionResult,
+    language: str,
+    is_containerised: bool,
+    framework: str,
+) -> ViabilityResult:
+    """JS/TS viability gate — checks package.json has deps, skips import check.
+
+    npm scoped packages (@vercel/*, @t3-oss/*, etc.) are never in the Python
+    recognition list, so the standard import-based gate would fail almost
+    every modern JS/TS project.  Instead:
+      - node_modules/ exists → viable (deps already installed)
+      - package.json has ≥1 dependency entry → viable (npm install runs later)
+      - package.json has zero dependencies → fail with clear message
+    """
+    non_dev = [d for d in ingestion.dependencies if not d.is_dev]
+    all_deps = ingestion.dependencies
+
+    # Syntax rate still applies
+    total_files = ingestion.files_analyzed + ingestion.files_failed
+    syntax_rate = ingestion.files_analyzed / total_files if total_files > 0 else 1.0
+
+    # Check if node_modules exists (post npm install)
+    has_node_modules = False
+    try:
+        project_dir = session.project_copy_dir
+        if (project_dir / "node_modules").is_dir():
+            has_node_modules = True
+    except Exception:
+        pass
+
+    # Check dependency count
+    has_deps = len(all_deps) > 0
+
+    if not has_deps:
+        return ViabilityResult(
+            viable=False,
+            install_rate=0.0,
+            import_rate=0.0,
+            syntax_rate=syntax_rate,
+            reason="package.json contains no dependencies.",
+            language=language,
+            framework=framework,
+            declared_deps=[],
+        )
+
+    # JS projects are viable if they have dependencies (npm install
+    # happens during session setup, or node_modules already exists).
+    viable = syntax_rate >= SYNTAX_RATE_THRESHOLD
+
+    reasons: list[str] = []
+    if syntax_rate < SYNTAX_RATE_THRESHOLD:
+        reasons.append(
+            f"Only {ingestion.files_analyzed} of {total_files} source "
+            f"files could be parsed ({syntax_rate:.0%})."
+        )
+
+    declared_deps = [
+        {
+            "name": d.name,
+            "version": d.required_version or d.installed_version or "",
+        }
+        for d in non_dev
+    ]
+
+    result = ViabilityResult(
+        viable=viable,
+        install_rate=1.0,  # npm install is handled by session manager
+        import_rate=1.0 if has_node_modules else 0.8,  # don't penalise
+        syntax_rate=syntax_rate,
+        missing_deps=[],
+        unimportable_deps=[],
+        reason=" ".join(reasons),
+        suggest_docker=not viable and not is_containerised,
+        language=language,
+        framework=framework,
+        declared_deps=declared_deps,
+    )
+
+    if viable:
+        logger.info(
+            "JS viability gate passed: %d deps declared, "
+            "node_modules=%s, syntax=%.0f%%",
+            len(all_deps), has_node_modules, syntax_rate * 100,
+        )
+    else:
+        logger.warning("JS viability gate FAILED: %s", result.reason)
 
     return result
 

@@ -7,7 +7,7 @@ Phase 3: load driving).
 
 Supported frameworks:
   Python  — Streamlit, FastAPI, Flask
-  Node.js — Express, React (Create React App)
+  Node.js — Express, Next.js, React (Create React App), generic npm start
 
 Pure Python.  No LLM dependency.
 """
@@ -37,10 +37,12 @@ _IS_WINDOWS = sys.platform == "win32"
 # Default startup timeout — if the server isn't ready by this, it's a finding
 STARTUP_TIMEOUT_SECONDS = 30
 
-# Per-framework startup timeouts.  CRA/React dev servers run webpack
-# compilation on cold start which can take 2-4 minutes.
+# Per-framework startup timeouts.  CRA/React and Next.js dev servers
+# compile on cold start which can take 2-4 minutes.
 _FRAMEWORK_STARTUP_TIMEOUTS: dict[str, int] = {
     "react-scripts": 120,
+    "nextjs": 120,
+    "npm-start": 30,
 }
 
 # Health-check poll interval
@@ -249,19 +251,14 @@ def _detect_js_framework(
     ingestion: IngestionResult,
     project_dir: Path,
 ) -> Optional[FrameworkDetection]:
-    """Detect Express.js or React (Create React App) from ingestion data."""
-    # ── React / Create React App ──
-    # Detection: react-scripts in dependencies + src/index.js or src/App.js
-    dep_names = {d.name for d in ingestion.dependencies if not d.is_dev}
-    if "react-scripts" in dep_names:
-        for entry_candidate in ("src/index.js", "src/App.js", "src/index.tsx", "src/App.tsx"):
-            if (project_dir / entry_candidate).is_file():
-                return FrameworkDetection(
-                    framework="react-scripts",
-                    entry_file=entry_candidate,
-                )
+    """Detect JS server frameworks from ingestion data.
 
-    # ── Express.js ──
+    Priority: Express > Next.js > CRA/React > generic npm start.
+    """
+    all_dep_names = {d.name for d in ingestion.dependencies}
+    non_dev_names = {d.name for d in ingestion.dependencies if not d.is_dev}
+
+    # ── Express.js ──  (checked first — explicit server, most specific)
     express_candidates: list[str] = []
 
     for fa in ingestion.file_analyses:
@@ -292,6 +289,63 @@ def _detect_js_framework(
             framework="express",
             entry_file=entry,
         )
+
+    # ── Next.js ──
+    # Detection: 'next' in deps AND (next.config.* exists OR pages/ OR app/ dir)
+    if "next" in all_dep_names:
+        has_next_config = any(
+            (project_dir / cfg).exists()
+            for cfg in ("next.config.js", "next.config.mjs", "next.config.ts")
+        )
+        has_pages = (project_dir / "pages").is_dir()
+        has_app_dir = (project_dir / "app").is_dir()
+        has_src_pages = (project_dir / "src" / "pages").is_dir()
+        has_src_app = (project_dir / "src" / "app").is_dir()
+
+        if has_next_config or has_pages or has_app_dir or has_src_pages or has_src_app:
+            # Pick a representative entry file for metadata
+            entry = "next.config.js"
+            for candidate in (
+                "next.config.js", "next.config.mjs", "next.config.ts",
+                "pages/index.js", "pages/index.tsx",
+                "app/page.js", "app/page.tsx",
+                "src/pages/index.js", "src/pages/index.tsx",
+                "src/app/page.js", "src/app/page.tsx",
+            ):
+                if (project_dir / candidate).exists():
+                    entry = candidate
+                    break
+            return FrameworkDetection(
+                framework="nextjs",
+                entry_file=entry,
+            )
+
+    # ── React / Create React App ──
+    # Detection: react-scripts in dependencies + src/index.js or src/App.js
+    if "react-scripts" in non_dev_names:
+        for entry_candidate in ("src/index.js", "src/App.js", "src/index.tsx", "src/App.tsx"):
+            if (project_dir / entry_candidate).is_file():
+                return FrameworkDetection(
+                    framework="react-scripts",
+                    entry_file=entry_candidate,
+                )
+
+    # ── Generic npm start fallback ──
+    # If package.json has a "start" script and none of the above matched,
+    # try npm start with PORT env var.
+    pkg_json_path = project_dir / "package.json"
+    if pkg_json_path.is_file():
+        try:
+            import json as _json
+            pkg = _json.loads(_read_text_safe(pkg_json_path))
+            scripts = pkg.get("scripts", {})
+            if "start" in scripts or "dev" in scripts:
+                return FrameworkDetection(
+                    framework="npm-start",
+                    entry_file="package.json",
+                )
+        except Exception:
+            pass
 
     return None
 
@@ -388,9 +442,19 @@ def build_startup_command(
         env = {"PORT": str(port)}
         return cmd, env
 
+    if fw == "nextjs":
+        cmd = ["npx", "next", "dev", "-p", str(port)]
+        env = {"PORT": str(port), "NODE_ENV": "development"}
+        return cmd, env
+
     if fw == "react-scripts":
         cmd = ["npx", "react-scripts", "start"]
         env = {"PORT": str(port), "BROWSER": "none"}
+        return cmd, env
+
+    if fw == "npm-start":
+        cmd = ["npm", "start"]
+        env = {"PORT": str(port)}
         return cmd, env
 
     raise ValueError(f"Unsupported framework: {fw}")
@@ -403,7 +467,7 @@ def _health_check_url(framework: str, port: int) -> str:
     """Return the URL to poll for readiness."""
     if framework in ("fastapi", "flask", "express"):
         return f"http://localhost:{port}/health"
-    # Streamlit and React dev server serve HTML at root
+    # Streamlit, React, Next.js, and generic servers serve at root
     return f"http://localhost:{port}/"
 
 

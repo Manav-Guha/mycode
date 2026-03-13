@@ -17,14 +17,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mycode.ingester import DependencyInfo, IngestionResult
+from mycode.ingester import DependencyInfo, FileAnalysis, IngestionResult
 from mycode.session import SessionResult
 from mycode.viability import (
     IMPORT_RATE_THRESHOLD,
     INSTALL_RATE_THRESHOLD,
     SYNTAX_RATE_THRESHOLD,
     ViabilityResult,
+    _is_js_project,
     _python_import_name,
+    _run_js_viability_gate,
     build_baseline_failed_text,
     check_importability,
     check_js_imports,
@@ -53,6 +55,7 @@ def _make_ingestion(
     deps: list[DependencyInfo] | None = None,
     files_analyzed: int = 10,
     files_failed: int = 0,
+    file_analyses: list | None = None,
 ) -> IngestionResult:
     """Create an IngestionResult with the given dep/file counts."""
     return IngestionResult(
@@ -60,7 +63,7 @@ def _make_ingestion(
         dependencies=deps or [],
         files_analyzed=files_analyzed,
         files_failed=files_failed,
-        file_analyses=[],
+        file_analyses=file_analyses or [],
         total_lines=100,
     )
 
@@ -531,6 +534,136 @@ class TestBaselineFailedReport:
         for line in lines:
             assert not line.startswith("# "), f"Found markdown header: {line}"
             assert not line.startswith("## "), f"Found markdown header: {line}"
+
+
+# ── Test: JS/TS Viability Gate ──
+
+
+class TestIsJsProject:
+    """Test JS/TS project detection."""
+
+    def test_detects_package_json_in_file_analyses(self):
+        ingestion = _make_ingestion(file_analyses=[
+            FileAnalysis(file_path="package.json"),
+        ])
+        assert _is_js_project(ingestion) is True
+
+    def test_detects_scoped_npm_packages(self):
+        deps = [_make_dep("@vercel/analytics"), _make_dep("react")]
+        ingestion = _make_ingestion(deps)
+        assert _is_js_project(ingestion) is True
+
+    def test_python_project_not_detected(self):
+        deps = [_make_dep("flask"), _make_dep("requests")]
+        ingestion = _make_ingestion(deps)
+        assert _is_js_project(ingestion) is False
+
+    def test_empty_project_not_detected(self):
+        ingestion = _make_ingestion([])
+        assert _is_js_project(ingestion) is False
+
+
+class TestJsViabilityGate:
+    """Test JS/TS viability gate — no Python import checking."""
+
+    def test_passes_with_scoped_npm_packages(self):
+        """20 scoped npm packages + 2 recognised should pass."""
+        deps = [
+            _make_dep("@vercel/analytics"),
+            _make_dep("@vercel/og"),
+            _make_dep("@t3-oss/env-nextjs"),
+            _make_dep("@tanstack/react-query"),
+            _make_dep("@radix-ui/react-dialog"),
+            _make_dep("@radix-ui/react-dropdown-menu"),
+            _make_dep("@radix-ui/react-slot"),
+            _make_dep("@radix-ui/react-tabs"),
+            _make_dep("@hookform/resolvers"),
+            _make_dep("@auth/prisma-adapter"),
+            _make_dep("@prisma/client"),
+            _make_dep("@trpc/client"),
+            _make_dep("@trpc/server"),
+            _make_dep("@trpc/react-query"),
+            _make_dep("@types/node", is_dev=True),
+            _make_dep("@testing-library/react", is_dev=True),
+            _make_dep("@typescript-eslint/parser", is_dev=True),
+            _make_dep("@tailwindcss/forms"),
+            _make_dep("@emotion/react"),
+            _make_dep("@emotion/styled"),
+            # 2 recognised (non-scoped)
+            _make_dep("next"),
+            _make_dep("react"),
+        ]
+        ingestion = _make_ingestion(deps, files_analyzed=30, files_failed=0,
+                                    file_analyses=[FileAnalysis(file_path="package.json")])
+        session = MagicMock()
+
+        result = run_viability_gate(session, ingestion, "javascript")
+        assert result.viable is True
+        assert result.install_rate == 1.0
+        assert result.import_rate >= 0.8
+        assert result.language == "javascript"
+
+    def test_passes_without_node_modules(self):
+        """Should pass even without node_modules (npm install runs later)."""
+        deps = [_make_dep("next"), _make_dep("react"), _make_dep("@vercel/og")]
+        ingestion = _make_ingestion(deps, files_analyzed=5)
+        session = MagicMock()
+        session.project_copy_dir = Path("/nonexistent/path")
+
+        result = run_viability_gate(session, ingestion, "javascript")
+        assert result.viable is True
+
+    def test_fails_with_zero_dependencies(self):
+        """package.json with no dependencies should fail."""
+        ingestion = _make_ingestion([], files_analyzed=5,
+                                    file_analyses=[FileAnalysis(file_path="package.json")])
+        session = MagicMock()
+
+        result = run_viability_gate(session, ingestion, "javascript")
+        assert result.viable is False
+        assert "no dependencies" in result.reason
+
+    def test_fails_with_low_syntax_rate(self):
+        """JS gate still checks syntax rate."""
+        deps = [_make_dep("next"), _make_dep("react")]
+        ingestion = _make_ingestion(deps, files_analyzed=1, files_failed=10)
+        session = MagicMock()
+
+        result = run_viability_gate(session, ingestion, "javascript")
+        assert result.viable is False
+        assert "parsed" in result.reason
+
+    def test_does_not_run_python_imports(self):
+        """JS gate should NOT try to import packages in Python."""
+        deps = [_make_dep("@vercel/og"), _make_dep("next")]
+        ingestion = _make_ingestion(deps, files_analyzed=5)
+        session = MagicMock()
+
+        run_viability_gate(session, ingestion, "javascript")
+        # run_in_session should never be called (no import check)
+        session.run_in_session.assert_not_called()
+
+    def test_auto_detects_js_from_scoped_deps(self):
+        """Even if language='python', scoped deps trigger JS gate."""
+        deps = [_make_dep("@vercel/og"), _make_dep("next")]
+        ingestion = _make_ingestion(deps, files_analyzed=5)
+        session = MagicMock()
+
+        result = run_viability_gate(session, ingestion, "python")
+        # Should use JS gate (not try Python imports on npm packages)
+        assert result.viable is True
+        session.run_in_session.assert_not_called()
+
+    def test_python_project_unchanged(self):
+        """Python projects still use Python import-based gate."""
+        deps = [_make_dep("flask"), _make_dep("requests")]
+        ingestion = _make_ingestion(deps, files_analyzed=10)
+        session = _make_session({"flask": True, "requests": True})
+
+        result = run_viability_gate(session, ingestion, "python")
+        assert result.viable is True
+        # Should have called run_in_session for import check
+        session.run_in_session.assert_called_once()
 
 
 # ── Test: Pipeline Integration ──
