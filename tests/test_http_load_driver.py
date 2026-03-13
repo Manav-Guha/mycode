@@ -669,7 +669,7 @@ class TestRunHttpTestingPhase:
 
     @patch("mycode.http_load_driver.run_http_load_test")
     @patch("mycode.http_load_driver.detect_framework_entry")
-    def test_server_fail_adds_warning(self, mock_detect, mock_load):
+    def test_server_fail_generates_critical_finding(self, mock_detect, mock_load):
         mock_detect.return_value = FrameworkDetection(
             framework="flask", entry_file="app.py", app_variable="app",
         )
@@ -687,7 +687,10 @@ class TestRunHttpTestingPhase:
         result = run_http_testing_phase(
             session, ingestion, execution, "python"
         )
-        assert any("server could not start" in w for w in result.warnings)
+        assert result.http_ran is True
+        assert len(result.http_findings) == 1
+        assert result.http_findings[0].severity == "critical"
+        assert "could not start" in result.http_findings[0].title.lower()
 
     @patch("mycode.http_load_driver.run_http_load_test")
     @patch("mycode.http_load_driver.detect_framework_entry")
@@ -847,6 +850,91 @@ class TestEnhancedFindings:
         )
         findings = http_results_to_findings(load_result)
         assert len(findings) == 0
+
+
+class TestServerStartupFailureFinding:
+    """Verify server startup failure generates a CRITICAL finding."""
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_startup_failure_critical_finding(self, mock_detect, mock_load):
+        """Server crash with no endpoints → CRITICAL 'could not start' finding."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="flask", entry_file="app.py",
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="flask",
+            endpoint_results=[],
+            server_crash=True,
+            startup_error="ModuleNotFoundError: No module named 'flask'",
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        assert result.http_ran is True
+        assert len(result.http_findings) == 1
+        finding = result.http_findings[0]
+        assert finding.severity == "critical"
+        assert "could not start" in finding.title.lower()
+        assert "flask" in finding.description.lower()
+        assert "ModuleNotFoundError" in finding.description
+        assert "No users can access your app" in finding.description
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_startup_failure_unknown_error(self, mock_detect, mock_load):
+        """Server crash with no startup_error → uses 'unknown error'."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="streamlit", entry_file="app.py",
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="streamlit",
+            endpoint_results=[],
+            server_crash=True,
+            startup_error="",
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        assert len(result.http_findings) == 1
+        assert "unknown error" in result.http_findings[0].description
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_startup_failure_no_extra_scenarios(self, mock_detect, mock_load):
+        """Server crash → no scenario results added, only finding."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="fastapi", entry_file="main.py",
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[],
+            server_crash=True,
+            startup_error="SyntaxError in main.py",
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        assert len(result.scenario_results) == 0
+        assert len(result.http_degradation_points) == 0
 
 
 class TestHttpRanIntegration:

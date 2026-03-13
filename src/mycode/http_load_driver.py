@@ -113,6 +113,7 @@ class HttpLoadResult:
     total_duration_ms: float = 0.0
     server_crash: bool = False
     server_crash_concurrency: int = 0
+    startup_error: str = ""  # populated when server fails to start
 
 
 # ── Load Levels ──
@@ -334,6 +335,7 @@ def run_http_load_test(
         return HttpLoadResult(
             framework=detection.framework,
             server_crash=True,
+            startup_error=server_result.error,
         )
 
     server = server_result.server
@@ -827,15 +829,30 @@ def run_http_testing_phase(
 
     if load_result is None:
         execution.warnings.append(
-            f"HTTP testing skipped: server could not start"
+            "HTTP testing skipped: server could not start"
         )
         return execution
 
-    # Server failed to start — add INFO finding and continue
+    # Server failed to start — generate CRITICAL finding
     if load_result.server_crash and not load_result.endpoint_results:
-        execution.warnings.append(
-            f"HTTP testing skipped: {detection.framework} server could not start"
+        deps = _FRAMEWORK_DEPS.get(
+            detection.framework, [detection.framework]
         )
+        error_detail = load_result.startup_error or "unknown error"
+        execution.http_findings.append(Finding(
+            title="Application server could not start",
+            severity="critical",
+            category="http_load_testing",
+            description=(
+                f"myCode detected a {detection.framework} application but "
+                f"the server failed to start: {error_detail}. Your "
+                f"application will not start on modern infrastructure. "
+                f"No users can access your app until this is resolved."
+            ),
+            affected_dependencies=list(deps),
+            _finding_type="scenario_failed",
+        ))
+        execution.http_ran = True
         return execution
 
     # Convert to scenario results and append

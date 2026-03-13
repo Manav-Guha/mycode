@@ -2000,7 +2000,10 @@ class TestProbeAndSkip:
 class TestIdenticalErrorDetection:
     """Tests for the post-execution identical-error-at-every-step detection."""
 
-    def _make_steps_output(self, error_counts, import_errors=None):
+    def _make_steps_output(
+        self, error_counts, import_errors=None,
+        error_type="ImportError", error_message="No module named 'yfinance'",
+    ):
         """Build harness JSON output with given error counts per step."""
         steps = []
         for i, ec in enumerate(error_counts):
@@ -2011,7 +2014,7 @@ class TestIdenticalErrorDetection:
                 "memory_peak_mb": 2.0,
                 "error_count": ec,
                 "errors": [
-                    {"type": "TypeError", "message": f"err {j}"}
+                    {"type": error_type, "message": error_message}
                     for j in range(ec)
                 ],
                 "resource_cap_hit": "",
@@ -2154,7 +2157,7 @@ class TestIdenticalErrorDetection:
                 "execution_time_ms": 10.0,
                 "memory_peak_mb": 2.0,
                 "error_count": 10,
-                "errors": [{"type": "TypeError", "message": "err"}] * 10,
+                "errors": [{"type": "ImportError", "message": "No module named 'yfinance'"}] * 10,
                 "resource_cap_hit": "",
             })
         for i in range(5, 7):
@@ -2188,5 +2191,140 @@ class TestIdenticalErrorDetection:
         sr = engine._execute_scenario(scenario)
 
         # The 5 real steps have identical errors → reclassified
+        assert sr.status == "skipped"
+        assert sr.failure_reason == "runtime_context_required"
+
+    def test_typeerror_not_reclassified(self, tmp_path):
+        """TypeError at every step is a data shape issue, NOT runtime context."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output(
+            [10] * 5,
+            error_type="TypeError",
+            error_message="expected str, got int",
+        )
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+        assert sr.status != "skipped"
+
+    def test_valueerror_not_reclassified(self, tmp_path):
+        """ValueError at every step is a data issue, NOT runtime context."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output(
+            [8] * 4,
+            error_type="ValueError",
+            error_message="invalid literal for int()",
+        )
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+        assert sr.status != "skipped"
+
+    def test_attributeerror_with_framework_keyword_reclassified(self, tmp_path):
+        """AttributeError mentioning 'st.' (Streamlit) → runtime context."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output(
+            [5] * 5,
+            error_type="AttributeError",
+            error_message="module 'streamlit' has no attribute 'session_state'",
+        )
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="memory_profiling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.status == "skipped"
+        assert sr.failure_reason == "runtime_context_required"
+
+    def test_attributeerror_without_framework_keyword_not_reclassified(self, tmp_path):
+        """AttributeError without framework keywords → real bug, NOT reclassified."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output(
+            [5] * 5,
+            error_type="AttributeError",
+            error_message="'NoneType' object has no attribute 'append'",
+        )
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="data_volume_scaling",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
+        assert sr.failure_reason == ""
+        assert sr.status != "skipped"
+
+    def test_connectionerror_reclassified(self, tmp_path):
+        """ConnectionError at every step → runtime context (needs server)."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+
+        output = self._make_steps_output(
+            [3] * 4,
+            error_type="ConnectionRefusedError",
+            error_message="Connection refused",
+        )
+        session.run_in_session.return_value = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n{output}\n{_RESULTS_END}",
+            stderr="",
+        )
+
+        engine = ExecutionEngine(session=session, ingestion=ingestion)
+        scenario = StressTestScenario(
+            name="test_scenario",
+            category="concurrent_access",
+            description="Test scenario",
+        )
+        sr = engine._execute_scenario(scenario)
+
         assert sr.status == "skipped"
         assert sr.failure_reason == "runtime_context_required"

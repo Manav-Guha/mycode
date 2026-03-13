@@ -238,6 +238,90 @@ _UNSUPPORTED_FRAMEWORKS = frozenset({
 })
 
 
+# Error types that indicate genuine runtime context dependence
+_CONTEXT_ERROR_TYPES = frozenset({
+    "ImportError", "ModuleNotFoundError",
+    "ConnectionError", "ConnectionRefusedError", "ConnectionResetError",
+})
+
+# Error types that indicate data shape issues (testable, not context)
+_DATA_ERROR_TYPES = frozenset({
+    "TypeError", "ValueError",
+})
+
+# Keywords in error messages that indicate context even for TypeError/NameError
+_CONTEXT_KEYWORDS = (
+    "streamlit", "yfinance", "plotly", "st.", "flask", "django",
+    "fastapi", "sqlalchemy", "session", "request", "app_context",
+    "current_app", "figure", "login_manager",
+)
+
+
+def _identical_errors_are_context(test_steps: list["StepResult"]) -> bool:
+    """Check whether identical errors across steps indicate runtime context failure.
+
+    Returns True if the dominant error type suggests missing runtime context
+    (ImportError, AttributeError on framework objects, ConnectionError, etc.).
+    Returns False if errors are predominantly TypeError/ValueError, which
+    indicate data shape issues — these are testable functions that need
+    better synthetic data, not missing context.
+    """
+    # Collect all error types from test steps
+    error_types: dict[str, int] = {}
+    error_messages: list[str] = []
+    for step in test_steps:
+        for err in step.errors:
+            etype = err.get("type", "")
+            if etype:
+                error_types[etype] = error_types.get(etype, 0) + 1
+            msg = err.get("message", "")
+            if msg:
+                error_messages.append(msg.lower())
+
+    if not error_types:
+        # No typed errors — can't determine, default to context
+        return True
+
+    # Find the dominant error type
+    dominant_type = max(error_types, key=error_types.get)
+    total = sum(error_types.values())
+    dominant_pct = error_types[dominant_type] / total if total else 0
+
+    # Clear context errors — always reclassify
+    if dominant_type in _CONTEXT_ERROR_TYPES:
+        return True
+
+    # AttributeError: context only if referencing framework objects
+    if dominant_type == "AttributeError":
+        combined = " ".join(error_messages)
+        for kw in _CONTEXT_KEYWORDS:
+            if kw in combined:
+                return True
+        # Generic AttributeError without framework refs — could be data issue
+        return False
+
+    # RuntimeError: context if about event loops / app context
+    if dominant_type == "RuntimeError":
+        combined = " ".join(error_messages)
+        for pat in ("event loop", "application context", "working outside",
+                     "no current event loop", "missing server", "thread"):
+            if pat in combined:
+                return True
+        return False
+
+    # TypeError / ValueError — data shape issues, NOT context
+    if dominant_type in _DATA_ERROR_TYPES:
+        # Exception: if error messages reference framework objects
+        combined = " ".join(error_messages)
+        for kw in _CONTEXT_KEYWORDS:
+            if kw in combined:
+                return True
+        return False
+
+    # Unknown error types — default to context to preserve existing behavior
+    return True
+
+
 def _classify_harness_failure(stderr: str, scenario_name: str = "") -> str:
     """Classify a harness failure by examining stderr content.
 
@@ -831,9 +915,14 @@ class ExecutionEngine:
         # ── Post-execution check: identical errors at every step ──
         # If every test step (excluding module_import and time-budget skips)
         # has errors, and the error count is the same across all of them,
-        # this is NOT a scaling failure — it's a function that fails
-        # identically regardless of load, indicating runtime context
-        # dependence.
+        # this may indicate runtime context dependence (function fails
+        # identically regardless of load).
+        #
+        # However, TypeError/ValueError typically indicate data shape
+        # issues (e.g. int passed where DataFrame expected) — these are
+        # testable functions that need better synthetic data, NOT missing
+        # runtime context.  Only reclassify when error types indicate
+        # genuine context dependence.
         test_steps = [
             s for s in steps
             if s.step_name != "module_import"
@@ -843,6 +932,7 @@ class ExecutionEngine:
             len(test_steps) >= 3
             and all(s.error_count > 0 for s in test_steps)
             and len({s.error_count for s in test_steps}) == 1
+            and _identical_errors_are_context(test_steps)
         ):
             return ScenarioResult(
                 scenario_name=scenario.name,
