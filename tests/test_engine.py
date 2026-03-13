@@ -2820,7 +2820,11 @@ class TestBrowserOnlySkip:
         assert result.scenario_results[0].failure_reason != "browser_framework"
 
     def test_nextjs_not_browser_only(self, tmp_path):
-        """Next.js project (next + react + react-dom, no express) → NOT browser-only."""
+        """Next.js project (next + react + react-dom, no express) → NOT browser-only.
+
+        Uses a .js file to verify the project-level gate doesn't fire.
+        (.tsx files are separately skipped at the scenario level by Fix F1.)
+        """
         session = _make_session(tmp_path)
         version_result = SessionResult(
             returncode=0, stdout="v20.11.0\n", stderr="",
@@ -2838,8 +2842,8 @@ class TestBrowserOnlySkip:
             files_analyzed=1,
             file_analyses=[
                 FileAnalysis(
-                    file_path="app/page.tsx",
-                    functions=[FunctionInfo(name="Home", file_path="app/page.tsx", lineno=1, args=[])],
+                    file_path="utils.js",
+                    functions=[FunctionInfo(name="helper", file_path="utils.js", lineno=1, args=[])],
                     classes=[], imports=[], lines_of_code=10,
                 ),
             ],
@@ -2946,6 +2950,231 @@ class TestBrowserOnlySkip:
         result = engine.execute(scenarios)
         assert result.scenario_results[0].status == "skipped"
         assert result.scenario_results[0].failure_reason == "browser_framework"
+
+
+# ── Per-Scenario TypeScript/JSX Skip Tests ──
+
+
+class TestPerScenarioTsxSkip:
+    """Test that scenarios targeting .ts/.tsx/.jsx files skip with browser_framework."""
+
+    def test_tsx_files_skipped(self, tmp_path):
+        """Scenarios targeting .tsx files → browser_framework skip (not crash)."""
+        session = _make_session(tmp_path)
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        ingestion = IngestionResult(
+            project_path="/fake/nextjs-app",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="app/page.tsx",
+                    functions=[FunctionInfo(name="Home", file_path="app/page.tsx", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="next"),
+                DependencyInfo(name="react"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_tsx", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        sr = result.scenario_results[0]
+        assert sr.status == "skipped"
+        assert sr.failure_reason == "browser_framework"
+        assert "transpiler" in sr.summary.lower() or "TypeScript" in sr.summary
+
+    def test_ts_files_skipped(self, tmp_path):
+        """Scenarios targeting .ts files → browser_framework skip."""
+        session = _make_session(tmp_path)
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        ingestion = IngestionResult(
+            project_path="/fake/nextjs-app",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="app/api/todos/route.ts",
+                    functions=[FunctionInfo(name="GET", file_path="app/api/todos/route.ts", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="next"),
+                DependencyInfo(name="react"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_ts", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].status == "skipped"
+        assert result.scenario_results[0].failure_reason == "browser_framework"
+
+    def test_plain_js_files_not_skipped(self, tmp_path):
+        """Scenarios targeting .js files → NOT skipped (Node can require them)."""
+        session = _make_session(tmp_path)
+        version_result = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        ingestion = IngestionResult(
+            project_path="/fake/express-app",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="server.js",
+                    functions=[FunctionInfo(name="handler", file_path="server.js", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="express"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_js", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].failure_reason != "browser_framework"
+
+    def test_mixed_js_and_tsx_trims_tsx(self, tmp_path):
+        """Scenario with both .js and .tsx functions → .tsx trimmed, .js kept."""
+        session = _make_session(tmp_path)
+        version_result = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        ingestion = IngestionResult(
+            project_path="/fake/nextjs-app",
+            files_analyzed=2,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="utils.js",
+                    functions=[FunctionInfo(name="helper", file_path="utils.js", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+                FileAnalysis(
+                    file_path="app/page.tsx",
+                    functions=[FunctionInfo(name="Home", file_path="app/page.tsx", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="next"),
+                DependencyInfo(name="react"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_mixed", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        # Should NOT be skipped — the .js function is requireable
+        assert result.scenario_results[0].failure_reason != "browser_framework"
+
+    def test_coupling_scenarios_not_skipped(self, tmp_path):
+        """Coupling/behavior scenarios have no target_functions → always run."""
+        session = _make_session(tmp_path)
+        version_result = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        ingestion = IngestionResult(
+            project_path="/fake/nextjs-app",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="app/page.tsx",
+                    functions=[FunctionInfo(name="Home", file_path="app/page.tsx", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="next"),
+                DependencyInfo(name="react"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_coupling", category="component_coupling", description="Test",
+                test_config={"behavior": "shared_state_coupling"},
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].failure_reason != "browser_framework"
+
+    def test_python_project_unaffected(self, tmp_path):
+        """Python project → no TSX skip logic triggered."""
+        session = _make_session(tmp_path)
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.return_value = harness_result
+        ingestion = IngestionResult(
+            project_path="/fake/flask-app",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="app.py",
+                    functions=[FunctionInfo(name="index", file_path="app.py", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="flask"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="python")
+        scenarios = [
+            StressTestScenario(
+                name="test_py", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].failure_reason != "browser_framework"
 
 
 # ── User Timeout Override Tests ──

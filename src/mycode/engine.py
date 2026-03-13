@@ -743,6 +743,37 @@ class ExecutionEngine:
         )
         harness_config = self._build_harness_config(scenario)
 
+        # Per-scenario skip: JS/TS files that Node.js can't require() natively.
+        # .ts, .tsx, .jsx need a transpiler (tsc, babel) — plain `node` crashes.
+        # Coupling/behavior scenarios (no target_functions) still run fine.
+        if is_js and not harness_config.get("behavior"):
+            target_funcs = harness_config.get("target_functions", [])
+            if target_funcs:
+                _NEEDS_TRANSPILE = (".ts", ".tsx", ".jsx", ".mts", ".cts")
+                requireable = [
+                    f for f in target_funcs
+                    if not f["module"].endswith(_NEEDS_TRANSPILE)
+                ]
+                if not requireable:
+                    total_ms = (time.perf_counter() - start) * 1000
+                    return ScenarioResult(
+                        scenario_name=scenario.name,
+                        scenario_category=scenario.category,
+                        status="skipped",
+                        total_execution_time_ms=total_ms,
+                        summary=(
+                            "TypeScript/JSX files require a transpiler "
+                            "— testing via HTTP instead."
+                        ),
+                        failure_reason="browser_framework",
+                    )
+                # If only some functions need transpilation, keep the rest
+                if len(requireable) < len(target_funcs):
+                    harness_config["target_functions"] = requireable
+                    harness_config["target_modules"] = list({
+                        f["module"] for f in requireable
+                    })
+
         if is_js:
             harness_content = self._build_js_harness(
                 scenario.category,
