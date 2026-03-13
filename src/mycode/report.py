@@ -697,7 +697,7 @@ def _runtime_ctx_explanation(http_ran: bool) -> str:
         return (
             "These functions could not be tested in isolation, but myCode "
             "tested your application under load via HTTP — see HTTP "
-            "findings above."
+            "findings in this report."
         )
     return (
         "These functions require runtime context (e.g. a running Streamlit "
@@ -1051,7 +1051,7 @@ class ReportGenerator:
             _runtime_ctx_desc = (
                 "This function could not be tested in isolation, but "
                 "myCode tested your application under load via HTTP — "
-                "see HTTP findings above."
+                "see HTTP findings in this report."
             )
         else:
             _runtime_ctx_desc = (

@@ -296,6 +296,7 @@ function formatConstraints(c) {
     if (c.usage_pattern) parts.push(c.usage_pattern.replace("_", " ") + " usage");
     if (c.deployment_context) parts.push(c.deployment_context.replace("_", " "));
     if (c.data_type) parts.push(c.data_type.replace("_", " ") + " data");
+    if (c.timeout_per_scenario) parts.push(`${c.timeout_per_scenario}s per test`);
     return parts.length ? "Testing for: " + parts.join(", ") + "." : "";
 }
 
