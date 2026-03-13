@@ -165,6 +165,7 @@ class DiagnosticReport:
     _data_type_detail: str = ""
     _data_type_note: str = ""
     _max_payload_mb: float | None = None
+    _timeout_per_scenario: int | None = None
     baseline_failed: bool = False
     _baseline_report_text: str = ""
     http_ran: bool = False
@@ -913,6 +914,8 @@ class ReportGenerator:
                 report._data_type_detail = constraints.data_type_detail
             if constraints.max_payload_mb is not None:
                 report._max_payload_mb = constraints.max_payload_mb
+            if constraints.timeout_per_scenario is not None:
+                report._timeout_per_scenario = constraints.timeout_per_scenario
 
             # Build data-type methodology note
             if constraints.data_type and constraints.data_type != "mixed":
@@ -2189,6 +2192,8 @@ class ReportGenerator:
             ctx_parts.append(
                 _usage_labels.get(report._usage_pattern, report._usage_pattern)
             )
+        if report._timeout_per_scenario:
+            ctx_parts.append(f"{report._timeout_per_scenario}s per test")
         if ctx_parts:
             parts.append(
                 f"Results assessed relative to: {', '.join(ctx_parts)}."

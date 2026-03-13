@@ -3616,3 +3616,53 @@ class TestUserTimeoutInReport:
         # The report should show 0 passed, 0 failed (user timeout excluded)
         assert report.scenarios_passed == 0
         assert report.scenarios_failed == 0
+
+
+class TestTimeoutInReportContext:
+    """Tests for timeout_per_scenario appearing in the report summary."""
+
+    def test_timeout_in_summary_context(self):
+        """timeout_per_scenario appears in the 'Results assessed relative to' line."""
+        from mycode.constraints import OperationalConstraints
+        sr = ScenarioResult(
+            scenario_name="test_scenario",
+            scenario_category="data_volume_scaling",
+            status="completed",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_completed=1,
+        )
+        constraints = OperationalConstraints(
+            user_scale=100,
+            usage_pattern="sustained",
+            timeout_per_scenario=120,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+            constraints=constraints,
+        )
+        text = report.as_text()
+        assert "120s per test" in text
+
+    def test_no_timeout_no_mention(self):
+        """When timeout_per_scenario is None, it doesn't appear in summary."""
+        from mycode.constraints import OperationalConstraints
+        sr = ScenarioResult(
+            scenario_name="test_scenario",
+            scenario_category="data_volume_scaling",
+            status="completed",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_completed=1,
+        )
+        constraints = OperationalConstraints(user_scale=100)
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+            constraints=constraints,
+        )
+        text = report.as_text()
+        assert "per test" not in text

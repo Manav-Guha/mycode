@@ -306,6 +306,7 @@ def drive_endpoint(
     req: HttpTestRequest,
     levels: list[int],
     server: ServerInfo,
+    deadline: Optional[float] = None,
 ) -> EndpointLoadResult:
     """Drive progressive load against a single endpoint.
 
@@ -313,10 +314,16 @@ def drive_endpoint(
       - Error rate > 50%
       - Median response time > 10s
       - Server process crashed
+      - Time budget exceeded (*deadline* is a ``time.monotonic()`` timestamp)
     """
     result = EndpointLoadResult(endpoint=req)
 
     for concurrency in levels:
+        # Check time budget
+        if deadline is not None and time.monotonic() >= deadline:
+            logger.info("HTTP budget exceeded — returning partial results for %s", req.description)
+            break
+
         # Check if server is still alive
         if server.process.poll() is not None:
             result.breaking_point = concurrency
@@ -355,6 +362,7 @@ def run_http_load_test(
     ingestion: IngestionResult,
     constraints: Optional[OperationalConstraints] = None,
     on_progress: Optional[Callable[[str], None]] = None,
+    timeout: Optional[int] = None,
 ) -> Optional[HttpLoadResult]:
     """Run the complete HTTP load testing pipeline.
 
@@ -364,9 +372,14 @@ def run_http_load_test(
     4. Drive progressive load (Phase 3)
     5. Tear down server
 
+    If *timeout* is set, the entire phase (server start through load
+    driving) must complete within this budget.  Partial results are
+    returned if the budget is exceeded.
+
     Returns None if the server couldn't start.
     """
     _progress = on_progress or (lambda msg: None)
+    deadline = (time.monotonic() + timeout) if timeout else None
 
     _progress("Starting application server...")
     server_result = start_server(session, detection)
@@ -425,8 +438,13 @@ def run_http_load_test(
         # Drive load on each testable endpoint
         endpoint_results: list[EndpointLoadResult] = []
         for i, (req, _) in enumerate(testable):
+            # Check time budget before starting next endpoint
+            if deadline is not None and time.monotonic() >= deadline:
+                logger.info("HTTP budget exceeded — skipping remaining endpoints")
+                break
+
             _progress(f"Testing endpoint {i + 1}/{len(testable)}: {req.description}")
-            ep_result = drive_endpoint(req, levels, server)
+            ep_result = drive_endpoint(req, levels, server, deadline=deadline)
             endpoint_results.append(ep_result)
 
             # If server crashed, stop testing
@@ -969,16 +987,24 @@ def run_http_testing_phase(
         return execution
 
     _progress(f"Detected {detection.framework} server — running HTTP stress tests...")
+    logger.info("HTTP phase: detected %s, entry=%s", detection.framework, detection.entry_file)
 
+    http_timeout = (
+        constraints.timeout_per_scenario
+        if constraints and constraints.timeout_per_scenario
+        else None
+    )
     load_result = run_http_load_test(
         session=session,
         detection=detection,
         ingestion=ingestion,
         constraints=constraints,
         on_progress=on_progress,
+        timeout=http_timeout,
     )
 
     if load_result is None:
+        logger.warning("HTTP phase: run_http_load_test returned None")
         execution.warnings.append(
             "HTTP testing skipped: server could not start"
         )
@@ -1007,6 +1033,24 @@ def run_http_testing_phase(
         # messaging for incomplete tests should NOT reference HTTP findings
         return execution
 
+    # Log detailed results
+    logger.info(
+        "HTTP phase: server started in %.1fs, %d endpoints tested, crash=%s",
+        load_result.server_startup_time,
+        len(load_result.endpoint_results),
+        load_result.server_crash,
+    )
+    for ep in load_result.endpoint_results:
+        lvl_summary = ", ".join(
+            f"{l.concurrency}c={l.median_response_ms:.0f}ms/{l.error_rate:.0%}err"
+            for l in ep.levels
+        )
+        logger.info(
+            "HTTP phase: endpoint %s — %d levels [%s] break=%s",
+            ep.endpoint.description, len(ep.levels), lvl_summary,
+            ep.breaking_reason or "none",
+        )
+
     # Convert to scenario results and append
     http_scenarios = http_results_to_scenario_results(load_result)
     execution.scenario_results.extend(http_scenarios)
@@ -1018,6 +1062,37 @@ def run_http_testing_phase(
     execution.http_degradation_points = http_results_to_degradation_points(
         load_result,
     )
+
+    # If no findings were generated but endpoints were tested, add an INFO
+    # finding so the HTTP phase is visible in the report.
+    if not execution.http_findings and load_result.endpoint_results:
+        deps = _FRAMEWORK_DEPS.get(
+            load_result.framework, [load_result.framework]
+        )
+        max_concurrency = 0
+        for ep in load_result.endpoint_results:
+            if ep.levels:
+                max_concurrency = max(max_concurrency, ep.levels[-1].concurrency)
+        execution.http_findings.append(Finding(
+            title="Application handled HTTP load without issues",
+            severity="info",
+            category="http_load_testing",
+            description=(
+                f"myCode tested your {detection.framework} application "
+                f"under load up to {max_concurrency} concurrent "
+                f"connections. No degradation or errors were detected."
+            ),
+            affected_dependencies=list(deps),
+            _finding_type="clean",
+        ))
+
+    logger.info(
+        "HTTP phase: %d findings, %d degradation points, %d scenario results",
+        len(execution.http_findings),
+        len(execution.http_degradation_points),
+        len(http_scenarios),
+    )
+
     execution.http_ran = True
 
     # Update execution counts

@@ -1235,3 +1235,130 @@ class TestVarianceNote:
         findings = http_results_to_findings(load_result)
         for f in findings:
             assert "variance" not in f.description.lower()
+
+
+# ── Clean Endpoint INFO Finding ──
+
+
+class TestCleanEndpointFinding:
+    """Tests for INFO finding when HTTP testing produces no degradation."""
+
+    def test_clean_endpoint_produces_info_finding(self):
+        """run_http_testing_phase generates INFO finding when endpoint passes all levels."""
+        ep = EndpointLoadResult(
+            endpoint=HttpTestRequest(
+                method="GET", url="http://localhost:8501/",
+                description="GET / — Main Page",
+            ),
+            levels=[
+                _make_load_level(concurrency=1, median_ms=50.0, memory_mb=2.0),
+                _make_load_level(concurrency=10, median_ms=80.0, memory_mb=2.0),
+                _make_load_level(concurrency=25, median_ms=100.0, memory_mb=2.0),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="streamlit",
+            endpoint_results=[ep],
+            server_startup_time=2.0,
+        )
+
+        # No findings from threshold checks
+        findings = http_results_to_findings(load_result)
+        assert len(findings) == 0
+
+        # But run_http_testing_phase should add INFO finding
+        execution = ExecutionEngineResult()
+        with patch("mycode.http_load_driver.detect_framework_entry") as mock_detect, \
+             patch("mycode.http_load_driver.run_http_load_test") as mock_load:
+            from mycode.server_manager import FrameworkDetection
+            mock_detect.return_value = FrameworkDetection(
+                framework="streamlit", entry_file="app.py",
+            )
+            mock_load.return_value = load_result
+
+            from mycode.http_load_driver import run_http_testing_phase
+            result = run_http_testing_phase(
+                session=MagicMock(project_copy_dir=Path("/tmp")),
+                ingestion=MagicMock(project_path="/tmp"),
+                execution=execution,
+                language="python",
+            )
+
+        assert result.http_ran is True
+        assert len(result.http_findings) == 1
+        assert result.http_findings[0].severity == "info"
+        assert "without issues" in result.http_findings[0].title.lower()
+
+
+# ── HTTP Timeout Budget ──
+
+
+class TestHttpTimeoutBudget:
+    """Tests for time budget in drive_endpoint and run_http_load_test."""
+
+    def test_drive_endpoint_respects_deadline(self):
+        """drive_endpoint stops testing when deadline is passed."""
+        import time
+
+        req = HttpTestRequest(
+            method="GET", url="http://localhost:8000/",
+            description="GET /",
+        )
+        server = MagicMock()
+        server.process.poll.return_value = None  # still alive
+        server.process.pid = 12345
+
+        # Set deadline in the past so it triggers immediately
+        deadline = time.monotonic() - 1
+
+        with patch("mycode.http_load_driver.drive_load_level") as mock_drive:
+            result = drive_endpoint(
+                req, [1, 5, 10, 25], server, deadline=deadline,
+            )
+            # Should not have called drive_load_level at all
+            mock_drive.assert_not_called()
+            assert len(result.levels) == 0
+
+    def test_run_http_load_test_passes_timeout(self):
+        """run_http_load_test forwards timeout to drive_endpoint via deadline."""
+        from mycode.http_load_driver import run_http_load_test
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        detection = MagicMock(framework="streamlit", entry_file="app.py")
+        ingestion = MagicMock(project_path="/tmp/proj")
+
+        with patch("mycode.http_load_driver.start_server") as mock_start, \
+             patch("mycode.http_load_driver.discover_endpoints") as mock_disc, \
+             patch("mycode.http_load_driver.generate_requests") as mock_gen, \
+             patch("mycode.http_load_driver.probe_endpoints") as mock_probe, \
+             patch("mycode.http_load_driver.drive_endpoint") as mock_drive, \
+             patch("mycode.http_load_driver.stop_server"):
+
+            mock_server = MagicMock()
+            mock_server.port = 8501
+            mock_server.startup_time = 1.0
+            mock_server.process.poll.return_value = None
+            mock_start.return_value = MagicMock(
+                success=True, server=mock_server,
+            )
+            mock_disc.return_value = MagicMock()
+            mock_gen.return_value = [
+                HttpTestRequest(method="GET", url="http://localhost:8501/", description="GET /"),
+            ]
+            mock_probe.return_value = [MagicMock(testable=True, is_finding=False)]
+            mock_drive.return_value = EndpointLoadResult(
+                endpoint=mock_gen.return_value[0],
+            )
+
+            run_http_load_test(
+                session=session,
+                detection=detection,
+                ingestion=ingestion,
+                timeout=90,
+            )
+
+            # drive_endpoint should have been called with a deadline kwarg
+            assert mock_drive.called
+            call_kwargs = mock_drive.call_args
+            assert call_kwargs.kwargs.get("deadline") is not None
