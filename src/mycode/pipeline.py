@@ -33,6 +33,7 @@ from typing import Optional
 from mycode.constraints import OperationalConstraints
 from mycode.discovery import DiscoveryEngine
 from mycode.engine import ExecutionEngine, ExecutionEngineResult
+from mycode.http_load_driver import run_http_testing_phase
 from mycode.ingester import IngestionResult, ProjectIngester
 from mycode.interface import (
     ConversationalInterface,
@@ -466,6 +467,24 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                 session, ingestion, approved, result, language,
                 io=config.io,
             )
+
+            # ── Stage 8.5: HTTP Load Testing ──
+            if result.execution is not None:
+                try:
+                    result.execution = run_http_testing_phase(
+                        session=session,
+                        ingestion=ingestion,
+                        execution=result.execution,
+                        language=language,
+                        constraints=constraints,
+                        on_progress=lambda msg: (
+                            config.io.display(msg)
+                            if config.io else None
+                        ),
+                    )
+                except Exception as exc:
+                    logger.warning("HTTP testing failed: %s", exc)
+                    result.warnings.append(f"HTTP testing failed: {exc}")
 
             # Record execution
             if result.execution is not None:

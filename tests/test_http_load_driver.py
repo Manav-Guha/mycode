@@ -1,0 +1,743 @@
+"""Tests for http_load_driver.py — HTTP stress testing Phase 3.
+
+Tests load driving, degradation curve generation, finding generation,
+engine integration, and Streamlit page load testing.
+"""
+
+import textwrap
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from mycode.constraints import OperationalConstraints
+from mycode.endpoint_discovery import (
+    DiscoveredEndpoint,
+    DiscoveryResult,
+    HttpTestRequest,
+    ProbeResult,
+    StreamlitPage,
+)
+from mycode.engine import ExecutionEngineResult, ScenarioResult, StepResult
+from mycode.http_load_driver import (
+    EndpointLoadResult,
+    HttpLoadResult,
+    LoadLevelResult,
+    _build_http_summary,
+    _compute_load_levels,
+    _endpoint_to_finding,
+    _describe_response_curve,
+    _get_process_memory_mb,
+    _send_request,
+    drive_endpoint,
+    drive_load_level,
+    http_results_to_degradation_points,
+    http_results_to_findings,
+    http_results_to_scenario_results,
+    run_http_testing_phase,
+)
+from mycode.ingester import FileAnalysis, IngestionResult
+from mycode.report import DegradationPoint, Finding
+from mycode.server_manager import FrameworkDetection, ServerInfo
+
+
+# ── Helpers ──
+
+
+def _make_load_level(
+    concurrency=10, median_ms=50.0, p95_ms=100.0, error_rate=0.0,
+    error_count=0, memory_mb=50.0, total=10, successful=10,
+    server_crashed=False,
+):
+    return LoadLevelResult(
+        concurrency=concurrency,
+        total_requests=total,
+        successful_requests=successful,
+        error_count=error_count,
+        error_rate=error_rate,
+        median_response_ms=median_ms,
+        p95_response_ms=p95_ms,
+        memory_mb=memory_mb,
+        server_crashed=server_crashed,
+    )
+
+
+def _make_endpoint_result(
+    path="/api/test", method="GET", levels=None,
+    breaking_point=0, breaking_reason="",
+):
+    req = HttpTestRequest(
+        method=method,
+        url=f"http://localhost:8000{path}",
+        description=f"{method} {path}",
+    )
+    return EndpointLoadResult(
+        endpoint=req,
+        levels=levels or [],
+        breaking_point=breaking_point,
+        breaking_reason=breaking_reason,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Load Level Computation
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestComputeLoadLevels:
+    def test_default_levels(self):
+        levels = _compute_load_levels(None)
+        assert levels == [1, 5, 10, 25, 50, 100]
+
+    def test_user_scale_sets_upper_bound(self):
+        c = OperationalConstraints(user_scale=20)
+        levels = _compute_load_levels(c)
+        assert 20 in levels
+        assert 60 in levels  # 3x
+        assert all(l <= 60 for l in levels)
+
+    def test_user_scale_small(self):
+        c = OperationalConstraints(user_scale=5)
+        levels = _compute_load_levels(c)
+        assert 5 in levels
+        assert 15 in levels  # 3x
+        assert 1 in levels
+
+    def test_user_scale_large(self):
+        c = OperationalConstraints(user_scale=100)
+        levels = _compute_load_levels(c)
+        assert 100 in levels
+        assert 300 in levels  # 3x
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Single Request (mocked)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSendRequest:
+    @patch("mycode.http_load_driver.urllib.request.urlopen")
+    def test_successful_request(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b"ok"
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        elapsed, status, error = _send_request(req)
+        assert status == 200
+        assert error == ""
+        assert elapsed >= 0
+
+    @patch("mycode.http_load_driver.urllib.request.urlopen")
+    def test_error_response(self, mock_urlopen):
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "url", 500, "ISE", {}, None
+        )
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/broken")
+        elapsed, status, error = _send_request(req)
+        assert status == 500
+        assert "500" in error
+
+    @patch("mycode.http_load_driver.urllib.request.urlopen")
+    def test_timeout(self, mock_urlopen):
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.URLError("timeout")
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/slow")
+        elapsed, status, error = _send_request(req)
+        assert status == 0
+        assert "timeout" in error.lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Load Level Driver (mocked)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestDriveLoadLevel:
+    @patch("mycode.http_load_driver._get_process_memory_mb", return_value=50.0)
+    @patch("mycode.http_load_driver._send_request")
+    def test_single_concurrency(self, mock_send, mock_mem):
+        mock_send.return_value = (25.0, 200, "")
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_load_level(req, concurrency=1, server_pid=123)
+
+        assert result.concurrency == 1
+        assert result.total_requests == 1
+        assert result.successful_requests == 1
+        assert result.error_count == 0
+        assert result.error_rate == 0.0
+        assert result.median_response_ms == 25.0
+        assert result.memory_mb == 50.0
+
+    @patch("mycode.http_load_driver._get_process_memory_mb", return_value=100.0)
+    @patch("mycode.http_load_driver._send_request")
+    def test_multiple_concurrency(self, mock_send, mock_mem):
+        mock_send.return_value = (50.0, 200, "")
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_load_level(req, concurrency=5, server_pid=123)
+
+        assert result.concurrency == 5
+        assert result.total_requests == 5
+        assert result.successful_requests == 5
+
+    @patch("mycode.http_load_driver._get_process_memory_mb", return_value=50.0)
+    @patch("mycode.http_load_driver._send_request")
+    def test_mixed_success_and_errors(self, mock_send, mock_mem):
+        # All requests return 500 → 100% error rate
+        mock_send.return_value = (100.0, 500, "HTTP 500")
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_load_level(req, concurrency=4, server_pid=123)
+
+        assert result.total_requests == 4
+        assert result.error_count == 4
+        assert result.error_rate == 1.0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Endpoint Driver
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestDriveEndpoint:
+    @patch("mycode.http_load_driver.drive_load_level")
+    def test_stops_on_error_rate(self, mock_drive):
+        mock_drive.side_effect = [
+            _make_load_level(concurrency=1, error_rate=0.0),
+            _make_load_level(concurrency=5, error_rate=0.0),
+            _make_load_level(concurrency=10, error_rate=0.6),
+        ]
+
+        server = MagicMock()
+        server.process.poll.return_value = None
+        server.process.pid = 123
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/api/test")
+        result = drive_endpoint(req, [1, 5, 10, 25], server)
+
+        assert result.breaking_point == 10
+        assert result.breaking_reason == "error_rate"
+        assert len(result.levels) == 3
+
+    @patch("mycode.http_load_driver.drive_load_level")
+    def test_stops_on_response_time(self, mock_drive):
+        mock_drive.side_effect = [
+            _make_load_level(concurrency=1, median_ms=100),
+            _make_load_level(concurrency=5, median_ms=5000),
+            _make_load_level(concurrency=10, median_ms=15000),
+        ]
+
+        server = MagicMock()
+        server.process.poll.return_value = None
+        server.process.pid = 123
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_endpoint(req, [1, 5, 10], server)
+
+        assert result.breaking_point == 10
+        assert result.breaking_reason == "response_time"
+
+    @patch("mycode.http_load_driver.drive_load_level")
+    def test_stops_on_server_crash(self, mock_drive):
+        mock_drive.return_value = _make_load_level(concurrency=1)
+
+        server = MagicMock()
+        # First poll: running, second poll: crashed
+        server.process.poll.side_effect = [None, 1]
+        server.process.pid = 123
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_endpoint(req, [1, 5], server)
+
+        assert result.breaking_reason == "crash"
+
+    @patch("mycode.http_load_driver.drive_load_level")
+    def test_passes_all_levels(self, mock_drive):
+        mock_drive.side_effect = [
+            _make_load_level(concurrency=c, median_ms=50, error_rate=0)
+            for c in [1, 5, 10]
+        ]
+
+        server = MagicMock()
+        server.process.poll.return_value = None
+        server.process.pid = 123
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_endpoint(req, [1, 5, 10], server)
+
+        assert result.breaking_point == 0
+        assert result.breaking_reason == ""
+        assert len(result.levels) == 3
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Result Conversion: Scenario Results
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestHttpResultsToScenarioResults:
+    def test_basic_conversion(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=20),
+                _make_load_level(concurrency=5, median_ms=50),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[ep],
+        )
+
+        scenarios = http_results_to_scenario_results(load_result)
+        assert len(scenarios) == 1
+        assert scenarios[0].scenario_category == "http_load_testing"
+        assert len(scenarios[0].steps) == 2
+        assert scenarios[0].steps[0].step_name == "concurrent_1"
+        assert scenarios[0].steps[1].step_name == "concurrent_5"
+
+    def test_crash_status(self):
+        ep = _make_endpoint_result(
+            levels=[_make_load_level(concurrency=1)],
+            breaking_point=5,
+            breaking_reason="crash",
+        )
+        load_result = HttpLoadResult(
+            framework="flask",
+            endpoint_results=[ep],
+        )
+
+        scenarios = http_results_to_scenario_results(load_result)
+        assert scenarios[0].status == "failed"
+        assert scenarios[0].failure_reason == "server_crash"
+
+    def test_partial_status(self):
+        ep = _make_endpoint_result(
+            levels=[_make_load_level(concurrency=1)],
+            breaking_point=5,
+            breaking_reason="error_rate",
+        )
+        load_result = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[ep],
+        )
+
+        scenarios = http_results_to_scenario_results(load_result)
+        assert scenarios[0].status == "partial"
+
+    def test_step_measurements(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=10, median_ms=100, p95_ms=200,
+                                 error_rate=0.1, memory_mb=75),
+            ],
+        )
+        load_result = HttpLoadResult(framework="flask", endpoint_results=[ep])
+
+        scenarios = http_results_to_scenario_results(load_result)
+        step = scenarios[0].steps[0]
+        assert step.measurements["median_response_ms"] == 100
+        assert step.measurements["p95_response_ms"] == 200
+        assert step.measurements["error_rate"] == 0.1
+        assert step.memory_peak_mb == 75
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Result Conversion: Degradation Points
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestHttpResultsToDegradationPoints:
+    def test_response_time_curve(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=20),
+                _make_load_level(concurrency=10, median_ms=200),
+            ],
+            breaking_point=10,
+        )
+        load_result = HttpLoadResult(framework="fastapi", endpoint_results=[ep])
+
+        points = http_results_to_degradation_points(load_result)
+        assert len(points) >= 1
+        time_point = [p for p in points if p.metric == "response_time_ms"][0]
+        assert len(time_point.steps) == 2
+        assert time_point.steps[0] == ("1 concurrent", 20)
+        assert time_point.steps[1] == ("10 concurrent", 200)
+
+    def test_memory_curve_when_available(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, memory_mb=50),
+                _make_load_level(concurrency=10, memory_mb=150),
+            ],
+        )
+        load_result = HttpLoadResult(framework="flask", endpoint_results=[ep])
+
+        points = http_results_to_degradation_points(load_result)
+        mem_points = [p for p in points if p.metric == "memory_peak_mb"]
+        assert len(mem_points) == 1
+        assert mem_points[0].steps[1] == ("10 concurrent", 150)
+
+    def test_no_curve_for_empty_levels(self):
+        ep = _make_endpoint_result(levels=[])
+        load_result = HttpLoadResult(framework="flask", endpoint_results=[ep])
+
+        points = http_results_to_degradation_points(load_result)
+        assert len(points) == 0
+
+    def test_breaking_point_label(self):
+        ep = _make_endpoint_result(
+            levels=[_make_load_level(concurrency=1, median_ms=20)],
+            breaking_point=5,
+        )
+        load_result = HttpLoadResult(framework="fastapi", endpoint_results=[ep])
+
+        points = http_results_to_degradation_points(load_result)
+        assert points[0].breaking_point == "5 concurrent"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Finding Generation
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestHttpResultsToFindings:
+    def test_server_crash_critical(self):
+        load_result = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[],
+            server_crash=True,
+            server_crash_concurrency=25,
+        )
+        findings = http_results_to_findings(load_result)
+        assert len(findings) == 1
+        assert findings[0].severity == "critical"
+        assert "crashed" in findings[0].title.lower()
+        assert "25" in findings[0].description
+
+    def test_crash_below_user_scale(self):
+        c = OperationalConstraints(user_scale=100)
+        load_result = HttpLoadResult(
+            framework="flask",
+            server_crash=True,
+            server_crash_concurrency=25,
+        )
+        findings = http_results_to_findings(load_result, constraints=c)
+        assert "well below" in findings[0].description
+
+    def test_endpoint_error_rate_critical(self):
+        ep = _make_endpoint_result(
+            path="/api/data",
+            levels=[
+                _make_load_level(concurrency=1, error_rate=0),
+                _make_load_level(concurrency=25, error_rate=0.6),
+            ],
+            breaking_point=25,
+            breaking_reason="error_rate",
+        )
+        load_result = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result)
+        assert len(findings) == 1
+        assert findings[0].severity == "critical"
+        assert "/api/data" in findings[0].description
+
+    def test_endpoint_below_user_scale_critical(self):
+        c = OperationalConstraints(user_scale=500)
+        ep = _make_endpoint_result(
+            path="/api/data",
+            levels=[_make_load_level(concurrency=25, error_rate=0.6)],
+            breaking_point=25,
+            breaking_reason="error_rate",
+        )
+        load_result = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result, constraints=c)
+        assert findings[0].severity == "critical"
+        assert "500" in findings[0].description
+
+    def test_endpoint_above_user_scale_warning(self):
+        c = OperationalConstraints(user_scale=10)
+        ep = _make_endpoint_result(
+            path="/api/data",
+            levels=[_make_load_level(concurrency=15, error_rate=0.6)],
+            breaking_point=15,
+            breaking_reason="error_rate",
+        )
+        load_result = HttpLoadResult(
+            framework="flask",
+            endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result, constraints=c)
+        assert findings[0].severity == "warning"
+
+    def test_degradation_warning(self):
+        ep = _make_endpoint_result(
+            path="/api/data",
+            levels=[
+                _make_load_level(concurrency=1, median_ms=10),
+                _make_load_level(concurrency=50, median_ms=100),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result)
+        # 10x increase → warning
+        assert len(findings) == 1
+        assert findings[0].severity == "warning"
+        assert "10x" in findings[0].description
+
+    def test_clean_pass_no_finding(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=10),
+                _make_load_level(concurrency=50, median_ms=20),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result)
+        assert len(findings) == 0
+
+    def test_baseline_500_finding(self):
+        load_result = HttpLoadResult(framework="flask")
+        probe = ProbeResult(
+            endpoint=DiscoveredEndpoint(method="GET", path="/broken"),
+            status_code=500,
+            testable=False,
+            is_finding=True,
+            skip_reason="server error at baseline",
+        )
+        findings = http_results_to_findings(load_result, probe_results=[probe])
+        assert len(findings) == 1
+        assert findings[0].severity == "critical"
+        assert "500" in findings[0].description
+
+    def test_affected_dependencies(self):
+        load_result = HttpLoadResult(
+            framework="fastapi",
+            server_crash=True,
+            server_crash_concurrency=10,
+        )
+        findings = http_results_to_findings(load_result)
+        assert "fastapi" in findings[0].affected_dependencies
+        assert "uvicorn" in findings[0].affected_dependencies
+
+    def test_streamlit_deps(self):
+        load_result = HttpLoadResult(
+            framework="streamlit",
+            server_crash=True,
+            server_crash_concurrency=5,
+        )
+        findings = http_results_to_findings(load_result)
+        assert "streamlit" in findings[0].affected_dependencies
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Summary and Curve Description
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBuildHttpSummary:
+    def test_crash_summary(self):
+        ep = _make_endpoint_result(
+            breaking_point=25, breaking_reason="crash",
+            levels=[_make_load_level(concurrency=1)],
+        )
+        s = _build_http_summary(ep)
+        assert "crashed" in s.lower()
+        assert "25" in s
+
+    def test_error_rate_summary(self):
+        ep = _make_endpoint_result(
+            breaking_point=50, breaking_reason="error_rate",
+            levels=[
+                _make_load_level(concurrency=25, error_rate=0.0),
+                _make_load_level(concurrency=50, error_rate=0.6),
+            ],
+        )
+        s = _build_http_summary(ep)
+        assert "50" in s
+        assert "25" in s
+
+    def test_clean_pass_summary(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, error_rate=0, median_ms=10),
+                _make_load_level(concurrency=100, error_rate=0, median_ms=50),
+            ],
+        )
+        s = _build_http_summary(ep)
+        assert "100" in s
+        assert "handled" in s.lower()
+
+
+class TestDescribeResponseCurve:
+    def test_large_increase(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=10),
+                _make_load_level(concurrency=100, median_ms=1000),
+            ],
+        )
+        desc = _describe_response_curve(ep)
+        assert "100x" in desc
+
+    def test_moderate_increase(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=50),
+                _make_load_level(concurrency=10, median_ms=150),
+            ],
+        )
+        desc = _describe_response_curve(ep)
+        assert "doubled" in desc
+
+    def test_stable(self):
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=50),
+                _make_load_level(concurrency=10, median_ms=60),
+            ],
+        )
+        desc = _describe_response_curve(ep)
+        assert desc == ""
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Pipeline Integration
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestRunHttpTestingPhase:
+    @patch("mycode.http_load_driver.detect_framework_entry", return_value=None)
+    def test_no_framework_skips(self, mock_detect):
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        # Should return same execution unchanged
+        assert result is execution
+        assert len(result.scenario_results) == 0
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_framework_detected_runs_test(self, mock_detect, mock_load):
+        mock_detect.return_value = FrameworkDetection(
+            framework="fastapi", entry_file="app.py",
+            app_variable="app", module_name="app",
+        )
+        ep = _make_endpoint_result(
+            levels=[_make_load_level(concurrency=1, median_ms=20)],
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[ep],
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        assert len(result.scenario_results) == 1
+        assert result.scenario_results[0].scenario_category == "http_load_testing"
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_server_fail_adds_warning(self, mock_detect, mock_load):
+        mock_detect.return_value = FrameworkDetection(
+            framework="flask", entry_file="app.py", app_variable="app",
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="flask",
+            server_crash=True,
+            endpoint_results=[],
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        assert any("server could not start" in w for w in result.warnings)
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_updates_execution_counts(self, mock_detect, mock_load):
+        mock_detect.return_value = FrameworkDetection(
+            framework="fastapi", entry_file="app.py",
+            app_variable="app", module_name="app",
+        )
+        ep_ok = _make_endpoint_result(
+            path="/ok",
+            levels=[_make_load_level(concurrency=1, median_ms=20)],
+        )
+        ep_fail = _make_endpoint_result(
+            path="/fail",
+            levels=[_make_load_level(concurrency=1, error_rate=0.6)],
+            breaking_point=1,
+            breaking_reason="error_rate",
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="fastapi",
+            endpoint_results=[ep_ok, ep_fail],
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult(
+            scenarios_completed=3, scenarios_failed=1,
+        )
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        # ep_ok → completed (+1), ep_fail → partial (+1)
+        assert result.scenarios_completed == 4
+        assert result.scenarios_failed == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Memory Monitoring
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestGetProcessMemory:
+    def test_returns_zero_for_invalid_pid(self):
+        """Memory monitoring returns 0 for non-existent process."""
+        result = _get_process_memory_mb(999999999)
+        assert result == 0.0
+
+    def test_returns_float(self):
+        """Memory monitoring returns a float."""
+        import os
+        result = _get_process_memory_mb(os.getpid())
+        assert isinstance(result, float)
