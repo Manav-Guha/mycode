@@ -35,6 +35,7 @@ from mycode.engine import (
 )
 from mycode.ingester import (
     CouplingPoint,
+    DependencyInfo,
     FileAnalysis,
     FunctionFlow,
     FunctionInfo,
@@ -2392,3 +2393,153 @@ class TestIdenticalErrorDetection:
 
         assert sr.status == "skipped"
         assert sr.failure_reason == "runtime_context_required"
+
+
+class TestBrowserOnlySkip:
+    """Test that browser-only projects skip callable harnesses."""
+
+    def test_react_project_skips_harness(self, tmp_path):
+        """A React project with only browser deps should skip all scenarios."""
+        session = _make_session(tmp_path)
+        # Node.js available
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        ingestion = IngestionResult(
+            project_path="/fake/react-app",
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="react"),
+                DependencyInfo(name="react-dom"),
+                DependencyInfo(name="react-scripts"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="coupling_render_App",
+                category="state_management_degradation",
+                description="Test",
+            ),
+            StressTestScenario(
+                name="react_data_volume",
+                category="data_volume_scaling",
+                description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+
+        assert len(result.scenario_results) == 2
+        for sr in result.scenario_results:
+            assert sr.status == "skipped"
+            assert sr.failure_reason == "browser_framework"
+            assert "browser environment" in sr.summary.lower()
+
+    def test_express_project_not_skipped(self, tmp_path):
+        """An Express project should NOT be considered browser-only."""
+        session = _make_session(tmp_path)
+        version_result = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        ingestion = IngestionResult(
+            project_path="/fake/express-app",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="index.js",
+                    functions=[FunctionInfo(name="handler", file_path="index.js", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="express"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="express_load",
+                category="data_volume_scaling",
+                description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        # Should NOT be skipped as browser-only
+        assert result.scenario_results[0].failure_reason != "browser_framework"
+
+    def test_mixed_deps_not_skipped(self, tmp_path):
+        """A project with both browser and server deps should NOT skip."""
+        session = _make_session(tmp_path)
+        version_result = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        ingestion = IngestionResult(
+            project_path="/fake/fullstack",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="server.js",
+                    functions=[FunctionInfo(name="serve", file_path="server.js", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="react"),
+                DependencyInfo(name="express"),  # server dep -> not browser-only
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_load",
+                category="data_volume_scaling",
+                description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].failure_reason != "browser_framework"
+
+    def test_dev_deps_excluded_from_check(self, tmp_path):
+        """Dev dependencies should not count toward browser-only detection."""
+        session = _make_session(tmp_path)
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        ingestion = IngestionResult(
+            project_path="/fake/react-app",
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="react"),
+                DependencyInfo(name="react-dom"),
+                DependencyInfo(name="react-scripts"),
+                DependencyInfo(name="jest", is_dev=True),  # dev dep ignored
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_scenario", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        # Still browser-only (jest is dev)
+        assert result.scenario_results[0].status == "skipped"
+        assert result.scenario_results[0].failure_reason == "browser_framework"

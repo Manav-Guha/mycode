@@ -7,7 +7,7 @@ Phase 3: load driving).
 
 Supported frameworks:
   Python  — Streamlit, FastAPI, Flask
-  Node.js — Express
+  Node.js — Express, React (Create React App)
 
 Pure Python.  No LLM dependency.
 """
@@ -220,7 +220,19 @@ def _detect_js_framework(
     ingestion: IngestionResult,
     project_dir: Path,
 ) -> Optional[FrameworkDetection]:
-    """Detect Express.js from ingestion data and source files."""
+    """Detect Express.js or React (Create React App) from ingestion data."""
+    # ── React / Create React App ──
+    # Detection: react-scripts in dependencies + src/index.js or src/App.js
+    dep_names = {d.name for d in ingestion.dependencies if not d.is_dev}
+    if "react-scripts" in dep_names:
+        for entry_candidate in ("src/index.js", "src/App.js", "src/index.tsx", "src/App.tsx"):
+            if (project_dir / entry_candidate).is_file():
+                return FrameworkDetection(
+                    framework="react-scripts",
+                    entry_file=entry_candidate,
+                )
+
+    # ── Express.js ──
     express_candidates: list[str] = []
 
     for fa in ingestion.file_analyses:
@@ -347,6 +359,11 @@ def build_startup_command(
         env = {"PORT": str(port)}
         return cmd, env
 
+    if fw == "react-scripts":
+        cmd = ["npx", "react-scripts", "start"]
+        env = {"PORT": str(port), "BROWSER": "none"}
+        return cmd, env
+
     raise ValueError(f"Unsupported framework: {fw}")
 
 
@@ -357,7 +374,7 @@ def _health_check_url(framework: str, port: int) -> str:
     """Return the URL to poll for readiness."""
     if framework in ("fastapi", "flask", "express"):
         return f"http://localhost:{port}/health"
-    # Streamlit serves HTML at root
+    # Streamlit and React dev server serve HTML at root
     return f"http://localhost:{port}/"
 
 

@@ -40,6 +40,7 @@ from mycode.server_manager import (
     STARTUP_TIMEOUT_SECONDS,
 )
 from mycode.ingester import (
+    DependencyInfo,
     FileAnalysis,
     FunctionInfo,
     ImportInfo,
@@ -761,3 +762,119 @@ class TestStartServer:
         result = start_server(session, detection)
         assert result.success is False
         assert "Permission denied" in result.error
+
+
+class TestReactCRADetection:
+    """Tests for React / Create React App framework detection."""
+
+    def test_detects_react_scripts_with_index_js(self, tmp_path):
+        """react-scripts in deps + src/index.js → detected as react-scripts."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "index.js").write_text("import React from 'react';")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="react"),
+                DependencyInfo(name="react-dom"),
+                DependencyInfo(name="react-scripts"),
+            ],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "react-scripts"
+        assert result.entry_file == "src/index.js"
+
+    def test_detects_react_scripts_with_app_js(self, tmp_path):
+        """react-scripts + src/App.js (no index.js) → detected."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "App.js").write_text("export default function App() {}")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="react-scripts"),
+            ],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "react-scripts"
+        assert result.entry_file == "src/App.js"
+
+    def test_detects_react_scripts_with_tsx(self, tmp_path):
+        """react-scripts + src/index.tsx → detected (TypeScript variant)."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "index.tsx").write_text("import React from 'react';")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="react-scripts")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is not None
+        assert result.framework == "react-scripts"
+        assert result.entry_file == "src/index.tsx"
+
+    def test_no_react_scripts_no_detection(self, tmp_path):
+        """react in deps but no react-scripts → not CRA, no detection."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "index.js").write_text("import React from 'react';")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="react"),
+                DependencyInfo(name="react-dom"),
+            ],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is None
+
+    def test_react_scripts_no_entry_file(self, tmp_path):
+        """react-scripts but no src/index.js or src/App.js → no detection."""
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="react-scripts")],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is None
+
+    def test_react_scripts_dev_dep_ignored(self, tmp_path):
+        """react-scripts as devDependency should not trigger detection."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "index.js").write_text("import React from 'react';")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="react-scripts", is_dev=True),
+            ],
+        )
+        result = _detect_js_framework(ingestion, tmp_path)
+        assert result is None
+
+    def test_react_startup_command(self):
+        """react-scripts framework builds correct startup command."""
+        detection = FrameworkDetection(
+            framework="react-scripts", entry_file="src/index.js"
+        )
+        cmd, env = build_startup_command(detection, 3456)
+        assert cmd == ["npx", "react-scripts", "start"]
+        assert env == {"PORT": "3456", "BROWSER": "none"}
+
+    def test_react_health_check_url(self):
+        """react-scripts uses root URL for health check (dev server HTML)."""
+        url = _health_check_url("react-scripts", 3000)
+        assert url == "http://localhost:3000/"
+
+    def test_can_start_server_react(self, tmp_path):
+        """can_start_server returns True for a CRA project."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "index.js").write_text("import React from 'react';")
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="react-scripts")],
+        )
+        assert can_start_server(ingestion, tmp_path, language="javascript") is True

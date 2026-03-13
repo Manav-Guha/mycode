@@ -237,6 +237,15 @@ _UNSUPPORTED_FRAMEWORKS = frozenset({
     "streamlit", "gradio",
 })
 
+# Browser-only packages — callable harness cannot import these (need DOM/JSX)
+_BROWSER_ONLY_PACKAGES = frozenset({
+    "react", "react-dom", "react-scripts",
+    "vue", "@vue/cli-service",
+    "angular", "@angular/core", "@angular/cli",
+    "svelte", "@sveltejs/kit",
+    "next", "nuxt", "gatsby",
+})
+
 
 # Error types that indicate genuine runtime context dependence
 _CONTEXT_ERROR_TYPES = frozenset({
@@ -440,6 +449,18 @@ class ExecutionEngine:
             logger.warning("Node.js check error: %s", e)
             return False
 
+    def _is_browser_only_project(self) -> bool:
+        """Return True if the project's primary deps are all browser-only frameworks.
+
+        When True, callable harnesses cannot work (JSX/DOM required), so the
+        engine should skip them and let HTTP testing handle the project instead.
+        """
+        non_dev = [d for d in self.ingestion.dependencies if not d.is_dev]
+        if not non_dev:
+            return False
+        # Check if every non-dev dependency is a browser-only package
+        return all(d.name in _BROWSER_ONLY_PACKAGES for d in non_dev)
+
     def execute(
         self,
         scenarios: list[StressTestScenario],
@@ -485,6 +506,25 @@ class ExecutionEngine:
                         "JavaScript stress tests."
                     ],
                 )
+
+        # Check if project is browser-only (React, Vue, etc.) — skip callable harness
+        if self.language == "javascript" and self._is_browser_only_project():
+            return ExecutionEngineResult(
+                scenario_results=[
+                    ScenarioResult(
+                        scenario_name=s.name,
+                        scenario_category=s.category,
+                        status="skipped",
+                        summary=(
+                            "Frontend framework requires browser environment "
+                            "— testing via HTTP instead."
+                        ),
+                        failure_reason="browser_framework",
+                    )
+                    for s in scenarios
+                ],
+                warnings=[],
+            )
 
         total = len(scenarios)
         logger.info(

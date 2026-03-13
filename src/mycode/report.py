@@ -667,6 +667,11 @@ _FAILURE_REASON_EXPLANATIONS: dict[str, str] = {
         "myCode could not generate valid test scripts for these scenarios. "
         "This is a myCode limitation."
     ),
+    "browser_framework": (
+        "These scenarios target a frontend framework that requires a browser "
+        "environment (DOM, JSX). myCode tests these projects via HTTP load "
+        "testing instead of callable harnesses."
+    ),
     "module_import_failure": (
         "myCode could not import your project's modules for these tests. "
         "This can happen with non-standard project structures or monorepos."
@@ -699,6 +704,7 @@ _FAILURE_REASON_HEADERS: dict[str, str] = {
     "unsupported_framework": "Unsupported Framework",
     "dependency_unavailable": "Missing Dependencies",
     "harness_generation_error": "Test Script Generation Issue",
+    "browser_framework": "Browser Framework",
     "module_import_failure": "Module Import Issue",
     "timeout": "Timed Out",
     "runtime_context_required": "Requires Runtime Context",

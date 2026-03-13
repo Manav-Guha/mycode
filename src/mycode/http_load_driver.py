@@ -70,6 +70,7 @@ _FRAMEWORK_DEPS: dict[str, list[str]] = {
     "flask": ["flask"],
     "streamlit": ["streamlit"],
     "express": ["express"],
+    "react-scripts": ["react", "react-dom", "react-scripts"],
 }
 
 
