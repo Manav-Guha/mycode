@@ -25,6 +25,7 @@ from mycode.http_load_driver import (
     LoadLevelResult,
     _build_http_summary,
     _compute_load_levels,
+    _drive_single_round,
     _endpoint_to_finding,
     _describe_response_curve,
     _find_degradation_onset,
@@ -32,6 +33,8 @@ from mycode.http_load_driver import (
     _memory_capacity_finding,
     _warmed_up_baseline,
     _send_request,
+    _ROUNDS_PER_LEVEL,
+    _HIGH_VARIANCE_RATIO,
     drive_endpoint,
     drive_load_level,
     http_results_to_degradation_points,
@@ -169,7 +172,7 @@ class TestDriveLoadLevel:
         mock_send.return_value = (25.0, 200, "")
 
         req = HttpTestRequest(method="GET", url="http://localhost:8000/")
-        result = drive_load_level(req, concurrency=1, server_pid=123)
+        result = drive_load_level(req, concurrency=1, server_pid=123, rounds=1)
 
         assert result.concurrency == 1
         assert result.total_requests == 1
@@ -185,7 +188,7 @@ class TestDriveLoadLevel:
         mock_send.return_value = (50.0, 200, "")
 
         req = HttpTestRequest(method="GET", url="http://localhost:8000/")
-        result = drive_load_level(req, concurrency=5, server_pid=123)
+        result = drive_load_level(req, concurrency=5, server_pid=123, rounds=1)
 
         assert result.concurrency == 5
         assert result.total_requests == 5
@@ -198,7 +201,7 @@ class TestDriveLoadLevel:
         mock_send.return_value = (100.0, 500, "HTTP 500")
 
         req = HttpTestRequest(method="GET", url="http://localhost:8000/")
-        result = drive_load_level(req, concurrency=4, server_pid=123)
+        result = drive_load_level(req, concurrency=4, server_pid=123, rounds=1)
 
         assert result.total_requests == 4
         assert result.error_count == 4
@@ -1137,3 +1140,98 @@ class TestMemoryCapacityFinding:
             self._make_load_result(0.0), ["react"], user_scale=500,
         )
         assert finding is None
+
+
+class TestMultiRoundMedian:
+    """Test that drive_load_level runs multiple rounds and picks median."""
+
+    def test_default_rounds(self):
+        """Default rounds constant should be 3."""
+        assert _ROUNDS_PER_LEVEL == 3
+
+    @patch("mycode.http_load_driver._get_process_memory_mb", return_value=50.0)
+    @patch("mycode.http_load_driver._send_request")
+    def test_median_of_three_rounds(self, mock_send, mock_mem):
+        """With 3 rounds at varying speeds, result should be the median round."""
+        # Round 1: 10ms, Round 2: 100ms, Round 3: 20ms → median = 20ms
+        call_count = [0]
+
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            # Each round gets 1 request (concurrency=1)
+            # Rounds cycle: 10, 100, 20
+            round_idx = (call_count[0] - 1) // 1  # concurrency=1
+            times = [10.0, 100.0, 20.0]
+            return (times[round_idx % 3], 200, "")
+
+        mock_send.side_effect = side_effect
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_load_level(req, concurrency=1, server_pid=123, rounds=3)
+
+        # Median of [10, 100, 20] sorted = [10, 20, 100] → median idx 1 = 20
+        assert result.median_response_ms == 20.0
+
+    @patch("mycode.http_load_driver._get_process_memory_mb", return_value=50.0)
+    @patch("mycode.http_load_driver._send_request")
+    def test_high_variance_flagged(self, mock_send, mock_mem):
+        """When rounds vary >50%, high_variance should be True."""
+        call_count = [0]
+
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            round_idx = (call_count[0] - 1) // 1
+            # 10ms vs 100ms = 10x variance, well above 1.5x threshold
+            times = [10.0, 100.0, 50.0]
+            return (times[round_idx % 3], 200, "")
+
+        mock_send.side_effect = side_effect
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_load_level(req, concurrency=1, server_pid=123, rounds=3)
+        assert result.high_variance is True
+
+    @patch("mycode.http_load_driver._get_process_memory_mb", return_value=50.0)
+    @patch("mycode.http_load_driver._send_request")
+    def test_low_variance_not_flagged(self, mock_send, mock_mem):
+        """When rounds are consistent, high_variance should be False."""
+        mock_send.return_value = (25.0, 200, "")
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/")
+        result = drive_load_level(req, concurrency=1, server_pid=123, rounds=3)
+        assert result.high_variance is False
+
+
+class TestVarianceNote:
+    """Test that high variance appends a note to findings."""
+
+    def test_variance_note_appended(self):
+        """When a level has high_variance, findings get the variance note."""
+        ep = _make_endpoint_result(
+            path="/",
+            levels=[
+                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=2.0),
+                _make_load_level(concurrency=50, median_ms=50.0, memory_mb=2.0),
+            ],
+        )
+        # Mark one level as high variance
+        ep.levels[1].high_variance = True
+        load_result = HttpLoadResult(
+            framework="react-scripts", endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result)
+        assert len(findings) >= 1
+        assert "variance" in findings[0].description.lower()
+
+    def test_no_variance_note_when_stable(self):
+        """When no level has high_variance, no note appended."""
+        ep = _make_endpoint_result(
+            path="/",
+            levels=[
+                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=2.0),
+                _make_load_level(concurrency=50, median_ms=50.0, memory_mb=2.0),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="react-scripts", endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result)
+        for f in findings:
+            assert "variance" not in f.description.lower()

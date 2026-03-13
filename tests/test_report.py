@@ -3500,3 +3500,66 @@ class TestCouplingTitleDifferentiation:
             _humanize_title_name("coupling_errorhandler_onError"),
         }
         assert len(titles) == 4, f"Expected 4 distinct titles, got {titles}"
+
+
+class TestBrowserFrameworkSuppression:
+    """Browser-framework incomplete tests should be suppressed when HTTP findings exist."""
+
+    def test_suppressed_when_http_findings_present(self):
+        """7 browser_framework skips should vanish when HTTP findings exist."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name=f"react_scenario_{i}",
+                    scenario_category="data_volume_scaling",
+                    status="skipped",
+                    failure_reason="browser_framework",
+                    summary="Frontend framework requires browser environment.",
+                )
+                for i in range(7)
+            ],
+            http_findings=[
+                Finding(
+                    title="Response time degradation on your application",
+                    severity="warning",
+                    category="http_load_testing",
+                    description="Response time increases 25x under load.",
+                ),
+            ],
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        # browser_framework entries should be suppressed
+        browser_incomplete = [
+            f for f in report.incomplete_tests
+            if f._failure_reason == "browser_framework"
+        ]
+        assert len(browser_incomplete) == 0
+        # HTTP finding should be present
+        assert any("response time" in f.title.lower() for f in report.findings)
+
+    def test_kept_when_no_http_findings(self):
+        """browser_framework skips should remain when HTTP testing has no findings."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="react_scenario_0",
+                    scenario_category="data_volume_scaling",
+                    status="skipped",
+                    failure_reason="browser_framework",
+                    summary="Frontend framework requires browser environment.",
+                ),
+            ],
+            # No http_findings
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        browser_incomplete = [
+            f for f in report.incomplete_tests
+            if f._failure_reason == "browser_framework"
+        ]
+        assert len(browser_incomplete) == 1

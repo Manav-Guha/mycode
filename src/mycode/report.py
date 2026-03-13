@@ -933,6 +933,17 @@ class ReportGenerator:
         if execution.http_degradation_points:
             report.degradation_points.extend(execution.http_degradation_points)
 
+        # 1c. Suppress browser-framework incomplete tests when HTTP testing
+        #     produced findings — the skip entries are implementation noise
+        has_http_findings = any(
+            f.category == "http_load_testing" for f in report.findings
+        )
+        if has_http_findings:
+            report.incomplete_tests = [
+                f for f in report.incomplete_tests
+                if f._failure_reason != "browser_framework"
+            ]
+
         # 1a. Auto-classify every finding against taxonomy
         self._classify_all_findings(report)
 

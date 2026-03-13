@@ -61,6 +61,12 @@ _LEVEL_TIMEOUT_SECONDS = 30
 _MAX_ERROR_RATE = 0.50  # 50%
 _MAX_MEDIAN_RESPONSE_MS = 10_000  # 10 seconds
 
+# Number of rounds per concurrency level — median of rounds smooths variance
+_ROUNDS_PER_LEVEL = 3
+
+# If max/min ratio across rounds exceeds this, flag variance in findings
+_HIGH_VARIANCE_RATIO = 1.5
+
 # Per-request timeout
 _REQUEST_TIMEOUT_SECONDS = 15
 
@@ -92,6 +98,7 @@ class LoadLevelResult:
     response_times: list[float] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
     server_crashed: bool = False
+    high_variance: bool = False
 
 
 @dataclass
@@ -201,20 +208,16 @@ def _get_process_memory_mb(pid: int) -> float:
 # ── Load Driver ──
 
 
-def drive_load_level(
+def _drive_single_round(
     req: HttpTestRequest,
     concurrency: int,
     server_pid: int,
     timeout: int = _LEVEL_TIMEOUT_SECONDS,
 ) -> LoadLevelResult:
-    """Drive concurrent load at a single concurrency level.
-
-    Sends ``concurrency`` simultaneous requests and measures response times.
-    """
+    """Run one round of concurrent requests at a single concurrency level."""
     response_times: list[float] = []
     errors: list[dict] = []
     successful = 0
-    start = time.monotonic()
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [
@@ -261,6 +264,42 @@ def drive_load_level(
         response_times=sorted_times,
         errors=errors,
     )
+
+
+def drive_load_level(
+    req: HttpTestRequest,
+    concurrency: int,
+    server_pid: int,
+    timeout: int = _LEVEL_TIMEOUT_SECONDS,
+    rounds: int = _ROUNDS_PER_LEVEL,
+) -> LoadLevelResult:
+    """Drive concurrent load at a single concurrency level.
+
+    Runs ``rounds`` independent bursts and returns the result whose median
+    response time is the median across all rounds.  This smooths out
+    infrastructure variance between runs.
+    """
+    round_results = []
+    for _ in range(rounds):
+        rr = _drive_single_round(req, concurrency, server_pid, timeout)
+        round_results.append(rr)
+        # If any round causes a server crash, stop immediately
+        if rr.server_crashed:
+            return rr
+
+    # Pick the round with the median response time
+    round_results.sort(key=lambda r: r.median_response_ms)
+    median_idx = len(round_results) // 2
+    chosen = round_results[median_idx]
+
+    # Check for high variance between rounds
+    if len(round_results) >= 2:
+        lo = round_results[0].median_response_ms
+        hi = round_results[-1].median_response_ms
+        if lo > 0 and hi / lo > _HIGH_VARIANCE_RATIO:
+            chosen.high_variance = True
+
+    return chosen
 
 
 def drive_endpoint(
@@ -634,10 +673,23 @@ def http_results_to_findings(
             _finding_type="scenario_failed",
         ))
 
+    has_high_variance = False
     for ep_result in load_result.endpoint_results:
         finding = _endpoint_to_finding(ep_result, deps, user_scale)
         if finding:
             findings.append(finding)
+        if any(lvl.high_variance for lvl in ep_result.levels):
+            has_high_variance = True
+
+    # Append variance note to all HTTP findings if any level showed instability
+    if has_high_variance:
+        _VARIANCE_NOTE = (
+            " Results showed significant variance between test rounds — "
+            "infrastructure conditions may affect these measurements."
+        )
+        for f in findings:
+            if f.category == "http_load_testing":
+                f.description += _VARIANCE_NOTE
 
     # Memory capacity finding — independent of per-endpoint response/error findings
     if user_scale:
