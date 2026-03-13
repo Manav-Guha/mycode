@@ -570,6 +570,31 @@ class TestJsDependencyInstallation:
         assert sm.js_deps_installed is True
         assert sm.js_deps_error == ""
 
+    def test_npm_eperm_retries_with_local_cache(self, tmp_path):
+        """EPERM on default npm cache → retry with workspace-local cache."""
+        project = tmp_path / "js_project"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"test"}')
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+        sm.workspace_dir = workspace
+
+        eperm_result = mock.Mock(returncode=1, stdout="", stderr="npm error code EPERM\nnpm error syscall open")
+        success_result = mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("mycode.session.subprocess.run") as mock_run:
+            mock_run.side_effect = [eperm_result, success_result]
+            sm._install_js_dependencies()
+
+        assert sm.js_deps_installed is True
+        assert mock_run.call_count == 2
+        # Second call should have --cache flag
+        retry_cmd = mock_run.call_args_list[1][0][0]
+        assert "--cache" in retry_cmd
+
     def test_npm_timeout_sets_failure(self, tmp_path):
         project = tmp_path / "js_project"
         project.mkdir()

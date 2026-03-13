@@ -557,6 +557,21 @@ class SessionManager:
             logger.debug("[JS-DEPS] Exit code: %d", result.returncode)
             logger.debug("[JS-DEPS] stdout:\n%s", result.stdout[:2000])
             logger.debug("[JS-DEPS] stderr:\n%s", result.stderr[:2000])
+
+            # Retry with workspace-local cache if default cache has permission issues
+            if result.returncode != 0 and "EPERM" in (result.stderr or ""):
+                logger.info("npm cache permission error — retrying with workspace-local cache")
+                local_cache = self.workspace_dir / ".npm_cache"
+                retry_cmd = cmd + ["--cache", str(local_cache)]
+                result = subprocess.run(
+                    retry_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    cwd=str(self.project_copy_dir),
+                    env=env,
+                )
+
             if result.returncode != 0:
                 self.js_deps_installed = False
                 self.js_deps_error = result.stderr[:500] or result.stdout[:500]
