@@ -1362,3 +1362,105 @@ class TestHttpTimeoutBudget:
             assert mock_drive.called
             call_kwargs = mock_drive.call_args
             assert call_kwargs.kwargs.get("deadline") is not None
+
+
+# ── npm Install Failure Blocks HTTP Testing ──
+
+
+class TestNpmInstallFailureBlocksHttp:
+    """Verify HTTP testing is skipped with CRITICAL finding when npm install failed."""
+
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_npm_failure_generates_critical_finding(self, mock_detect):
+        """js_deps_installed=False → CRITICAL finding, no server start attempted."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="nextjs", entry_file="next.config.js",
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        session.js_deps_installed = False
+        session.js_deps_error = "ERR! missing peer dependency"
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "javascript"
+        )
+        assert len(result.http_findings) == 1
+        finding = result.http_findings[0]
+        assert finding.severity == "critical"
+        assert "installation failed" in finding.title.lower()
+        assert "ERR! missing peer dependency" in finding.description
+        assert "nextjs" in finding.description
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_npm_success_proceeds_normally(self, mock_detect, mock_load):
+        """js_deps_installed=True → server start attempted normally."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="nextjs", entry_file="next.config.js",
+        )
+        ep = _make_endpoint_result(
+            levels=[_make_load_level(concurrency=1, median_ms=20)],
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="nextjs", endpoint_results=[ep],
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        session.js_deps_installed = True
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "javascript"
+        )
+        mock_load.assert_called_once()
+        assert result.http_ran is True
+
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_npm_timeout_generates_finding(self, mock_detect):
+        """npm timeout → CRITICAL finding with timeout message."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="express", entry_file="server.js",
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        session.js_deps_installed = False
+        session.js_deps_error = "npm install timed out after 120 seconds"
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "javascript"
+        )
+        assert len(result.http_findings) == 1
+        assert "timed out" in result.http_findings[0].description
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_python_project_unaffected(self, mock_detect, mock_load):
+        """Python project (js_deps_installed=None) → proceeds normally."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="flask", entry_file="app.py", app_variable="app",
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="flask",
+            server_crash=True,
+            endpoint_results=[],
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        session.js_deps_installed = None  # not a JS project
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        # Should have proceeded to run_http_load_test (not blocked)
+        mock_load.assert_called_once()

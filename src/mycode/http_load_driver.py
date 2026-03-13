@@ -986,6 +986,26 @@ def run_http_testing_phase(
         logger.debug("No server framework detected — skipping HTTP testing")
         return execution
 
+    # Block server startup if JS dependency installation failed
+    if session.js_deps_installed is False:
+        error_msg = session.js_deps_error or "npm install failed"
+        logger.warning("HTTP phase: skipping — JS deps not installed: %s", error_msg)
+        _progress("Skipping HTTP testing — dependency installation failed")
+        deps = _FRAMEWORK_DEPS.get(detection.framework, [detection.framework])
+        execution.http_findings.append(Finding(
+            title="Dependency installation failed",
+            severity="critical",
+            category="http_load_testing",
+            description=(
+                f"npm install failed for this project: {error_msg}. "
+                f"Without installed dependencies, the {detection.framework} "
+                f"server cannot start. No HTTP stress testing was attempted."
+            ),
+            affected_dependencies=list(deps),
+            _finding_type="scenario_failed",
+        ))
+        return execution
+
     _progress(f"Detected {detection.framework} server — running HTTP stress tests...")
     logger.info("HTTP phase: detected %s, entry=%s", detection.framework, detection.entry_file)
 

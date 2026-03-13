@@ -144,6 +144,10 @@ class SessionManager:
         self._setup_complete = False
         self._active_process: Optional[subprocess.Popen] = None
 
+        # JS dependency install tracking
+        self.js_deps_installed: Optional[bool] = None  # None=not JS, True=success, False=failed
+        self.js_deps_error: str = ""  # Error message if install failed
+
     # ── Context Manager ──
 
     def __enter__(self):
@@ -504,7 +508,12 @@ class SessionManager:
     # ── JS Dependency Installation ──
 
     def _install_js_dependencies(self):
-        """Install Node.js dependencies in the project copy if package.json exists."""
+        """Install Node.js dependencies in the project copy if package.json exists.
+
+        Sets self.js_deps_installed to True/False and self.js_deps_error on failure.
+        Downstream stages (server_manager, HTTP testing) check these before attempting
+        to start a server.
+        """
         logger.debug("[JS-DEPS] _install_js_dependencies called, project_copy_dir=%s", self.project_copy_dir)
         if not self.project_copy_dir:
             logger.debug("[JS-DEPS] No project_copy_dir, skipping")
@@ -516,11 +525,23 @@ class SessionManager:
             logger.debug("[JS-DEPS] No package.json found, skipping")
             return
 
+        # If node_modules already present (e.g. user pre-installed), skip
+        node_modules = self.project_copy_dir / "node_modules"
+        if node_modules.is_dir() and any(node_modules.iterdir()):
+            logger.info("node_modules already exists, skipping npm install")
+            self.js_deps_installed = True
+            return
+
         lock_file = self.project_copy_dir / "package-lock.json"
         if lock_file.is_file():
-            cmd = ["npm", "ci", "--ignore-scripts"]
+            cmd = ["npm", "ci"]
         else:
-            cmd = ["npm", "install", "--ignore-scripts"]
+            cmd = ["npm", "install"]
+
+        # NODE_ENV=development ensures devDependencies are installed
+        # (many frameworks like Next.js are devDependencies)
+        env = os.environ.copy()
+        env["NODE_ENV"] = "development"
 
         logger.debug("[JS-DEPS] Running command: %s in cwd=%s", cmd, self.project_copy_dir)
 
@@ -531,21 +552,29 @@ class SessionManager:
                 text=True,
                 timeout=120,
                 cwd=str(self.project_copy_dir),
+                env=env,
             )
             logger.debug("[JS-DEPS] Exit code: %d", result.returncode)
             logger.debug("[JS-DEPS] stdout:\n%s", result.stdout[:2000])
             logger.debug("[JS-DEPS] stderr:\n%s", result.stderr[:2000])
             if result.returncode != 0:
+                self.js_deps_installed = False
+                self.js_deps_error = result.stderr[:500] or result.stdout[:500]
                 logger.warning(
                     "npm install failed (exit %d): %s",
                     result.returncode,
-                    result.stderr[:500],
+                    self.js_deps_error,
                 )
             else:
+                self.js_deps_installed = True
                 logger.info("JS dependencies installed via %s", cmd[1])
         except FileNotFoundError:
+            self.js_deps_installed = False
+            self.js_deps_error = "npm not found on PATH"
             logger.warning("npm not found on PATH, skipping JS dependency installation")
         except subprocess.TimeoutExpired:
+            self.js_deps_installed = False
+            self.js_deps_error = "npm install timed out after 120 seconds"
             logger.warning("npm install timed out after 120s")
 
     # ── Project Copy ──
