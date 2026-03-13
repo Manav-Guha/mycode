@@ -649,12 +649,13 @@ def http_results_to_findings(
     if probe_results:
         for probe in probe_results:
             if probe.is_finding:
+                probe_label = _humanize_path(probe.endpoint.path)
                 findings.append(Finding(
-                    title=f"Server error on {probe.endpoint.path} before load testing",
+                    title=f"Server error on {probe_label} before load testing",
                     severity="critical",
                     category="http_load_testing",
                     description=(
-                        f"Endpoint {probe.endpoint.method} {probe.endpoint.path} returned "
+                        f"Your {probe_label} returned "
                         f"HTTP {probe.status_code} even before load testing — this is a "
                         f"bug in your application, not a scaling issue."
                     ),
@@ -663,6 +664,17 @@ def http_results_to_findings(
                 ))
 
     return findings
+
+
+def _humanize_path(raw_path: str) -> str:
+    """Turn a raw URL path into a human-readable label for finding titles.
+
+    '/' → 'your application'   (root is the homepage / single-page app)
+    '/api/users' → '/api/users' (already meaningful)
+    """
+    if raw_path in ("/", ""):
+        return "your application"
+    return raw_path
 
 
 def _endpoint_to_finding(
@@ -675,6 +687,7 @@ def _endpoint_to_finding(
     path = req.url.split("//", 1)[-1].split("/", 1)[-1] if "//" in req.url else "/"
     if not path.startswith("/"):
         path = "/" + path
+    label = _humanize_path(path)
 
     if ep_result.breaking_reason == "crash":
         return None  # handled at top level
@@ -689,7 +702,10 @@ def _endpoint_to_finding(
             "becomes unresponsive" if ep_result.breaking_reason == "response_time"
             else "fails with errors"
         )
-        desc = f"Your {path} endpoint {verb} at {bp} concurrent connections."
+        if path == "/":
+            desc = f"Your application {verb} at {bp} concurrent connections."
+        else:
+            desc = f"Your {label} endpoint {verb} at {bp} concurrent connections."
         if user_scale:
             if bp <= user_scale:
                 desc += (
@@ -709,7 +725,7 @@ def _endpoint_to_finding(
                 )
                 severity = "info"
         return Finding(
-            title=f"Endpoint {path} degrades under concurrent load",
+            title=f"Application degrades under concurrent load" if path == "/" else f"Endpoint {label} degrades under concurrent load",
             severity=severity,
             category="http_load_testing",
             description=desc,
@@ -747,7 +763,7 @@ def _endpoint_to_finding(
                             f"{user_scale} concurrent users."
                         )
                 return Finding(
-                    title=f"Response time degradation on {path}",
+                    title=f"Response time degradation on {label}",
                     severity="warning",
                     category="http_load_testing",
                     description=desc,
@@ -759,11 +775,18 @@ def _endpoint_to_finding(
         # Error rate above 10% at any level (but below 50% hard stop)
         worst_error_level = max(ep_result.levels, key=lambda l: l.error_rate)
         if worst_error_level.error_rate > 0.10:
-            desc = (
-                f"Your {path} endpoint has a {worst_error_level.error_rate:.0%} "
-                f"error rate at {worst_error_level.concurrency} concurrent "
-                f"connections."
-            )
+            if path == "/":
+                desc = (
+                    f"Your application has a {worst_error_level.error_rate:.0%} "
+                    f"error rate at {worst_error_level.concurrency} concurrent "
+                    f"connections."
+                )
+            else:
+                desc = (
+                    f"Your {label} endpoint has a {worst_error_level.error_rate:.0%} "
+                    f"error rate at {worst_error_level.concurrency} concurrent "
+                    f"connections."
+                )
             if user_scale:
                 if worst_error_level.concurrency <= user_scale:
                     desc += (
@@ -771,7 +794,7 @@ def _endpoint_to_finding(
                         f"concurrent users — some users will see errors."
                     )
             return Finding(
-                title=f"Elevated error rate on {path}",
+                title=f"Elevated error rate on {label}",
                 severity="warning",
                 category="http_load_testing",
                 description=desc,
