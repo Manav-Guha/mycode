@@ -3287,7 +3287,50 @@ class TestRuntimeContextFindings:
             ],
         )
         text = report.as_text()
-        assert "Streamlit" in text or "live API" in text or "planned for v2" in text
+        assert "runtime context" in text.lower()
+        assert "planned for v2" not in text
+
+    def test_runtime_context_with_http_ran_shows_http_message(self):
+        """When HTTP testing ran, runtime context findings say so."""
+        report = DiagnosticReport(
+            http_ran=True,
+            incomplete_tests=[
+                Finding(
+                    title="Could not test: app.render_dashboard",
+                    severity="info",
+                    _failure_reason="runtime_context_required",
+                    description=(
+                        "This function could not be tested in isolation, but "
+                        "myCode tested your application under load via HTTP — "
+                        "see HTTP findings above."
+                    ),
+                ),
+            ],
+        )
+        text = report.as_text()
+        assert "tested your application under load via HTTP" in text
+        assert "planned for v2" not in text
+
+    def test_runtime_context_without_http_ran_no_http_reference(self):
+        """When HTTP testing didn't run, no HTTP reference in message."""
+        report = DiagnosticReport(
+            http_ran=False,
+            incomplete_tests=[
+                Finding(
+                    title="Could not test: app.render_dashboard",
+                    severity="info",
+                    _failure_reason="runtime_context_required",
+                    description=(
+                        "This function requires runtime context that myCode "
+                        "cannot simulate in isolation."
+                    ),
+                ),
+            ],
+        )
+        text = report.as_text()
+        assert "cannot simulate in isolation" in text
+        assert "HTTP" not in text
+        assert "planned for v2" not in text
 
     def test_identical_error_scenario_routed_to_incomplete(self):
         """Scenario reclassified by identical-error detection goes to incomplete_tests."""
@@ -3321,3 +3364,50 @@ class TestRuntimeContextFindings:
         assert len(report.findings) == 0
         # Should not count as failed
         assert report.scenarios_failed == 0
+
+    def test_analyze_execution_uses_http_ran_for_description(self):
+        """When http_ran=True, runtime context findings get HTTP message."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="streamlit_concurrent_session_load",
+                    scenario_category="concurrent_execution",
+                    status="skipped",
+                    failure_reason="runtime_context_required",
+                    steps=[],
+                    total_errors=0,
+                ),
+            ],
+        )
+        execution.http_ran = True
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        assert len(report.incomplete_tests) == 1
+        desc = report.incomplete_tests[0].description
+        assert "tested your application under load via HTTP" in desc
+
+    def test_analyze_execution_no_http_ran_no_http_reference(self):
+        """When http_ran=False, runtime context findings don't mention HTTP."""
+        execution = ExecutionEngineResult(
+            scenario_results=[
+                ScenarioResult(
+                    scenario_name="streamlit_concurrent_session_load",
+                    scenario_category="concurrent_execution",
+                    status="skipped",
+                    failure_reason="runtime_context_required",
+                    steps=[],
+                    total_errors=0,
+                ),
+            ],
+        )
+        execution.http_ran = False
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(), [], "test intent",
+        )
+        assert len(report.incomplete_tests) == 1
+        desc = report.incomplete_tests[0].description
+        assert "cannot simulate in isolation" in desc
+        assert "HTTP" not in desc

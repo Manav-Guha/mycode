@@ -222,6 +222,10 @@ class ExecutionEngineResult:
     scenarios_failed: int = 0
     scenarios_skipped: int = 0
     warnings: list[str] = field(default_factory=list)
+    # HTTP load testing results — populated by http_load_driver, consumed by report
+    http_findings: list = field(default_factory=list)
+    http_degradation_points: list = field(default_factory=list)
+    http_ran: bool = False
 
 
 # Known frameworks that require system-level setup beyond pip/npm

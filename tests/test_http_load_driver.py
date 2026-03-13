@@ -27,6 +27,7 @@ from mycode.http_load_driver import (
     _compute_load_levels,
     _endpoint_to_finding,
     _describe_response_curve,
+    _find_degradation_onset,
     _get_process_memory_mb,
     _send_request,
     drive_endpoint,
@@ -741,3 +742,157 @@ class TestGetProcessMemory:
         import os
         result = _get_process_memory_mb(os.getpid())
         assert isinstance(result, float)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Degradation Onset Detection
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFindDegradationOnset:
+    def test_finds_doubling_point(self):
+        levels = [
+            _make_load_level(concurrency=1, median_ms=1.0),
+            _make_load_level(concurrency=10, median_ms=1.5),
+            _make_load_level(concurrency=50, median_ms=3.0),
+            _make_load_level(concurrency=100, median_ms=10.0),
+        ]
+        assert _find_degradation_onset(levels) == 50
+
+    def test_no_degradation_returns_zero(self):
+        levels = [
+            _make_load_level(concurrency=1, median_ms=10.0),
+            _make_load_level(concurrency=100, median_ms=15.0),
+        ]
+        assert _find_degradation_onset(levels) == 0
+
+    def test_empty_returns_zero(self):
+        assert _find_degradation_onset([]) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Enhanced Finding Generation
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEnhancedFindings:
+    def test_degradation_finding_includes_onset(self):
+        """Response time >5x increase produces WARNING with onset point."""
+        ep = _make_endpoint_result(
+            path="/",
+            levels=[
+                _make_load_level(concurrency=1, median_ms=0.77),
+                _make_load_level(concurrency=50, median_ms=2.0),
+                _make_load_level(concurrency=1250, median_ms=8.0),
+                _make_load_level(concurrency=3750, median_ms=52.82),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="streamlit", endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result)
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.severity == "warning"
+        # 52.82/0.77 ≈ 68.6, rounds to 69x
+        assert "69x" in f.description
+        assert "concurrent connections, response time begins" in f.description
+
+    def test_degradation_finding_with_user_scale(self):
+        """Degradation finding references user's stated capacity."""
+        c = OperationalConstraints(user_scale=100)
+        ep = _make_endpoint_result(
+            path="/",
+            levels=[
+                _make_load_level(concurrency=1, median_ms=1.0),
+                _make_load_level(concurrency=50, median_ms=3.0),
+                _make_load_level(concurrency=100, median_ms=10.0),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="streamlit", endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result, constraints=c)
+        assert len(findings) == 1
+        assert "100 concurrent users" in findings[0].description
+
+    def test_elevated_error_rate_warning(self):
+        """Error rate >10% (but <50%) produces WARNING."""
+        ep = _make_endpoint_result(
+            path="/api/data",
+            levels=[
+                _make_load_level(concurrency=1, error_rate=0.0, median_ms=5),
+                _make_load_level(concurrency=50, error_rate=0.15, median_ms=8),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="fastapi", endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result)
+        assert len(findings) == 1
+        assert findings[0].severity == "warning"
+        assert "15%" in findings[0].description
+
+    def test_low_error_rate_no_finding(self):
+        """Error rate <10% produces no finding if response time stable."""
+        ep = _make_endpoint_result(
+            path="/api/data",
+            levels=[
+                _make_load_level(concurrency=1, error_rate=0.0, median_ms=5),
+                _make_load_level(concurrency=50, error_rate=0.05, median_ms=8),
+            ],
+        )
+        load_result = HttpLoadResult(
+            framework="fastapi", endpoint_results=[ep],
+        )
+        findings = http_results_to_findings(load_result)
+        assert len(findings) == 0
+
+
+class TestHttpRanIntegration:
+    """Verify run_http_testing_phase sets http_ran and populates findings."""
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_sets_http_ran_and_findings(self, mock_detect, mock_load):
+        mock_detect.return_value = FrameworkDetection(
+            framework="streamlit", entry_file="app.py",
+        )
+        ep = _make_endpoint_result(
+            path="/",
+            levels=[
+                _make_load_level(concurrency=1, median_ms=1),
+                _make_load_level(concurrency=100, median_ms=100),
+            ],
+        )
+        mock_load.return_value = HttpLoadResult(
+            framework="streamlit",
+            endpoint_results=[ep],
+        )
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        assert result.http_ran is True
+        # 100x degradation → should produce a finding
+        assert len(result.http_findings) >= 1
+        assert result.http_findings[0].severity == "warning"
+        # Should have degradation points too
+        assert len(result.http_degradation_points) >= 1
+
+    @patch("mycode.http_load_driver.detect_framework_entry", return_value=None)
+    def test_http_ran_false_when_no_framework(self, mock_detect):
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        result = run_http_testing_phase(
+            session, ingestion, execution, "python"
+        )
+        assert result.http_ran is False

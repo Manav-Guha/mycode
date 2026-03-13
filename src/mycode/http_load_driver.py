@@ -709,27 +709,82 @@ def _endpoint_to_finding(
             _load_level=bp,
         )
 
-    # Check for degradation without failure
+    # Check for degradation without hard failure
     if len(ep_result.levels) >= 2:
         first = ep_result.levels[0]
         last = ep_result.levels[-1]
+
+        # Response time degradation (>5x increase = WARNING)
         if first.median_response_ms > 0:
             ratio = last.median_response_ms / first.median_response_ms
             if ratio > 5:
+                desc = (
+                    f"Response time on your application increases {ratio:.0f}x "
+                    f"between {first.concurrency} and {last.concurrency} "
+                    f"concurrent users ({first.median_response_ms:.0f}ms → "
+                    f"{last.median_response_ms:.0f}ms)."
+                )
+                # Find the concurrency where degradation became significant
+                degrade_at = _find_degradation_onset(ep_result.levels)
+                if degrade_at:
+                    desc += (
+                        f" At {degrade_at} concurrent connections, response "
+                        f"time begins degrading significantly."
+                    )
+                if user_scale:
+                    if degrade_at and degrade_at <= user_scale:
+                        desc += (
+                            f" This is at or below your expected "
+                            f"{user_scale} concurrent users."
+                        )
                 return Finding(
                     title=f"Response time degradation on {path}",
                     severity="warning",
                     category="http_load_testing",
-                    description=(
-                        f"Response time on {path} increases {ratio:.0f}x between "
-                        f"{first.concurrency} and {last.concurrency} concurrent users "
-                        f"({first.median_response_ms:.0f}ms → {last.median_response_ms:.0f}ms)."
-                    ),
+                    description=desc,
                     affected_dependencies=list(deps),
                     _finding_type="errors_during",
+                    _load_level=degrade_at or last.concurrency,
                 )
 
+        # Error rate above 10% at any level (but below 50% hard stop)
+        worst_error_level = max(ep_result.levels, key=lambda l: l.error_rate)
+        if worst_error_level.error_rate > 0.10:
+            desc = (
+                f"Your {path} endpoint has a {worst_error_level.error_rate:.0%} "
+                f"error rate at {worst_error_level.concurrency} concurrent "
+                f"connections."
+            )
+            if user_scale:
+                if worst_error_level.concurrency <= user_scale:
+                    desc += (
+                        f" This is within your expected {user_scale} "
+                        f"concurrent users — some users will see errors."
+                    )
+            return Finding(
+                title=f"Elevated error rate on {path}",
+                severity="warning",
+                category="http_load_testing",
+                description=desc,
+                affected_dependencies=list(deps),
+                _finding_type="errors_during",
+                _load_level=worst_error_level.concurrency,
+            )
+
     return None  # Passed all levels
+
+
+def _find_degradation_onset(levels: list[LoadLevelResult]) -> int:
+    """Find the concurrency level where response time first doubles from baseline."""
+    if not levels:
+        return 0
+    baseline = levels[0].median_response_ms
+    if baseline <= 0:
+        return 0
+    for lvl in levels[1:]:
+        if lvl.median_response_ms > baseline * 2:
+            return lvl.concurrency
+    return 0
 
 
 # ── Pipeline Integration Helper ──
@@ -786,6 +841,15 @@ def run_http_testing_phase(
     # Convert to scenario results and append
     http_scenarios = http_results_to_scenario_results(load_result)
     execution.scenario_results.extend(http_scenarios)
+
+    # Generate HTTP-specific findings and degradation points
+    execution.http_findings = http_results_to_findings(
+        load_result, constraints,
+    )
+    execution.http_degradation_points = http_results_to_degradation_points(
+        load_result,
+    )
+    execution.http_ran = True
 
     # Update execution counts
     for sr in http_scenarios:

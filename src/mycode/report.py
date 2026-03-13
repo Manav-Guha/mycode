@@ -167,6 +167,7 @@ class DiagnosticReport:
     _max_payload_mb: float | None = None
     baseline_failed: bool = False
     _baseline_report_text: str = ""
+    http_ran: bool = False
     project_name: str = ""
     model_used: str = "offline"
     token_usage: dict = field(
@@ -288,7 +289,7 @@ class DiagnosticReport:
             sections.append("\n" + "-" * 40)
             sections.append("  Tests myCode Could Not Run")
             sections.append("-" * 40)
-            _render_incomplete_text(sections, self.incomplete_tests)
+            _render_incomplete_text(sections, self.incomplete_tests, self.http_ran)
 
         # Degradation
         if self.degradation_points:
@@ -522,7 +523,7 @@ class DiagnosticReport:
         if self.incomplete_tests:
             lines.append("## Tests myCode Could Not Run")
             lines.append("")
-            _render_incomplete_markdown(lines, self.incomplete_tests)
+            _render_incomplete_markdown(lines, self.incomplete_tests, self.http_ran)
 
         # Degradation curves (simplified for non-technical readers)
         if self.degradation_points:
@@ -673,13 +674,26 @@ _FAILURE_REASON_EXPLANATIONS: dict[str, str] = {
     "timeout": "These tests exceeded the time limit.",
     "runtime_context_required": (
         "These functions require runtime context (e.g. a running Streamlit "
-        "server, database connection, or live API) that myCode cannot simulate "
-        "in isolation. This is not a code problem — these functions work "
-        "correctly in their intended environment. Live application testing is "
-        "planned for v2."
+        "server, database connection, or live API) that myCode cannot "
+        "simulate in isolation."
     ),
     "unknown": "These tests could not run due to unexpected issues.",
 }
+
+
+def _runtime_ctx_explanation(http_ran: bool) -> str:
+    """Return the appropriate runtime-context explanation based on whether HTTP testing ran."""
+    if http_ran:
+        return (
+            "These functions could not be tested in isolation, but myCode "
+            "tested your application under load via HTTP — see HTTP "
+            "findings above."
+        )
+    return (
+        "These functions require runtime context (e.g. a running Streamlit "
+        "server, database connection, or live API) that myCode cannot "
+        "simulate in isolation."
+    )
 
 _FAILURE_REASON_HEADERS: dict[str, str] = {
     "unsupported_framework": "Unsupported Framework",
@@ -706,12 +720,13 @@ def _group_by_failure_reason(
 
 def _render_incomplete_text(
     sections: list[str], findings: list["Finding"],
+    http_ran: bool = False,
 ) -> None:
     """Render incomplete tests grouped by failure reason for plain text."""
     groups = _group_by_failure_reason(findings)
     for reason, group in groups.items():
         header = _FAILURE_REASON_HEADERS.get(reason, "Other Issues")
-        explanation = _FAILURE_REASON_EXPLANATIONS.get(
+        explanation = _runtime_ctx_explanation(http_ran) if reason == "runtime_context_required" else _FAILURE_REASON_EXPLANATIONS.get(
             reason,
             "These tests could not run fully due to environment issues.",
         )
@@ -734,12 +749,13 @@ def _render_incomplete_text(
 
 def _render_incomplete_markdown(
     lines: list[str], findings: list["Finding"],
+    http_ran: bool = False,
 ) -> None:
     """Render incomplete tests grouped by failure reason for markdown."""
     groups = _group_by_failure_reason(findings)
     for reason, group in groups.items():
         header = _FAILURE_REASON_HEADERS.get(reason, "Other Issues")
-        explanation = _FAILURE_REASON_EXPLANATIONS.get(
+        explanation = _runtime_ctx_explanation(http_ran) if reason == "runtime_context_required" else _FAILURE_REASON_EXPLANATIONS.get(
             reason,
             "These tests could not run fully due to environment issues.",
         )
@@ -848,6 +864,9 @@ class ReportGenerator:
             scenarios_run=len(execution.scenario_results),
         )
 
+        # 0. Track whether HTTP testing ran (for runtime-context messaging)
+        report.http_ran = execution.http_ran
+
         # 0a. Classify project first — description depends on it
         self._classify_project(report, ingestion)
 
@@ -901,6 +920,12 @@ class ReportGenerator:
 
         # 1. Analyze execution results → findings + degradation
         self._analyze_execution(execution, report)
+
+        # 1b. Merge HTTP-specific findings and degradation points
+        if execution.http_findings:
+            report.findings.extend(execution.http_findings)
+        if execution.http_degradation_points:
+            report.degradation_points.extend(execution.http_degradation_points)
 
         # 1a. Auto-classify every finding against taxonomy
         self._classify_all_findings(report)
@@ -996,6 +1021,19 @@ class ReportGenerator:
         failed = 0
         total_errors = 0
 
+        # Choose runtime-context message based on whether HTTP testing ran
+        if execution.http_ran:
+            _runtime_ctx_desc = (
+                "This function could not be tested in isolation, but "
+                "myCode tested your application under load via HTTP — "
+                "see HTTP findings above."
+            )
+        else:
+            _runtime_ctx_desc = (
+                "This function requires runtime context that myCode "
+                "cannot simulate in isolation."
+            )
+
         for sr in execution.scenario_results:
             total_errors += sr.total_errors
 
@@ -1018,12 +1056,7 @@ class ReportGenerator:
             # ── Harness failures → incomplete tests (myCode limitation) ──
             if sr.failure_reason:
                 if sr.failure_reason == "runtime_context_required":
-                    desc = (
-                        "This function requires runtime context (e.g. "
-                        "Streamlit server, database connection, live API) "
-                        "that myCode cannot simulate in isolation. Live "
-                        "application testing is planned for v2."
-                    )
+                    desc = _runtime_ctx_desc
                 else:
                     desc = sr.summary or "Test could not run."
                 f = Finding(
@@ -1046,12 +1079,7 @@ class ReportGenerator:
                         title=f"Could not test: {ps.get('name', 'unknown')}",
                         severity="info",
                         category=sr.scenario_category,
-                        description=(
-                            "This function requires runtime context (e.g. "
-                            "Streamlit server, database connection, live API) "
-                            "that myCode cannot simulate in isolation. Live "
-                            "application testing is planned for v2."
-                        ),
+                        description=_runtime_ctx_desc,
                         affected_dependencies=self._deps_from_name(
                             sr.scenario_name,
                         ),
