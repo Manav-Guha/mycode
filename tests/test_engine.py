@@ -2819,6 +2819,134 @@ class TestBrowserOnlySkip:
         result = engine.execute(scenarios)
         assert result.scenario_results[0].failure_reason != "browser_framework"
 
+    def test_nextjs_not_browser_only(self, tmp_path):
+        """Next.js project (next + react + react-dom, no express) → NOT browser-only."""
+        session = _make_session(tmp_path)
+        version_result = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        ingestion = IngestionResult(
+            project_path="/fake/nextjs-app",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="app/page.tsx",
+                    functions=[FunctionInfo(name="Home", file_path="app/page.tsx", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="next"),
+                DependencyInfo(name="react"),
+                DependencyInfo(name="react-dom"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_scenario", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].failure_reason != "browser_framework"
+
+    def test_pure_react_still_browser_only(self, tmp_path):
+        """React + react-dom (no next, no express) → still browser-only."""
+        session = _make_session(tmp_path)
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        ingestion = IngestionResult(
+            project_path="/fake/react-app",
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="react"),
+                DependencyInfo(name="react-dom"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_scenario", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].status == "skipped"
+        assert result.scenario_results[0].failure_reason == "browser_framework"
+
+    def test_nextjs_plus_express_not_browser_only(self, tmp_path):
+        """Next.js + Express → NOT browser-only (no regression)."""
+        session = _make_session(tmp_path)
+        version_result = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        ingestion = IngestionResult(
+            project_path="/fake/nextjs-express",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="server.js",
+                    functions=[FunctionInfo(name="handler", file_path="server.js", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="next"),
+                DependencyInfo(name="react"),
+                DependencyInfo(name="express"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_scenario", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].failure_reason != "browser_framework"
+
+    def test_vue_without_server_still_browser_only(self, tmp_path):
+        """Vue project without server packages → still browser-only."""
+        session = _make_session(tmp_path)
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        ingestion = IngestionResult(
+            project_path="/fake/vue-app",
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="vue"),
+                DependencyInfo(name="@vue/cli-service"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_scenario", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].status == "skipped"
+        assert result.scenario_results[0].failure_reason == "browser_framework"
+
 
 # ── User Timeout Override Tests ──
 

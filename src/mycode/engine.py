@@ -249,10 +249,13 @@ _BROWSER_FRAMEWORK_CORES = frozenset({
 })
 
 # Server-side packages — if present alongside browser frameworks, the
-# project is fullstack and callable harnesses may work on server code
+# project is fullstack and callable harnesses may work on server code.
+# Full-stack meta-frameworks (next, nuxt, gatsby) include their own
+# server — a Next.js project is NOT browser-only even without express.
 _SERVER_SIDE_PACKAGES = frozenset({
     "express", "koa", "hapi", "@hapi/hapi", "fastify",
     "nest", "@nestjs/core",
+    "next", "nuxt", "gatsby",
 })
 
 
