@@ -237,13 +237,21 @@ _UNSUPPORTED_FRAMEWORKS = frozenset({
     "streamlit", "gradio",
 })
 
-# Browser-only packages — callable harness cannot import these (need DOM/JSX)
-_BROWSER_ONLY_PACKAGES = frozenset({
+# Core browser framework packages — presence of any means the project's
+# primary stack is browser-rendered (JSX/DOM required)
+_BROWSER_FRAMEWORK_CORES = frozenset({
     "react", "react-dom", "react-scripts",
     "vue", "@vue/cli-service",
     "angular", "@angular/core", "@angular/cli",
     "svelte", "@sveltejs/kit",
     "next", "nuxt", "gatsby",
+})
+
+# Server-side packages — if present alongside browser frameworks, the
+# project is fullstack and callable harnesses may work on server code
+_SERVER_SIDE_PACKAGES = frozenset({
+    "express", "koa", "hapi", "@hapi/hapi", "fastify",
+    "nest", "@nestjs/core",
 })
 
 
@@ -450,16 +458,21 @@ class ExecutionEngine:
             return False
 
     def _is_browser_only_project(self) -> bool:
-        """Return True if the project's primary deps are all browser-only frameworks.
+        """Return True if the project is a browser-only frontend app.
+
+        Detection: at least one core browser framework package is present
+        AND no server-side packages are present. Utility packages like sass,
+        postcss, tailwindcss etc. do NOT prevent browser-only detection.
 
         When True, callable harnesses cannot work (JSX/DOM required), so the
         engine should skip them and let HTTP testing handle the project instead.
         """
-        non_dev = [d for d in self.ingestion.dependencies if not d.is_dev]
-        if not non_dev:
+        non_dev_names = {d.name for d in self.ingestion.dependencies if not d.is_dev}
+        if not non_dev_names:
             return False
-        # Check if every non-dev dependency is a browser-only package
-        return all(d.name in _BROWSER_ONLY_PACKAGES for d in non_dev)
+        has_browser_framework = bool(non_dev_names & _BROWSER_FRAMEWORK_CORES)
+        has_server_framework = bool(non_dev_names & _SERVER_SIDE_PACKAGES)
+        return has_browser_framework and not has_server_framework
 
     def execute(
         self,

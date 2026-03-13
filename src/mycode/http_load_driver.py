@@ -581,18 +581,18 @@ def _describe_response_curve(ep_result: EndpointLoadResult) -> str:
     """Describe the response time degradation curve."""
     if len(ep_result.levels) < 2:
         return ""
-    first = ep_result.levels[0]
+    baseline_ms = _warmed_up_baseline(ep_result.levels)
     last = ep_result.levels[-1]
-    if first.median_response_ms > 0:
-        ratio = last.median_response_ms / first.median_response_ms
+    if baseline_ms > 0:
+        ratio = last.median_response_ms / baseline_ms
         if ratio > 5:
             return (
                 f"Response time increased {ratio:.0f}x from "
-                f"{first.median_response_ms:.0f}ms to {last.median_response_ms:.0f}ms"
+                f"{baseline_ms:.0f}ms to {last.median_response_ms:.0f}ms"
             )
         if ratio > 2:
             return (
-                f"Response time doubled from {first.median_response_ms:.0f}ms "
+                f"Response time doubled from {baseline_ms:.0f}ms "
                 f"to {last.median_response_ms:.0f}ms"
             )
     return ""
@@ -714,18 +714,18 @@ def _endpoint_to_finding(
 
     # Check for degradation without hard failure
     if len(ep_result.levels) >= 2:
-        first = ep_result.levels[0]
+        baseline_ms = _warmed_up_baseline(ep_result.levels)
         last = ep_result.levels[-1]
 
         # Response time degradation (>5x increase = WARNING)
-        if first.median_response_ms > 0:
-            ratio = last.median_response_ms / first.median_response_ms
+        if baseline_ms > 0:
+            ratio = last.median_response_ms / baseline_ms
             if ratio > 5:
                 desc = (
                     f"Response time on your application increases {ratio:.0f}x "
-                    f"between {first.concurrency} and {last.concurrency} "
-                    f"concurrent users ({first.median_response_ms:.0f}ms → "
-                    f"{last.median_response_ms:.0f}ms)."
+                    f"under load ({baseline_ms:.0f}ms baseline → "
+                    f"{last.median_response_ms:.0f}ms at "
+                    f"{last.concurrency} concurrent users)."
                 )
                 # Find the concurrency where degradation became significant
                 degrade_at = _find_degradation_onset(ep_result.levels)
@@ -774,14 +774,58 @@ def _endpoint_to_finding(
                 _load_level=worst_error_level.concurrency,
             )
 
+    # Memory capacity finding — estimate if per-process memory is too high
+    # for the user's stated scale
+    if len(ep_result.levels) >= 1 and user_scale:
+        # Use the baseline (first level) memory as per-process footprint
+        baseline_mem = ep_result.levels[0].memory_mb
+        if baseline_mem > 0:
+            # Estimate capacity on a 2GB server: (2048 - 512 OS overhead) / per-process
+            available_mb = 2048 - 512
+            estimated_capacity = int(available_mb / baseline_mem) if baseline_mem > 0 else 0
+            if estimated_capacity < user_scale:
+                severity = "critical" if estimated_capacity < user_scale // 2 else "warning"
+                desc = (
+                    f"Your server process uses {baseline_mem:.0f}MB of memory at "
+                    f"baseline. On a typical 2GB server, this limits you to "
+                    f"approximately {estimated_capacity} concurrent sessions — "
+                )
+                if estimated_capacity < user_scale:
+                    desc += (
+                        f"well below your expected {user_scale} concurrent users. "
+                        f"Consider memory profiling and optimisation, or provision "
+                        f"larger infrastructure."
+                    )
+                return Finding(
+                    title=f"High memory baseline limits concurrent capacity on {path}",
+                    severity=severity,
+                    category="http_load_testing",
+                    description=desc,
+                    affected_dependencies=list(deps),
+                    _finding_type="errors_during",
+                )
+
     return None  # Passed all levels
+
+
+def _warmed_up_baseline(levels: list[LoadLevelResult]) -> float:
+    """Return the warmed-up baseline response time, excluding cold-start outlier.
+
+    The first request at concurrency=1 often hits server/JIT warm-up and is
+    significantly slower than steady-state.  Use the minimum of the first 3
+    data points (or fewer if there aren't 3) as the true baseline.
+    """
+    if not levels:
+        return 0.0
+    candidates = [lvl.median_response_ms for lvl in levels[:3] if lvl.median_response_ms > 0]
+    return min(candidates) if candidates else 0.0
 
 
 def _find_degradation_onset(levels: list[LoadLevelResult]) -> int:
     """Find the concurrency level where response time first doubles from baseline."""
     if not levels:
         return 0
-    baseline = levels[0].median_response_ms
+    baseline = _warmed_up_baseline(levels)
     if baseline <= 0:
         return 0
     for lvl in levels[1:]:

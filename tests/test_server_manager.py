@@ -38,6 +38,7 @@ from mycode.server_manager import (
     _health_check_url,
     _pick_preferred,
     STARTUP_TIMEOUT_SECONDS,
+    _FRAMEWORK_STARTUP_TIMEOUTS,
 )
 from mycode.ingester import (
     DependencyInfo,
@@ -878,3 +879,46 @@ class TestReactCRADetection:
             dependencies=[DependencyInfo(name="react-scripts")],
         )
         assert can_start_server(ingestion, tmp_path, language="javascript") is True
+
+
+class TestCRAStartupTimeout:
+    """Test per-framework startup timeouts."""
+
+    def test_react_scripts_has_120s_timeout(self):
+        """CRA/react-scripts should have a 120s startup timeout."""
+        assert _FRAMEWORK_STARTUP_TIMEOUTS["react-scripts"] == 120
+
+    def test_default_timeout_unchanged(self):
+        """Default startup timeout remains 30s."""
+        assert STARTUP_TIMEOUT_SECONDS == 30
+
+    def test_start_server_uses_framework_timeout(self):
+        """start_server should use 120s for react-scripts when no timeout specified."""
+        session = MagicMock()
+        session._setup_complete = True
+        session.venv_dir = Path("/tmp/venv")
+        session.venv_python = Path("/tmp/venv/bin/python")
+        session.project_copy_dir = Path("/tmp/project")
+
+        detection = FrameworkDetection(
+            framework="react-scripts", entry_file="src/index.js"
+        )
+
+        with patch("mycode.server_manager._find_available_port", return_value=3000), \
+             patch("mycode.server_manager.subprocess.Popen") as mock_popen, \
+             patch("mycode.server_manager._check_health", return_value=False), \
+             patch("mycode.server_manager._check_health_tcp", return_value=False), \
+             patch("mycode.server_manager.time.monotonic") as mock_time, \
+             patch("mycode.server_manager.time.sleep"), \
+             patch("mycode.server_manager.kill_process_group"):
+            # Simulate: process never becomes ready, times out
+            mock_proc = MagicMock()
+            mock_proc.poll.return_value = None  # still running
+            mock_proc.communicate.return_value = (b"", b"timeout")
+            mock_popen.return_value = mock_proc
+            # Advance time past 120s
+            mock_time.side_effect = [0, 0, 121, 121]
+
+            result = start_server(session, detection)
+            assert result.success is False
+            assert "120s" in result.error

@@ -34,8 +34,14 @@ _IS_WINDOWS = sys.platform == "win32"
 
 # ── Framework Constants ──
 
-# Startup timeout — if the server isn't ready by this, it's a finding
+# Default startup timeout — if the server isn't ready by this, it's a finding
 STARTUP_TIMEOUT_SECONDS = 30
+
+# Per-framework startup timeouts.  CRA/React dev servers run webpack
+# compilation on cold start which can take 2-4 minutes.
+_FRAMEWORK_STARTUP_TIMEOUTS: dict[str, int] = {
+    "react-scripts": 120,
+}
 
 # Health-check poll interval
 POLL_INTERVAL_SECONDS = 0.5
@@ -411,7 +417,7 @@ def _check_health_tcp(port: int) -> bool:
 def start_server(
     session: SessionManager,
     detection: FrameworkDetection,
-    timeout: int = STARTUP_TIMEOUT_SECONDS,
+    timeout: Optional[int] = None,
 ) -> ServerStartResult:
     """Start a server process inside the session sandbox and poll for readiness.
 
@@ -421,12 +427,17 @@ def start_server(
     Args:
         session: An initialised SessionManager with setup() already called.
         detection: Framework detection result from ``detect_framework_entry``.
-        timeout: Maximum seconds to wait for server readiness.
+        timeout: Maximum seconds to wait for server readiness.  If None,
+            uses a per-framework default (120s for CRA, 30s for others).
 
     Returns:
         ServerStartResult with success=True and a ServerInfo on success,
         or success=False with an error message on failure.
     """
+    if timeout is None:
+        timeout = _FRAMEWORK_STARTUP_TIMEOUTS.get(
+            detection.framework, STARTUP_TIMEOUT_SECONDS
+        )
     if not session._setup_complete:
         return ServerStartResult(
             success=False,

@@ -2543,3 +2543,68 @@ class TestBrowserOnlySkip:
         # Still browser-only (jest is dev)
         assert result.scenario_results[0].status == "skipped"
         assert result.scenario_results[0].failure_reason == "browser_framework"
+
+    def test_react_with_utility_deps_still_browser_only(self, tmp_path):
+        """React + utility packages like sass should still be browser-only."""
+        session = _make_session(tmp_path)
+        session.run_in_session.return_value = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        ingestion = IngestionResult(
+            project_path="/fake/react-app",
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="react"),
+                DependencyInfo(name="react-dom"),
+                DependencyInfo(name="react-scripts"),
+                DependencyInfo(name="sass"),  # utility, not server-side
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_scenario", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].status == "skipped"
+        assert result.scenario_results[0].failure_reason == "browser_framework"
+
+    def test_no_browser_framework_not_skipped(self, tmp_path):
+        """A project with only utility deps and no browser framework is NOT skipped."""
+        session = _make_session(tmp_path)
+        version_result = SessionResult(
+            returncode=0, stdout="v20.11.0\n", stderr="",
+        )
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [], "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.side_effect = [version_result, harness_result]
+        ingestion = IngestionResult(
+            project_path="/fake/utility-app",
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="index.js",
+                    functions=[FunctionInfo(name="run", file_path="index.js", lineno=1, args=[])],
+                    classes=[], imports=[], lines_of_code=10,
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="lodash"),
+                DependencyInfo(name="axios"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="javascript")
+        scenarios = [
+            StressTestScenario(
+                name="test_scenario", category="data_volume_scaling", description="Test",
+            ),
+        ]
+        result = engine.execute(scenarios)
+        assert result.scenario_results[0].failure_reason != "browser_framework"

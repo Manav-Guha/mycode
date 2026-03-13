@@ -29,6 +29,7 @@ from mycode.http_load_driver import (
     _describe_response_curve,
     _find_degradation_onset,
     _get_process_memory_mb,
+    _warmed_up_baseline,
     _send_request,
     drive_endpoint,
     drive_load_level,
@@ -985,3 +986,107 @@ class TestHttpRanIntegration:
             session, ingestion, execution, "python"
         )
         assert result.http_ran is False
+
+
+class TestWarmedUpBaseline:
+    """Test cold-start outlier exclusion from baseline calculation."""
+
+    def test_cold_start_excluded(self):
+        """First point at 45ms, next two at 5ms — baseline should be 5ms."""
+        levels = [
+            _make_load_level(concurrency=1, median_ms=45.0),
+            _make_load_level(concurrency=5, median_ms=5.0),
+            _make_load_level(concurrency=10, median_ms=6.0),
+            _make_load_level(concurrency=50, median_ms=7.0),
+        ]
+        assert _warmed_up_baseline(levels) == 5.0
+
+    def test_stable_baseline_unchanged(self):
+        """When first point is already the lowest, it's used as-is."""
+        levels = [
+            _make_load_level(concurrency=1, median_ms=5.0),
+            _make_load_level(concurrency=5, median_ms=6.0),
+            _make_load_level(concurrency=10, median_ms=8.0),
+        ]
+        assert _warmed_up_baseline(levels) == 5.0
+
+    def test_single_level(self):
+        """Single data point is used as baseline."""
+        levels = [_make_load_level(concurrency=1, median_ms=45.0)]
+        assert _warmed_up_baseline(levels) == 45.0
+
+    def test_empty_levels(self):
+        assert _warmed_up_baseline([]) == 0.0
+
+
+class TestColdStartDegradationFinding:
+    """Test that cold-start outlier doesn't mask real degradation."""
+
+    def test_degradation_detected_with_cold_start(self):
+        """45ms cold start, 5ms warmed up, 127ms at load — 25x → WARNING."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=45.0),
+                _make_load_level(concurrency=5, median_ms=5.0),
+                _make_load_level(concurrency=10, median_ms=6.0),
+                _make_load_level(concurrency=50, median_ms=20.0),
+                _make_load_level(concurrency=100, median_ms=127.0),
+            ],
+        )
+        finding = _endpoint_to_finding(ep, ["react"], user_scale=500)
+        assert finding is not None
+        assert finding.severity == "warning"
+        assert "5ms" in finding.description or "baseline" in finding.description.lower()
+
+    def test_no_degradation_without_cold_start_issue(self):
+        """5ms → 10ms = 2x, below 5x threshold → no finding."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=5.0),
+                _make_load_level(concurrency=5, median_ms=6.0, memory_mb=5.0),
+                _make_load_level(concurrency=50, median_ms=10.0, memory_mb=5.0),
+            ],
+        )
+        finding = _endpoint_to_finding(ep, ["react"], user_scale=500)
+        # Either None or a memory finding, but NOT a response time finding
+        if finding is not None:
+            assert "response time" not in finding.title.lower()
+
+
+class TestMemoryCapacityFinding:
+    """Test memory baseline capacity estimation findings."""
+
+    def test_high_memory_generates_finding(self):
+        """71MB baseline, user expects 500 → capacity ~21 → CRITICAL."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=71.0),
+                _make_load_level(concurrency=5, median_ms=6.0, memory_mb=73.0),
+            ],
+        )
+        finding = _endpoint_to_finding(ep, ["react"], user_scale=500)
+        assert finding is not None
+        assert "memory" in finding.title.lower()
+        assert finding.severity in ("warning", "critical")
+        assert "500" in finding.description
+
+    def test_low_memory_no_finding(self):
+        """5MB baseline, user expects 10 → capacity ~307 → no finding."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=5.0),
+                _make_load_level(concurrency=5, median_ms=6.0, memory_mb=5.5),
+            ],
+        )
+        finding = _endpoint_to_finding(ep, ["express"], user_scale=10)
+        assert finding is None
+
+    def test_memory_finding_no_user_scale(self):
+        """Without user_scale, memory finding should not be generated."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=200.0),
+            ],
+        )
+        finding = _endpoint_to_finding(ep, ["react"], user_scale=None)
+        assert finding is None
