@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from mycode.ingester import IngestionResult
+from mycode.ingester import FileAnalysis, IngestionResult
 from mycode.interface import TerminalIO, UserIO
 from mycode.scenario import StressTestScenario
 from mycode.session import SessionManager, SessionResult
@@ -801,8 +801,13 @@ class ExecutionEngine:
         if skip_imports:
             harness_config["target_functions"] = []
         else:
-            # Add function info from ingestion
+            # Add function info from ingestion — only include functions
+            # from files that actually import the scenario's dependencies.
+            # This prevents the function × dependency explosion where every
+            # function gets tested against every dependency profile.
+            dep_import_names = self._dep_import_names(scenario)
             target_funcs = []
+            all_funcs = []  # fallback if dep filtering yields nothing
             for analysis in self.ingestion.file_analyses:
                 if self.language == "javascript":
                     mod = analysis.file_path
@@ -814,14 +819,28 @@ class ExecutionEngine:
                         .replace("\\", ".")
                     )
                 if mod in target_modules or not target_modules:
-                    for func in analysis.functions:
-                        if not func.is_method and not func.name.startswith("_"):
-                            target_funcs.append({
-                                "module": mod,
-                                "name": func.name,
-                                "args": func.args,
-                                "is_async": func.is_async,
-                            })
+                    file_funcs = [
+                        {
+                            "module": mod,
+                            "name": func.name,
+                            "args": func.args,
+                            "is_async": func.is_async,
+                        }
+                        for func in analysis.functions
+                        if not func.is_method and not func.name.startswith("_")
+                    ]
+                    all_funcs.extend(file_funcs)
+                    # If we know which deps this scenario targets, only
+                    # include functions from files that import those deps.
+                    if dep_import_names and not self._file_imports_any(
+                        analysis, dep_import_names,
+                    ):
+                        continue
+                    target_funcs.extend(file_funcs)
+            # Fall back to all functions if dep filtering found nothing
+            # (e.g. import info unavailable or dep name mismatch).
+            if not target_funcs and all_funcs:
+                target_funcs = all_funcs
             harness_config["target_functions"] = target_funcs[:50]
 
         # Pass harness_body override if present
@@ -1183,6 +1202,59 @@ class ExecutionEngine:
                     modules.append(mod)
 
         return modules[:20]
+
+    # ── Dependency-aware function filtering ──
+
+    # Map package names (pip) → import names (Python) for common mismatches.
+    _PKG_TO_IMPORT: dict[str, str] = {
+        "scikit-learn": "sklearn",
+        "pillow": "PIL",
+        "python-dotenv": "dotenv",
+        "beautifulsoup4": "bs4",
+        "opencv-python": "cv2",
+        "pyyaml": "yaml",
+        "python-dateutil": "dateutil",
+        "pymongo": "pymongo",
+        "attrs": "attr",
+    }
+
+    def _dep_import_names(
+        self, scenario: StressTestScenario,
+    ) -> set[str]:
+        """Return the set of import-level names for this scenario's deps.
+
+        E.g. target_dependencies=["scikit-learn", "pandas"] → {"sklearn", "pandas"}.
+        Returns empty set when there are no target deps (caller should skip
+        the filtering step).
+        """
+        deps = scenario.target_dependencies
+        if not deps:
+            return set()
+        names: set[str] = set()
+        for dep in deps:
+            lower = dep.lower()
+            if lower in self._PKG_TO_IMPORT:
+                names.add(self._PKG_TO_IMPORT[lower])
+            else:
+                # Default: replace hyphens with underscores
+                names.add(lower.replace("-", "_"))
+            # Also add the raw dep name — some packages import under their
+            # pip name (e.g. "requests", "flask").
+            names.add(lower.replace("-", "_"))
+        return names
+
+    @staticmethod
+    def _file_imports_any(
+        analysis: FileAnalysis,
+        dep_import_names: set[str],
+    ) -> bool:
+        """Return True if *analysis* imports any of the given dependency names."""
+        for imp in analysis.imports:
+            # imp.module is the top-level module, e.g. "langchain.chat_models"
+            top_level = imp.module.split(".")[0].lower()
+            if top_level in dep_import_names:
+                return True
+        return False
 
     def _check_failure_indicators(
         self,

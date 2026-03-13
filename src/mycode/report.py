@@ -1203,8 +1203,14 @@ class ReportGenerator:
                 f._load_level = failing_load
                 report.findings.append(f)
 
-            # Check for errors
-            if sr.total_errors > 0 and sr.status != "failed":
+            # Check for errors — skip if a CRITICAL finding already covers
+            # this scenario (resource_cap_hit or failed status) to avoid
+            # duplicate findings at different severity levels.
+            if (
+                sr.total_errors > 0
+                and sr.status != "failed"
+                and not sr.resource_cap_hit
+            ):
                 err_detail = self._summarize_errors(sr)
                 if load_detail:
                     err_detail = f"{err_detail}{load_detail}"
@@ -1229,8 +1235,11 @@ class ReportGenerator:
                 f._load_level = failing_load
                 report.findings.append(f)
 
-            # Check failure indicators
-            if sr.failure_indicators_triggered:
+            # Check failure indicators — skip if a CRITICAL finding
+            # already covers this scenario to avoid duplicate findings.
+            if sr.failure_indicators_triggered and not (
+                sr.status == "failed" or sr.resource_cap_hit
+            ):
                 human_triggers = [
                     _humanize_trigger(t)
                     for t in sr.failure_indicators_triggered
@@ -2508,6 +2517,34 @@ class ReportGenerator:
         """
         from collections import defaultdict
 
+        _sev_order = {"critical": 0, "warning": 1, "info": 2}
+
+        # ── Pre-pass: deduplicate findings with the same title at
+        # different severity levels ──
+        # A single scenario can produce findings at different severity levels
+        # (e.g. resource_cap_hit → CRITICAL and errors → WARNING). Keep only
+        # the highest severity per title. Findings at the *same* severity
+        # are left alone — they represent different aspects (errors vs.
+        # failure indicators) and will be grouped later.
+        by_title: dict[str, list[Finding]] = {}
+        for f in findings:
+            by_title.setdefault(f.title, []).append(f)
+        deduped: list[Finding] = []
+        for _title, group in by_title.items():
+            if len(group) == 1:
+                deduped.append(group[0])
+                continue
+            # Check if there are mixed severities
+            severities = {f.severity for f in group}
+            if len(severities) > 1:
+                # Keep only the highest severity
+                group.sort(key=lambda f: _sev_order.get(f.severity, 9))
+                deduped.append(group[0])
+            else:
+                # Same severity — keep all (different finding types)
+                deduped.extend(group)
+        findings = deduped
+
         # Group by (category, pattern, primary_dep) so findings from
         # different dependency domains are never grouped together.
         buckets: dict[tuple[str, str, str], list[Finding]] = defaultdict(list)
@@ -2536,7 +2573,6 @@ class ReportGenerator:
                 if not placed:
                     clusters.append([f])
 
-            _sev_order = {"critical": 0, "warning": 1, "info": 2}
             for cluster in clusters:
                 # Promote the highest-severity finding to representative
                 # so that a critical finding is never hidden behind a

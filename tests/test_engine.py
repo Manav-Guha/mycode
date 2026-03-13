@@ -39,6 +39,7 @@ from mycode.ingester import (
     FileAnalysis,
     FunctionFlow,
     FunctionInfo,
+    ImportInfo,
     IngestionResult,
 )
 from mycode.scenario import StressTestScenario
@@ -88,7 +89,9 @@ def _make_ingestion(files=None):
                     ),
                 ],
                 classes=[],
-                imports=[],
+                imports=[
+                    ImportInfo(module="flask", names=["Flask"], is_from_import=True),
+                ],
                 lines_of_code=30,
             ),
         ]
@@ -1168,6 +1171,109 @@ class TestHarnessConfig:
             f for f in config["target_functions"] if f["name"] == "async_handler"
         )
         assert async_func["is_async"] is True
+
+    def test_dep_filtering_restricts_functions_to_relevant_files(self, tmp_path):
+        """Functions from files that don't import the scenario's deps are excluded."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion(files=[
+            FileAnalysis(
+                file_path="web.py",
+                functions=[
+                    FunctionInfo(name="handle_request", file_path="web.py", lineno=1, args=[]),
+                ],
+                imports=[
+                    ImportInfo(module="flask", names=["Flask"], is_from_import=True),
+                ],
+                lines_of_code=20,
+            ),
+            FileAnalysis(
+                file_path="ml.py",
+                functions=[
+                    FunctionInfo(name="train_model", file_path="ml.py", lineno=1, args=[]),
+                ],
+                imports=[
+                    ImportInfo(module="sklearn.ensemble", names=["RandomForestClassifier"], is_from_import=True),
+                ],
+                lines_of_code=20,
+            ),
+        ])
+        engine = ExecutionEngine(session, ingestion)
+
+        # Scenario targeting flask — should only get handle_request
+        flask_scenario = _make_scenario(
+            name="flask_stress",
+            test_config={
+                "parameters": {},
+                "resource_limits": {},
+                "measurements": [],
+            },
+        )
+        flask_scenario.target_dependencies = ["flask"]
+        config = engine._build_harness_config(flask_scenario)
+        func_names = [f["name"] for f in config["target_functions"]]
+        assert "handle_request" in func_names
+        assert "train_model" not in func_names
+
+        # Scenario targeting scikit-learn — should only get train_model
+        sklearn_scenario = _make_scenario(
+            name="sklearn_stress",
+            test_config={
+                "parameters": {},
+                "resource_limits": {},
+                "measurements": [],
+            },
+        )
+        sklearn_scenario.target_dependencies = ["scikit-learn"]
+        config = engine._build_harness_config(sklearn_scenario)
+        func_names = [f["name"] for f in config["target_functions"]]
+        assert "train_model" in func_names
+        assert "handle_request" not in func_names
+
+    def test_dep_filtering_falls_back_when_no_imports_match(self, tmp_path):
+        """When no files import the target dep, all functions are included."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion(files=[
+            FileAnalysis(
+                file_path="app.py",
+                functions=[
+                    FunctionInfo(name="do_stuff", file_path="app.py", lineno=1, args=[]),
+                ],
+                imports=[],  # no imports at all
+                lines_of_code=10,
+            ),
+        ])
+        engine = ExecutionEngine(session, ingestion)
+        scenario = _make_scenario()
+        config = engine._build_harness_config(scenario)
+        func_names = [f["name"] for f in config["target_functions"]]
+        assert "do_stuff" in func_names
+
+    def test_dep_filtering_skipped_for_no_target_deps(self, tmp_path):
+        """Scenarios with no target_dependencies include all functions."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion(files=[
+            FileAnalysis(
+                file_path="app.py",
+                functions=[
+                    FunctionInfo(name="func_a", file_path="app.py", lineno=1, args=[]),
+                ],
+                imports=[],
+                lines_of_code=10,
+            ),
+        ])
+        engine = ExecutionEngine(session, ingestion)
+        scenario = _make_scenario(
+            name="generic_stress",
+            test_config={
+                "parameters": {},
+                "resource_limits": {},
+                "measurements": [],
+            },
+        )
+        scenario.target_dependencies = []
+        config = engine._build_harness_config(scenario)
+        func_names = [f["name"] for f in config["target_functions"]]
+        assert "func_a" in func_names
 
 
 # ── Edge Case & Robustness Tests ──

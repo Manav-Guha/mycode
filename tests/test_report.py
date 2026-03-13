@@ -1155,6 +1155,100 @@ class TestFindingGrouping:
         assert all(f.group_count == 1 for f in result)
 
 
+class TestFindingDeduplicationBySeverity:
+    """Test that same-title findings at different severities are deduplicated."""
+
+    def test_same_title_different_severity_keeps_highest(self):
+        """CRITICAL + WARNING with same title → only CRITICAL kept."""
+        findings = [
+            Finding(
+                title="Data Volume Scaling (pandas)",
+                severity="critical",
+                category="data_volume_scaling",
+                description="Resource limit hit.",
+                affected_dependencies=["pandas"],
+                _peak_memory_mb=500,
+                _execution_time_ms=1000,
+            ),
+            Finding(
+                title="Data Volume Scaling (pandas)",
+                severity="warning",
+                category="data_volume_scaling",
+                description="3 errors occurred.",
+                affected_dependencies=["pandas"],
+                _peak_memory_mb=500,
+                _execution_time_ms=1000,
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        assert len(result) == 1
+        assert result[0].severity == "critical"
+
+    def test_same_title_same_severity_kept(self):
+        """Two WARNING findings with same title but different types are kept."""
+        findings = [
+            Finding(
+                title="Flask Concurrent Stress",
+                severity="warning",
+                category="concurrent_execution",
+                description="Errors occurred.",
+                affected_dependencies=["flask"],
+                _peak_memory_mb=100,
+                _execution_time_ms=200,
+            ),
+            Finding(
+                title="Flask Concurrent Stress",
+                severity="warning",
+                category="concurrent_execution",
+                description="Memory growth unbounded.",
+                affected_dependencies=["flask"],
+                _peak_memory_mb=100,
+                _execution_time_ms=200,
+            ),
+        ]
+        result = ReportGenerator._group_similar_findings(findings)
+        # Both kept (same severity) — they may be grouped by metrics though
+        titles = [f.title for f in result]
+        assert "Flask Concurrent Stress" in titles
+
+    def test_resource_cap_suppresses_error_finding(self):
+        """A scenario with resource_cap_hit should not also produce error finding."""
+        from mycode.engine import ScenarioResult, StepResult, ExecutionEngineResult
+        from mycode.ingester import IngestionResult
+        sr = ScenarioResult(
+            scenario_name="pandas_data_volume",
+            scenario_category="data_volume_scaling",
+            status="completed",
+            resource_cap_hit=True,
+            total_errors=5,
+            steps=[
+                StepResult(
+                    step_name="size_1000",
+                    execution_time_ms=100.0,
+                    memory_peak_mb=500.0,
+                    error_count=5,
+                    resource_cap_hit="memory",
+                ),
+            ],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_completed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        ingestion = IngestionResult(project_path="/tmp/test")
+        report = gen.generate(execution, ingestion, [])
+        # Should have exactly one finding (CRITICAL for resource cap),
+        # not a second WARNING for errors
+        scenario_findings = [
+            f for f in report.findings
+            if "pandas" in f.title.lower() or "data volume" in f.title.lower()
+        ]
+        severities = [f.severity for f in scenario_findings]
+        assert "critical" in severities
+        assert severities.count("warning") == 0
+
+
 class TestMetricsSimilar:
     """Direct tests for _metrics_similar."""
 
