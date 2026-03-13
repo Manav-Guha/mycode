@@ -10,24 +10,25 @@
 
 FROM python:3.11-slim
 
-# Install system dependencies + Node.js 20 LTS via NodeSource
-# Node.js is required for JavaScript/React/Express stress testing
+# Layer 1: System build tools (cached safely)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        gcc g++ libffi-dev libssl-dev python3-dev \
        libopenblas-dev libgfortran5 git \
        ca-certificates curl gnupg \
-    && mkdir -p /etc/apt/keyrings \
+    && rm -rf /var/lib/apt/lists/*
+
+# Layer 2: Node.js 20 LTS via NodeSource (separate layer to avoid cache hits
+# from the old Dockerfile that installed Debian's ancient nodejs/npm)
+RUN mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
        > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Verify Node.js and npm are available
-RUN node --version && npm --version
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version && npm --version
 
 # Install myCode from local source
 COPY . /opt/mycode
