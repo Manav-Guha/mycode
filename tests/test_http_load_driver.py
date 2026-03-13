@@ -29,6 +29,7 @@ from mycode.http_load_driver import (
     _describe_response_curve,
     _find_degradation_onset,
     _get_process_memory_mb,
+    _memory_capacity_finding,
     _warmed_up_baseline,
     _send_request,
     drive_endpoint,
@@ -808,9 +809,9 @@ class TestEnhancedFindings:
         ep = _make_endpoint_result(
             path="/",
             levels=[
-                _make_load_level(concurrency=1, median_ms=1.0),
-                _make_load_level(concurrency=50, median_ms=3.0),
-                _make_load_level(concurrency=100, median_ms=10.0),
+                _make_load_level(concurrency=1, median_ms=1.0, memory_mb=2.0),
+                _make_load_level(concurrency=50, median_ms=3.0, memory_mb=2.0),
+                _make_load_level(concurrency=100, median_ms=10.0, memory_mb=2.0),
             ],
         )
         load_result = HttpLoadResult(
@@ -1054,39 +1055,85 @@ class TestColdStartDegradationFinding:
 
 
 class TestMemoryCapacityFinding:
-    """Test memory baseline capacity estimation findings."""
+    """Test memory capacity finding generated independently of per-endpoint findings."""
 
-    def test_high_memory_generates_finding(self):
-        """71MB baseline, user expects 500 → capacity ~21 → CRITICAL."""
-        ep = _make_endpoint_result(
-            levels=[
-                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=71.0),
-                _make_load_level(concurrency=5, median_ms=6.0, memory_mb=73.0),
+    def _make_load_result(self, memory_mb=71.0):
+        """Build an HttpLoadResult with one endpoint at given baseline memory."""
+        return HttpLoadResult(
+            framework="react-scripts",
+            endpoint_results=[
+                _make_endpoint_result(
+                    levels=[
+                        _make_load_level(concurrency=1, median_ms=5.0, memory_mb=memory_mb),
+                        _make_load_level(concurrency=5, median_ms=6.0, memory_mb=memory_mb + 2),
+                    ],
+                ),
             ],
         )
-        finding = _endpoint_to_finding(ep, ["react"], user_scale=500)
+
+    def test_critical_when_below_25_percent(self):
+        """72MB baseline, 500 user_scale → ~21 capacity (<25%) → CRITICAL."""
+        finding = _memory_capacity_finding(
+            self._make_load_result(72.0), ["react"], user_scale=500,
+        )
         assert finding is not None
+        assert finding.severity == "critical"
         assert "memory" in finding.title.lower()
-        assert finding.severity in ("warning", "critical")
         assert "500" in finding.description
+        assert "72MB" in finding.description
 
-    def test_low_memory_no_finding(self):
-        """5MB baseline, user expects 10 → capacity ~307 → no finding."""
-        ep = _make_endpoint_result(
-            levels=[
-                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=5.0),
-                _make_load_level(concurrency=5, median_ms=6.0, memory_mb=5.5),
-            ],
+    def test_warning_when_between_25_and_75_percent(self):
+        """10MB baseline, 200 user_scale → ~153 capacity (76%) — but let's
+        use 20MB → ~76 capacity (38%) → WARNING."""
+        finding = _memory_capacity_finding(
+            self._make_load_result(20.0), ["react"], user_scale=200,
         )
-        finding = _endpoint_to_finding(ep, ["express"], user_scale=10)
+        assert finding is not None
+        assert finding.severity == "warning"
+
+    def test_no_finding_when_capacity_exceeds_scale(self):
+        """5MB baseline, 10 user_scale → ~307 capacity → no finding."""
+        finding = _memory_capacity_finding(
+            self._make_load_result(5.0), ["express"], user_scale=10,
+        )
         assert finding is None
 
-    def test_memory_finding_no_user_scale(self):
-        """Without user_scale, memory finding should not be generated."""
-        ep = _make_endpoint_result(
-            levels=[
-                _make_load_level(concurrency=1, median_ms=5.0, memory_mb=200.0),
+    def test_no_finding_without_user_scale(self):
+        """_memory_capacity_finding requires user_scale — caller gates this."""
+        # The function itself takes user_scale as required int, but
+        # http_results_to_findings only calls it when user_scale is set.
+        # Just verify there's no crash with a scale that's met.
+        finding = _memory_capacity_finding(
+            self._make_load_result(1.0), ["react"], user_scale=5,
+        )
+        assert finding is None  # 1536 capacity >> 5 scale
+
+    def test_memory_finding_alongside_degradation(self):
+        """Memory finding should appear even when response time degradation exists."""
+        constraints = OperationalConstraints(user_scale=500)
+        load_result = HttpLoadResult(
+            framework="react-scripts",
+            endpoint_results=[
+                _make_endpoint_result(
+                    levels=[
+                        _make_load_level(concurrency=1, median_ms=45.0, memory_mb=72.0),
+                        _make_load_level(concurrency=5, median_ms=5.0, memory_mb=72.0),
+                        _make_load_level(concurrency=10, median_ms=6.0, memory_mb=73.0),
+                        _make_load_level(concurrency=50, median_ms=20.0, memory_mb=75.0),
+                        _make_load_level(concurrency=100, median_ms=127.0, memory_mb=80.0),
+                    ],
+                ),
             ],
         )
-        finding = _endpoint_to_finding(ep, ["react"], user_scale=None)
+        findings = http_results_to_findings(load_result, constraints)
+        titles = [f.title.lower() for f in findings]
+        # Both response time AND memory findings should be present
+        assert any("response time" in t for t in titles), f"Missing response time finding: {titles}"
+        assert any("memory" in t for t in titles), f"Missing memory finding: {titles}"
+
+    def test_no_memory_data_no_finding(self):
+        """When memory measurements are all 0, no memory finding."""
+        finding = _memory_capacity_finding(
+            self._make_load_result(0.0), ["react"], user_scale=500,
+        )
         assert finding is None

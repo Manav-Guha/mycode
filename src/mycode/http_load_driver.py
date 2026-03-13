@@ -639,6 +639,12 @@ def http_results_to_findings(
         if finding:
             findings.append(finding)
 
+    # Memory capacity finding — independent of per-endpoint response/error findings
+    if user_scale:
+        mem_finding = _memory_capacity_finding(load_result, deps, user_scale)
+        if mem_finding:
+            findings.append(mem_finding)
+
     # Baseline 500 errors from probe
     if probe_results:
         for probe in probe_results:
@@ -774,37 +780,6 @@ def _endpoint_to_finding(
                 _load_level=worst_error_level.concurrency,
             )
 
-    # Memory capacity finding — estimate if per-process memory is too high
-    # for the user's stated scale
-    if len(ep_result.levels) >= 1 and user_scale:
-        # Use the baseline (first level) memory as per-process footprint
-        baseline_mem = ep_result.levels[0].memory_mb
-        if baseline_mem > 0:
-            # Estimate capacity on a 2GB server: (2048 - 512 OS overhead) / per-process
-            available_mb = 2048 - 512
-            estimated_capacity = int(available_mb / baseline_mem) if baseline_mem > 0 else 0
-            if estimated_capacity < user_scale:
-                severity = "critical" if estimated_capacity < user_scale // 2 else "warning"
-                desc = (
-                    f"Your server process uses {baseline_mem:.0f}MB of memory at "
-                    f"baseline. On a typical 2GB server, this limits you to "
-                    f"approximately {estimated_capacity} concurrent sessions — "
-                )
-                if estimated_capacity < user_scale:
-                    desc += (
-                        f"well below your expected {user_scale} concurrent users. "
-                        f"Consider memory profiling and optimisation, or provision "
-                        f"larger infrastructure."
-                    )
-                return Finding(
-                    title=f"High memory baseline limits concurrent capacity on {path}",
-                    severity=severity,
-                    category="http_load_testing",
-                    description=desc,
-                    affected_dependencies=list(deps),
-                    _finding_type="errors_during",
-                )
-
     return None  # Passed all levels
 
 
@@ -832,6 +807,62 @@ def _find_degradation_onset(levels: list[LoadLevelResult]) -> int:
         if lvl.median_response_ms > baseline * 2:
             return lvl.concurrency
     return 0
+
+
+def _memory_capacity_finding(
+    load_result: HttpLoadResult,
+    deps: list[str],
+    user_scale: int,
+) -> Optional[Finding]:
+    """Generate a finding when per-process memory limits capacity below user_scale.
+
+    Uses the baseline (first-level) memory measurement across all endpoints.
+    Estimates capacity on a typical 2GB server (2048 - 512 MB OS overhead).
+
+    Severity:
+      - CRITICAL: estimated capacity < 25% of user_scale
+      - WARNING:  estimated capacity < 75% of user_scale
+      - None:     estimated capacity >= user_scale (no finding)
+    """
+    # Collect baseline memory from all endpoints
+    baseline_mems = []
+    for ep in load_result.endpoint_results:
+        if ep.levels and ep.levels[0].memory_mb > 0:
+            baseline_mems.append(ep.levels[0].memory_mb)
+    if not baseline_mems:
+        return None
+
+    baseline_mem = max(baseline_mems)  # worst case across endpoints
+    available_mb = 2048 - 512
+    estimated_capacity = int(available_mb / baseline_mem)
+
+    if estimated_capacity >= user_scale:
+        return None  # capacity meets or exceeds stated scale
+
+    if estimated_capacity < user_scale * 0.25:
+        severity = "critical"
+    elif estimated_capacity < user_scale * 0.75:
+        severity = "warning"
+    else:
+        return None  # close enough — no finding
+
+    desc = (
+        f"Your application uses {baseline_mem:.0f}MB per process. "
+        f"On a 2GB server, this supports approximately "
+        f"{estimated_capacity} concurrent sessions — "
+        f"well below your expected {user_scale} users. "
+        f"You will need to optimize memory usage or scale your "
+        f"infrastructure."
+    )
+
+    return Finding(
+        title="Memory baseline limits concurrent capacity",
+        severity=severity,
+        category="http_load_testing",
+        description=desc,
+        affected_dependencies=list(deps),
+        _finding_type="scenario_failed" if severity == "critical" else "errors_during",
+    )
 
 
 # ── Pipeline Integration Helper ──
