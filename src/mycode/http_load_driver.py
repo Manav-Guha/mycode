@@ -852,7 +852,8 @@ def run_http_testing_phase(
             affected_dependencies=list(deps),
             _finding_type="scenario_failed",
         ))
-        execution.http_ran = True
+        # http_ran stays False — server never ran, so runtime context
+        # messaging for incomplete tests should NOT reference HTTP findings
         return execution
 
     # Convert to scenario results and append

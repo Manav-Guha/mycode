@@ -687,7 +687,7 @@ class TestRunHttpTestingPhase:
         result = run_http_testing_phase(
             session, ingestion, execution, "python"
         )
-        assert result.http_ran is True
+        assert result.http_ran is False
         assert len(result.http_findings) == 1
         assert result.http_findings[0].severity == "critical"
         assert "could not start" in result.http_findings[0].title.lower()
@@ -877,7 +877,8 @@ class TestServerStartupFailureFinding:
         result = run_http_testing_phase(
             session, ingestion, execution, "python"
         )
-        assert result.http_ran is True
+        # http_ran stays False — server never ran successfully
+        assert result.http_ran is False
         assert len(result.http_findings) == 1
         finding = result.http_findings[0]
         assert finding.severity == "critical"

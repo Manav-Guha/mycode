@@ -392,7 +392,7 @@ footer {
 }
 
 .report-summary {
-    font-size: 0.92rem;
+    font-size: 1.07rem;
     line-height: 1.6;
     color: var(--text-primary);
     margin-bottom: 1rem;
@@ -483,13 +483,13 @@ footer {
 
 .finding-title {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 1.2rem;
 }
 
 .finding-description {
-    font-size: 0.85rem;
+    font-size: 1.07rem;
     color: var(--text-secondary);
-    line-height: 1.5;
+    line-height: 1.55;
 }
 
 .consequence {
@@ -502,7 +502,7 @@ footer {
     background: var(--bg-primary);
     border-radius: var(--radius);
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: 0.88rem;
     color: var(--text-muted);
     white-space: pre-wrap;
     overflow-x: auto;
@@ -510,7 +510,7 @@ footer {
 
 .finding-deps {
     margin-top: 0.4rem;
-    font-size: 0.78rem;
+    font-size: 0.88rem;
     color: var(--text-muted);
 }
 
@@ -598,7 +598,7 @@ footer {
     background: none;
     border: none;
     color: var(--text-secondary);
-    font-size: 0.85rem;
+    font-size: 1.0rem;
     font-family: var(--font-sans);
     padding: 0.4rem 0;
 }
