@@ -815,6 +815,49 @@ def _render_finding(lines: list[str], f: "Finding") -> None:
         lines.append("")
 
 
+def _build_dep_file_map(ingestion: IngestionResult) -> dict[str, list[str]]:
+    """Build a mapping from dependency name → list of files that import it.
+
+    Files are ordered by usage count (most imports first) so that
+    ``dep_map[dep][0]`` is the primary file for that dependency.
+    """
+    from collections import Counter
+
+    dep_files: dict[str, Counter[str]] = {}
+    for fa in ingestion.file_analyses:
+        for imp in fa.imports:
+            # Use top-level package name (e.g. "flask" from "flask.views")
+            top = imp.module.split(".")[0] if imp.module else ""
+            if not top:
+                continue
+            if top not in dep_files:
+                dep_files[top] = Counter()
+            # Count each from-import name as a usage, minimum 1 per import
+            dep_files[top][fa.file_path] += max(len(imp.names), 1)
+
+    # Convert to sorted lists (most usage first)
+    return {
+        dep: [f for f, _ in counter.most_common()]
+        for dep, counter in dep_files.items()
+    }
+
+
+def _resolve_source_file(
+    affected_deps: list[str],
+    dep_file_map: dict[str, list[str]],
+) -> str:
+    """Find the primary source file for a set of affected dependencies.
+
+    Returns the file with the most usage of the first matching dependency,
+    or empty string if no match is found.
+    """
+    for dep in affected_deps:
+        files = dep_file_map.get(dep)
+        if files:
+            return files[0]
+    return ""
+
+
 # ── Report Generator ──
 
 
@@ -936,11 +979,19 @@ class ReportGenerator:
                     f"planned for v2."
                 )
 
+        # 0f. Build dependency → file mapping for source_file fallback
+        dep_file_map = _build_dep_file_map(ingestion)
+
         # 1. Analyze execution results → findings + degradation
-        self._analyze_execution(execution, report)
+        self._analyze_execution(execution, report, dep_file_map)
 
         # 1b. Merge HTTP-specific findings and degradation points
         if execution.http_findings:
+            for hf in execution.http_findings:
+                if not hf.source_file and hf.affected_dependencies:
+                    hf.source_file = _resolve_source_file(
+                        hf.affected_dependencies, dep_file_map,
+                    )
             report.findings.extend(execution.http_findings)
         if execution.http_degradation_points:
             report.degradation_points.extend(execution.http_degradation_points)
@@ -1044,6 +1095,7 @@ class ReportGenerator:
         self,
         execution: ExecutionEngineResult,
         report: DiagnosticReport,
+        dep_file_map: Optional[dict[str, list[str]]] = None,
     ) -> None:
         """Extract findings and degradation curves from execution results."""
         passed = 0
@@ -1087,9 +1139,17 @@ class ReportGenerator:
             )
 
             def _tag_source(f: Finding) -> Finding:
-                """Attach source file/function from scenario result."""
+                """Attach source file/function from scenario result.
+
+                Falls back to dep→file mapping when the scenario doesn't
+                provide explicit source info (e.g. coupling scenarios).
+                """
                 f.source_file = sr_source_file
                 f.source_function = sr_source_function
+                if not f.source_file and f.affected_dependencies and dep_file_map:
+                    f.source_file = _resolve_source_file(
+                        f.affected_dependencies, dep_file_map,
+                    )
                 return f
 
             # ── User timeout → INFO finding with re-run suggestion ──

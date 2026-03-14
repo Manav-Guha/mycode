@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from mycode.engine import ExecutionEngineResult, ScenarioResult, StepResult
-from mycode.ingester import DependencyInfo, IngestionResult
+from mycode.ingester import DependencyInfo, FileAnalysis, ImportInfo, IngestionResult
 from mycode.library.loader import ProfileMatch
 from mycode.report import (
     DegradationPoint,
@@ -25,6 +25,7 @@ from mycode.report import (
     Finding,
     ReportError,
     ReportGenerator,
+    _build_dep_file_map,
     _describe_errors,
     _describe_errors_with_context,
     _describe_impact,
@@ -38,6 +39,7 @@ from mycode.report import (
     _humanize_title_name,
     _is_significant_degradation,
     _is_significant_finding,
+    _resolve_source_file,
 )
 from mycode.scenario import LLMBackend, LLMConfig, LLMError, LLMResponse
 
@@ -3856,3 +3858,238 @@ class TestTimeoutInReportContext:
         )
         text = report.as_text()
         assert "per test" not in text
+
+
+# ── Dep→File Mapping & source_file Fallback ──
+
+
+class TestBuildDepFileMap:
+    """Tests for _build_dep_file_map."""
+
+    def test_single_file_single_dep(self):
+        ingestion = IngestionResult(
+            project_path="/tmp/proj",
+            files_analyzed=1,
+            total_lines=10,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="app.py",
+                    imports=[ImportInfo(module="flask", names=["Flask"])],
+                ),
+            ],
+        )
+        result = _build_dep_file_map(ingestion)
+        assert result == {"flask": ["app.py"]}
+
+    def test_multiple_files_ordered_by_usage(self):
+        ingestion = IngestionResult(
+            project_path="/tmp/proj",
+            files_analyzed=2,
+            total_lines=20,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="routes.py",
+                    imports=[
+                        ImportInfo(module="flask", names=["Blueprint", "request", "jsonify"]),
+                    ],
+                ),
+                FileAnalysis(
+                    file_path="app.py",
+                    imports=[
+                        ImportInfo(module="flask", names=["Flask"]),
+                    ],
+                ),
+            ],
+        )
+        result = _build_dep_file_map(ingestion)
+        # routes.py has 3 names, app.py has 1 → routes.py first
+        assert result["flask"] == ["routes.py", "app.py"]
+
+    def test_submodule_maps_to_top_level(self):
+        ingestion = IngestionResult(
+            project_path="/tmp/proj",
+            files_analyzed=1,
+            total_lines=10,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="db.py",
+                    imports=[ImportInfo(module="sqlalchemy.orm", names=["Session"])],
+                ),
+            ],
+        )
+        result = _build_dep_file_map(ingestion)
+        assert "sqlalchemy" in result
+        assert result["sqlalchemy"] == ["db.py"]
+
+    def test_empty_ingestion(self):
+        ingestion = IngestionResult(
+            project_path="/tmp/proj",
+            files_analyzed=0,
+            total_lines=0,
+        )
+        result = _build_dep_file_map(ingestion)
+        assert result == {}
+
+    def test_import_without_names_counts_as_one(self):
+        ingestion = IngestionResult(
+            project_path="/tmp/proj",
+            files_analyzed=1,
+            total_lines=5,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="main.py",
+                    imports=[ImportInfo(module="os")],
+                ),
+            ],
+        )
+        result = _build_dep_file_map(ingestion)
+        assert result["os"] == ["main.py"]
+
+
+class TestResolveSourceFile:
+    """Tests for _resolve_source_file."""
+
+    def test_finds_primary_file(self):
+        dep_map = {"flask": ["routes.py", "app.py"], "sqlalchemy": ["db.py"]}
+        assert _resolve_source_file(["flask"], dep_map) == "routes.py"
+
+    def test_first_matching_dep_wins(self):
+        dep_map = {"flask": ["routes.py"], "sqlalchemy": ["db.py"]}
+        assert _resolve_source_file(["sqlalchemy", "flask"], dep_map) == "db.py"
+
+    def test_no_match_returns_empty(self):
+        dep_map = {"flask": ["app.py"]}
+        assert _resolve_source_file(["pandas"], dep_map) == ""
+
+    def test_empty_deps_returns_empty(self):
+        dep_map = {"flask": ["app.py"]}
+        assert _resolve_source_file([], dep_map) == ""
+
+    def test_empty_map_returns_empty(self):
+        assert _resolve_source_file(["flask"], {}) == ""
+
+
+class TestSourceFileFallbackIntegration:
+    """Test that source_file is populated via dep→file fallback."""
+
+    def _ingestion_with_flask_file(self):
+        return IngestionResult(
+            project_path="/tmp/proj",
+            files_analyzed=1,
+            total_lines=50,
+            dependencies=[
+                DependencyInfo(name="flask", installed_version="3.0.0"),
+            ],
+            file_analyses=[
+                FileAnalysis(
+                    file_path="app.py",
+                    imports=[ImportInfo(module="flask", names=["Flask", "request"])],
+                ),
+            ],
+        )
+
+    def test_fallback_populates_source_file_on_finding(self):
+        """When ScenarioResult has no source_files, fallback uses dep map."""
+        sr = ScenarioResult(
+            scenario_name="flask_resource_exhaustion",
+            scenario_category="resource_exhaustion",
+            status="failed",
+            steps=[StepResult(step_name="step_1", error_count=1)],
+            total_errors=1,
+            # source_files is empty — no target_modules
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_completed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            self._ingestion_with_flask_file(),
+            [],
+            "test intent",
+        )
+        # The finding should have source_file from the dep→file fallback
+        flask_findings = [
+            f for f in report.findings
+            if "flask" in f.affected_dependencies
+        ]
+        assert flask_findings
+        assert flask_findings[0].source_file == "app.py"
+
+    def test_explicit_source_file_not_overridden(self):
+        """When ScenarioResult has source_files, fallback is NOT used."""
+        sr = ScenarioResult(
+            scenario_name="flask_resource_exhaustion",
+            scenario_category="resource_exhaustion",
+            status="failed",
+            steps=[StepResult(step_name="step_1", error_count=1)],
+            total_errors=1,
+            source_files=["explicit.py"],
+            source_functions=["handle_request"],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_completed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            self._ingestion_with_flask_file(),
+            [],
+            "test intent",
+        )
+        flask_findings = [
+            f for f in report.findings
+            if "flask" in f.affected_dependencies
+        ]
+        assert flask_findings
+        assert flask_findings[0].source_file == "explicit.py"
+        assert flask_findings[0].source_function == "handle_request"
+
+    def test_fallback_on_incomplete_test(self):
+        """Incomplete tests also get source_file from fallback."""
+        sr = ScenarioResult(
+            scenario_name="flask_concurrent_execution",
+            scenario_category="concurrent_execution",
+            status="skipped",
+            failure_reason="runtime_context_required",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_completed=0,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            self._ingestion_with_flask_file(),
+            [],
+            "test intent",
+        )
+        assert report.incomplete_tests
+        assert report.incomplete_tests[0].source_file == "app.py"
+
+    def test_http_findings_get_source_file(self):
+        """HTTP findings merged post-analysis get source_file from fallback."""
+        http_finding = Finding(
+            title="High error rate under load",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[],
+            scenarios_completed=0,
+            http_findings=[http_finding],
+            http_ran=True,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution,
+            self._ingestion_with_flask_file(),
+            [],
+            "test intent",
+        )
+        http_fs = [f for f in report.findings if f.category == "http_load_testing"]
+        assert http_fs
+        assert http_fs[0].source_file == "app.py"
