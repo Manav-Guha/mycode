@@ -14,7 +14,7 @@ It is not a linter, not a static analysis tool, not a code reviewer, and not a s
 
 1. Point myCode at a GitHub repo URL via the [web interface](https://mycode-ai.vercel.app/).
 2. Answer 2–3 questions about your project in plain language (what it does, who uses it, what conditions it operates under).
-3. myCode clones the repo, resolves dependencies, parses the codebase via AST, matches against its component library of 36 dependency profiles, generates stress scenarios from the intersection of your stated intent and parsed code structure, then executes them.
+3. myCode clones the repo, resolves dependencies, parses the codebase via AST, matches against its component library of 41 dependency profiles, generates stress scenarios from the intersection of your stated intent and parsed code structure, then executes them.
 4. You get a diagnostic report: what broke, at what load level, and under what conditions.
 
 All tests run inside isolated temporary environments. **Your original files are never touched**.
