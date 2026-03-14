@@ -135,6 +135,10 @@ def render_understanding(report: DiagnosticReport, edition: int) -> str:
     )
     lines.append(f"- Passed: {report.scenarios_passed}")
     lines.append(f"- Failed: {report.scenarios_failed}")
+    if report.scenarios_incomplete:
+        lines.append(
+            f"- Could not test: {report.scenarios_incomplete}"
+        )
     if report.total_errors:
         lines.append(f"- Total errors: {report.total_errors}")
     lines.append("")
@@ -330,11 +334,13 @@ def _render_fix_finding(lines: list[str], f: Finding) -> None:
 def _build_investigation_prompt(f: Finding) -> str:
     """Build a scoped investigation prompt for a finding.
 
-    Tells the agent what to look at and what behaviour to verify,
-    NOT what code to write.
+    Uses finding-specific data (metrics, thresholds, observed values)
+    to generate targeted investigation guidance. Tells the agent what
+    to look at and what behaviour to verify, NOT what code to write.
     """
     parts: list[str] = []
 
+    # 1. Location
     location = ""
     if f.source_function and f.source_file:
         location = f"`{f.source_function}` in `{f.source_file}`"
@@ -348,8 +354,111 @@ def _build_investigation_prompt(f: Finding) -> str:
     if location:
         parts.append(f"Examine {location}.")
 
-    # Category-specific verification guidance
-    category_checks = {
+    # 2. Finding-specific guidance derived from actual data
+    specific = _finding_specific_guidance(f)
+    if specific:
+        parts.append(specific)
+    else:
+        # 3. Category fallback (only when no specific guidance)
+        fallback = _category_fallback_guidance(f.category)
+        if fallback:
+            parts.append(fallback)
+        elif f.description:
+            parts.append(
+                "Verify that the observed behaviour does not occur "
+                "under the conditions described above."
+            )
+
+    return " ".join(parts) if parts else (
+        "Review the code path identified above and verify correct "
+        "behaviour under the conditions described."
+    )
+
+
+def _finding_specific_guidance(f: Finding) -> str:
+    """Generate investigation guidance from the finding's actual data.
+
+    Returns empty string if no specific guidance can be derived.
+    """
+    parts: list[str] = []
+
+    # Memory-related findings
+    if f._peak_memory_mb and f._peak_memory_mb > 0:
+        if f._finding_type == "resource_limit_hit":
+            parts.append(
+                f"Memory peaked at {f._peak_memory_mb:.0f} MB. "
+                f"Check for unbounded data structures, large object "
+                f"allocations, or caches that grow with each request."
+            )
+        elif f._peak_memory_mb > 100:
+            parts.append(
+                f"Memory reached {f._peak_memory_mb:.0f} MB. "
+                f"Look for objects held in memory across requests — "
+                f"module-level caches, connection pools, or accumulated "
+                f"state that is never released."
+            )
+
+    # Execution time findings
+    if f._execution_time_ms and f._execution_time_ms > 0:
+        if f._execution_time_ms > 5000:
+            parts.append(
+                f"Response time reached {f._execution_time_ms:.0f} ms. "
+                f"Investigate what causes the latency — synchronous "
+                f"operations, unoptimized database queries, blocking I/O, "
+                f"or missing connection pooling."
+            )
+        elif f._execution_time_ms > 1000:
+            parts.append(
+                f"Response time reached {f._execution_time_ms:.0f} ms. "
+                f"Check for synchronous middleware, N+1 query patterns, "
+                f"or operations that scale with request count."
+            )
+
+    # Error-heavy findings
+    if f._error_count and f._error_count > 5 and not parts:
+        parts.append(
+            f"{f._error_count} errors occurred during testing. "
+            f"Check error handling paths — unhandled exceptions, "
+            f"missing error boundaries, or cascading failures."
+        )
+
+    # Load-level context
+    if f._load_level is not None and f._load_level > 0:
+        if f._finding_type == "scenario_failed":
+            parts.append(
+                f"Failed at load level {f._load_level}. "
+                f"Verify behaviour at and below this threshold."
+            )
+
+    # HTTP-specific findings — use description to extract specifics
+    if f.category == "http_load_testing" and not parts:
+        desc_lower = (f.description or "").lower()
+        if "memory" in desc_lower or "baseline" in desc_lower:
+            parts.append(
+                "Check what the application loads at startup — "
+                "large bundles, unoptimized imports, in-memory data "
+                "stores, or objects held per process."
+            )
+        elif "response time" in desc_lower or "latency" in desc_lower:
+            parts.append(
+                "Investigate what causes response time to increase "
+                "under concurrent load — synchronous middleware, "
+                "blocking operations, connection pool exhaustion, "
+                "or per-request computation that doesn't scale."
+            )
+        elif "error" in desc_lower or "crash" in desc_lower:
+            parts.append(
+                "Check for unhandled exceptions under concurrent "
+                "access — race conditions, shared state corruption, "
+                "or resource limits (file descriptors, connections)."
+            )
+
+    return " ".join(parts)
+
+
+def _category_fallback_guidance(category: str) -> str:
+    """Return generic category guidance when no specific data is available."""
+    fallbacks = {
         "data_volume_scaling": (
             "Verify that the code handles progressively larger inputs "
             "without unbounded memory growth or excessive processing time."
@@ -383,21 +492,7 @@ def _build_investigation_prompt(f: Finding) -> str:
             "without excessive response time degradation or errors."
         ),
     }
-
-    check = category_checks.get(f.category, "")
-    if check:
-        parts.append(check)
-    elif f.description:
-        # Fall back to a generic prompt derived from the finding
-        parts.append(
-            "Verify that the observed behaviour does not occur "
-            "under the conditions described above."
-        )
-
-    return " ".join(parts) if parts else (
-        "Review the code path identified above and verify correct "
-        "behaviour under the conditions described."
-    )
+    return fallbacks.get(category, "")
 
 
 # ── File Output ──

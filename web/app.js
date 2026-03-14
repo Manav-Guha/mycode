@@ -402,10 +402,12 @@ function renderReport(report, summary, understandingMd, fixesMd, edition) {
     let html = "";
 
     // Stats
+    const incompleteCount = summary.scenarios_incomplete || 0;
     html += `<div class="report-stats">
         <div class="stat"><span class="stat-value">${summary.scenarios_run || 0}</span><span class="stat-label">scenarios</span></div>
         <div class="stat"><span class="stat-value" style="color:var(--green)">${summary.scenarios_passed || 0}</span><span class="stat-label">passed</span></div>
         <div class="stat"><span class="stat-value" style="color:var(--red)">${summary.scenarios_failed || 0}</span><span class="stat-label">failed</span></div>
+        ${incompleteCount > 0 ? `<div class="stat"><span class="stat-value" style="color:var(--amber)">${incompleteCount}</span><span class="stat-label">could not test</span></div>` : ""}
         <div class="stat"><span class="stat-value">${summary.total_errors || 0}</span><span class="stat-label">errors</span></div>
     </div>`;
 

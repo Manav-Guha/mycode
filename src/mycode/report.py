@@ -154,6 +154,7 @@ class DiagnosticReport:
     scenarios_run: int = 0
     scenarios_passed: int = 0
     scenarios_failed: int = 0
+    scenarios_incomplete: int = 0
     total_errors: int = 0
     operational_context: str = ""
     project_description: str = ""
@@ -198,11 +199,16 @@ class DiagnosticReport:
             sections.append(f"\n{self.summary}")
 
         # Stats bar
-        sections.append(
-            f"\nScenarios: {self.scenarios_run} run, "
-            f"{self.scenarios_passed} clean, "
-            f"{self.scenarios_failed} with issues"
-        )
+        stats_parts = [
+            f"Scenarios: {self.scenarios_run} run",
+            f"{self.scenarios_passed} clean",
+            f"{self.scenarios_failed} with issues",
+        ]
+        if self.scenarios_incomplete:
+            stats_parts.append(
+                f"{self.scenarios_incomplete} could not test"
+            )
+        sections.append("\n" + ", ".join(stats_parts))
         if self.total_errors:
             sections.append(f"Total errors captured: {self.total_errors}")
 
@@ -638,6 +644,7 @@ class DiagnosticReport:
                 "scenarios_run": self.scenarios_run,
                 "scenarios_passed": self.scenarios_passed,
                 "scenarios_failed": self.scenarios_failed,
+                "scenarios_incomplete": self.scenarios_incomplete,
                 "total_errors": self.total_errors,
                 "recognized_dependencies": self.recognized_dep_count,
                 "unrecognized_dependencies": len(self.unrecognized_deps),
@@ -1100,6 +1107,7 @@ class ReportGenerator:
         """Extract findings and degradation curves from execution results."""
         passed = 0
         failed = 0
+        incomplete = 0
         total_errors = 0
 
         # Choose runtime-context message based on whether HTTP testing ran
@@ -1117,14 +1125,7 @@ class ReportGenerator:
 
         for sr in execution.scenario_results:
             total_errors += sr.total_errors
-
-            # Runtime context and user-timeout scenarios don't count toward pass/fail
-            if sr.failure_reason == "runtime_context_required" or sr.hit_user_timeout:
-                pass  # excluded from counts
-            elif sr.status == "completed" and sr.total_errors == 0 and not sr.resource_cap_hit:
-                passed += 1
-            else:
-                failed += 1
+            _findings_before = len(report.findings)
 
             # Extract source file/function for document generation
             sr_source_file = sr.source_files[0] if sr.source_files else ""
@@ -1167,6 +1168,7 @@ class ReportGenerator:
                 )
                 f._failure_reason = "user_timeout"
                 report.incomplete_tests.append(_tag_source(f))
+                incomplete += 1
                 continue
 
             # ── Harness failures → incomplete tests (myCode limitation) ──
@@ -1186,6 +1188,7 @@ class ReportGenerator:
                 f._failure_reason = sr.failure_reason
                 f._error_count = sr.total_errors
                 report.incomplete_tests.append(_tag_source(f))
+                incomplete += 1
                 continue
 
             # ── Probe-skipped functions on a scenario that still ran ──
@@ -1218,6 +1221,7 @@ class ReportGenerator:
                 )
                 f._error_count = sr.total_errors
                 report.incomplete_tests.append(_tag_source(f))
+                incomplete += 1
                 continue
 
             # Extract load level info from steps (for contextualisation)
@@ -1338,8 +1342,27 @@ class ReportGenerator:
             # Detect degradation curves
             self._detect_degradation(sr, report)
 
+            # ── Count scenario outcome based on what was actually produced ──
+            # Runtime context and user-timeout are excluded from counts
+            if sr.failure_reason == "runtime_context_required" or sr.hit_user_timeout:
+                incomplete += 1
+            elif len(report.findings) > _findings_before:
+                # Scenario produced at least one finding → failed
+                failed += 1
+            elif sr.failure_reason or self._is_environment_only(sr):
+                # Routed entirely to incomplete_tests → incomplete
+                incomplete += 1
+            elif sr.status == "completed" and sr.total_errors == 0 and not sr.resource_cap_hit:
+                passed += 1
+            else:
+                # Edge case: errors but no finding generated (e.g.
+                # probe-skipped scenario with clean remaining execution).
+                # Count as incomplete rather than silently failed.
+                incomplete += 1
+
         report.scenarios_passed = passed
         report.scenarios_failed = failed
+        report.scenarios_incomplete = incomplete
         report.total_errors = total_errors
 
     @staticmethod
@@ -1426,6 +1449,7 @@ class ReportGenerator:
                 sr.scenario_name, "execution_time_ms", time_steps,
             )
             if dp:
+                self._annotate_non_monotonic(dp)
                 report.degradation_points.append(dp)
 
         # Check memory degradation
@@ -1439,6 +1463,7 @@ class ReportGenerator:
                 sr.scenario_name, "memory_peak_mb", mem_steps,
             )
             if dp:
+                self._annotate_non_monotonic(dp)
                 report.degradation_points.append(dp)
 
         # Check error accumulation
@@ -1451,6 +1476,7 @@ class ReportGenerator:
                 sr.scenario_name, "error_count", error_steps,
             )
             if dp:
+                self._annotate_non_monotonic(dp)
                 report.degradation_points.append(dp)
 
     # Minimum absolute change (last - first) below which a ratio-based
@@ -1555,6 +1581,42 @@ class ReportGenerator:
             )
 
         return None
+
+    @staticmethod
+    def _annotate_non_monotonic(dp: DegradationPoint) -> None:
+        """Flag non-monotonic data points in a degradation curve.
+
+        When a value drops by >40% from the previous step, append a
+        variance note to the description so users know the data point
+        may reflect infrastructure conditions rather than application
+        behaviour.
+        """
+        if len(dp.steps) < 3:
+            return
+
+        anomalies: list[str] = []
+        for i in range(1, len(dp.steps)):
+            prev_val = dp.steps[i - 1][1]
+            curr_val = dp.steps[i][1]
+            if prev_val > 0.001 and curr_val < prev_val * 0.6:
+                label = dp.steps[i][0]
+                anomalies.append(label)
+
+        if anomalies:
+            note = (
+                "Note: results showed significant variance at "
+                + (
+                    f"step '{anomalies[0]}'"
+                    if len(anomalies) == 1
+                    else f"steps {', '.join(repr(a) for a in anomalies)}"
+                )
+                + " — this data point may reflect infrastructure "
+                "conditions rather than application behaviour."
+            )
+            if dp.description:
+                dp.description = f"{dp.description} {note}"
+            else:
+                dp.description = note
 
     # ── Constraint-Driven Contextualisation ──
 
@@ -2357,11 +2419,17 @@ class ReportGenerator:
         if operational_intent:
             user_parts.append(f"## User's Purpose\n{operational_intent}")
 
+        incomplete_line = ""
+        if report.scenarios_incomplete:
+            incomplete_line = (
+                f"\nCould not test: {report.scenarios_incomplete}"
+            )
         user_parts.append(
             f"\n## Test Results\n"
             f"Scenarios run: {report.scenarios_run}\n"
             f"Passed: {report.scenarios_passed}\n"
-            f"Failed: {report.scenarios_failed}\n"
+            f"Failed: {report.scenarios_failed}"
+            f"{incomplete_line}\n"
             f"Total errors: {report.total_errors}"
         )
 
@@ -2833,47 +2901,99 @@ def _short_project_ref(vertical: str) -> str:
     return "your app"
 
 
+_FRAMEWORK_LABELS: dict[str, str] = {
+    "react": "React",
+    "react-dom": "React",
+    "vue": "Vue",
+    "angular": "Angular",
+    "@angular/core": "Angular",
+    "svelte": "Svelte",
+    "next": "Next.js",
+    "nextjs": "Next.js",
+    "flask": "Flask",
+    "django": "Django",
+    "fastapi": "FastAPI",
+    "express": "Express",
+    "streamlit": "Streamlit",
+    "gradio": "Gradio",
+    "dash": "Dash",
+    "langchain": "LangChain",
+    "llama-index": "LlamaIndex",
+    "tensorflow": "TensorFlow",
+    "torch": "PyTorch",
+    "pytorch": "PyTorch",
+    "sklearn": "scikit-learn",
+    "scikit-learn": "scikit-learn",
+    "pandas": "pandas",
+}
+
+
+def _detect_primary_framework(deps: list[str]) -> str:
+    """Detect the primary framework from dependency names.
+
+    Returns a human-readable framework label (e.g. "React", "Flask")
+    or empty string if no known framework is found.
+    """
+    for dep in deps:
+        label = _FRAMEWORK_LABELS.get(dep.lower())
+        if label:
+            return label
+    return ""
+
+
 def _generate_project_description(
     ingestion: IngestionResult,
     project_name: str = "",
     vertical: str = "",
     architectural_pattern: str = "",
 ) -> str:
-    """Generate a short project description from classifier output + deps.
+    """Generate a short project description from framework + project name.
 
-    Format: "Your [human_label] built with [dep1], [dep2], and [dep3]"
-    Uses the vertical classifier output mapped to a human-readable label,
-    plus the top 3 non-dev dependencies.
+    Preferred format: "Your React web application (react-shopping-cart)"
+    Fallback chain:
+      1. Framework + vertical + project name
+      2. Framework + vertical (no project name)
+      3. Vertical + project name
+      4. Vertical only
+      5. "Your project built with [deps]" (last resort)
     """
-    # Get human label from classifier vertical
     human_label = _VERTICAL_LABELS.get(vertical, "")
-
-    # Get top 3 non-dev dependencies by name
     non_dev_deps = [d.name for d in ingestion.dependencies if not d.is_dev]
-    top_deps = non_dev_deps[:3]
+    framework = _detect_primary_framework(non_dev_deps)
 
-    if human_label and top_deps:
-        if len(top_deps) == 1:
-            dep_str = top_deps[0]
-        elif len(top_deps) == 2:
-            dep_str = f"{top_deps[0]} and {top_deps[1]}"
+    # Build the core description
+    if framework and human_label:
+        desc = f"Your {framework} {human_label}"
+    elif framework:
+        desc = f"Your {framework} project"
+    elif human_label:
+        desc = f"Your {human_label}"
+    elif non_dev_deps:
+        top = non_dev_deps[:3]
+        if len(top) == 1:
+            dep_str = top[0]
+        elif len(top) == 2:
+            dep_str = f"{top[0]} and {top[1]}"
         else:
-            dep_str = f"{top_deps[0]}, {top_deps[1]}, and {top_deps[2]}"
-        return f"Your {human_label} built with {dep_str}"
+            dep_str = f"{top[0]}, {top[1]}, and {top[2]}"
+        desc = f"Your project built with {dep_str}"
+    else:
+        desc = "your project"
 
-    if human_label:
-        return f"Your {human_label}"
+    # Append project name in parentheses if available and distinct
+    if project_name:
+        # Avoid redundancy: don't append if the project name is generic
+        # or already contained in the description
+        name_lower = project_name.lower().replace(" ", "-")
+        desc_lower = desc.lower()
+        generic_names = {"project", "my project", "app", "my app", "untitled"}
+        if (
+            name_lower not in generic_names
+            and project_name.lower() not in desc_lower
+        ):
+            desc = f"{desc} ({project_name})"
 
-    if top_deps:
-        if len(top_deps) == 1:
-            dep_str = top_deps[0]
-        elif len(top_deps) == 2:
-            dep_str = f"{top_deps[0]} and {top_deps[1]}"
-        else:
-            dep_str = f"{top_deps[0]}, {top_deps[1]}, and {top_deps[2]}"
-        return f"Your project built with {dep_str}"
-
-    return "your project"
+    return desc
 
 
 _DATA_TYPE_HUMAN_LABELS: dict[str, str] = {

@@ -1551,8 +1551,9 @@ class TestEdgeCases:
             IngestionResult(project_path="/tmp/x"),
             [],
         )
-        # Skipped scenarios count as failed (not clean)
-        assert report.scenarios_failed == 1
+        # Skipped scenarios count as incomplete (not failed)
+        assert report.scenarios_failed == 0
+        assert report.scenarios_incomplete == 1
 
     def test_operational_intent_in_context(self, clean_execution):
         gen = ReportGenerator(offline=True)
@@ -3185,12 +3186,22 @@ def _s14_ingestion(deps=None):
 class TestIntelligentProjectDescription:
     """Tests for _generate_project_description with classifier output."""
 
-    def test_vertical_with_deps(self):
+    def test_framework_with_vertical(self):
         from mycode.report import _generate_project_description
         ingestion = _s14_ingestion(["flask", "sqlalchemy", "pandas"])
         desc = _generate_project_description(ingestion, vertical="web_app")
+        assert "Flask" in desc
         assert "web application" in desc
-        assert "flask" in desc
+
+    def test_framework_with_project_name(self):
+        from mycode.report import _generate_project_description
+        ingestion = _s14_ingestion(["react", "react-dom", "react-scripts"])
+        desc = _generate_project_description(
+            ingestion, project_name="React Shopping Cart", vertical="web_app",
+        )
+        assert "React" in desc
+        assert "web application" in desc
+        assert "(React Shopping Cart)" in desc
 
     def test_vertical_only(self):
         from mycode.report import _generate_project_description
@@ -3198,9 +3209,9 @@ class TestIntelligentProjectDescription:
         desc = _generate_project_description(ingestion, vertical="dashboard")
         assert "dashboard" in desc
 
-    def test_deps_only_no_vertical(self):
+    def test_deps_only_no_vertical_no_framework(self):
         from mycode.report import _generate_project_description
-        ingestion = _s14_ingestion(["numpy", "pandas"])
+        ingestion = _s14_ingestion(["numpy", "scipy"])
         desc = _generate_project_description(ingestion)
         assert "numpy" in desc
         assert "project" in desc.lower()
@@ -3213,11 +3224,31 @@ class TestIntelligentProjectDescription:
         assert "Your Project" not in desc
         assert desc == "your project"
 
-    def test_three_deps_formatted_correctly(self):
+    def test_project_name_not_duplicated(self):
+        """Don't append project name if it's already in the description."""
         from mycode.report import _generate_project_description
-        ingestion = _s14_ingestion(["flask", "redis", "celery"])
+        ingestion = _s14_ingestion(["flask"])
+        desc = _generate_project_description(
+            ingestion, project_name="Flask", vertical="web_app",
+        )
+        # "Flask" is already in the description, don't repeat as "(Flask)"
+        assert desc.count("Flask") == 1
+
+    def test_generic_project_name_omitted(self):
+        """Generic names like 'Project' or 'App' are not appended."""
+        from mycode.report import _generate_project_description
+        ingestion = _s14_ingestion(["flask"])
+        desc = _generate_project_description(
+            ingestion, project_name="Project", vertical="web_app",
+        )
+        assert "(Project)" not in desc
+
+    def test_api_service_vertical(self):
+        from mycode.report import _generate_project_description
+        ingestion = _s14_ingestion(["fastapi", "redis", "celery"])
         desc = _generate_project_description(ingestion, vertical="api_service")
-        assert "flask, redis, and celery" in desc
+        assert "FastAPI" in desc
+        assert "API service" in desc
 
 
 # ── Session 14: Report Narrative Tests ──
@@ -4093,3 +4124,210 @@ class TestSourceFileFallbackIntegration:
         http_fs = [f for f in report.findings if f.category == "http_load_testing"]
         assert http_fs
         assert http_fs[0].source_file == "app.py"
+
+
+# ── Bug 1: Scenario Counting ──
+
+
+class TestScenarioCounting:
+    """Test that scenario counts correctly distinguish failed vs incomplete."""
+
+    def test_runtime_context_counts_as_incomplete(self):
+        sr = ScenarioResult(
+            scenario_name="flask_concurrent",
+            scenario_category="concurrent_execution",
+            status="skipped",
+            failure_reason="runtime_context_required",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr], scenarios_completed=0,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, IngestionResult(project_path="/tmp/x"), [],
+        )
+        assert report.scenarios_failed == 0
+        assert report.scenarios_incomplete == 1
+        assert report.scenarios_passed == 0
+
+    def test_environment_only_counts_as_incomplete(self):
+        sr = ScenarioResult(
+            scenario_name="flask_test",
+            scenario_category="resource_exhaustion",
+            status="completed",
+            total_errors=1,
+            steps=[
+                StepResult(
+                    step_name="step_1",
+                    error_count=1,
+                    errors=[{"type": "ModuleNotFoundError", "message": "No module"}],
+                ),
+            ],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr], scenarios_completed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, IngestionResult(project_path="/tmp/x"), [],
+        )
+        assert report.scenarios_failed == 0
+        assert report.scenarios_incomplete == 1
+
+    def test_real_failure_counts_as_failed(self):
+        sr = ScenarioResult(
+            scenario_name="flask_resource",
+            scenario_category="resource_exhaustion",
+            status="failed",
+            total_errors=3,
+            steps=[
+                StepResult(
+                    step_name="step_1",
+                    error_count=3,
+                    errors=[{"type": "MemoryError", "message": "OOM"}],
+                ),
+            ],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr], scenarios_completed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, IngestionResult(project_path="/tmp/x"), [],
+        )
+        assert report.scenarios_failed == 1
+        assert report.scenarios_incomplete == 0
+
+    def test_mixed_counts(self):
+        """3 scenarios: 1 pass, 1 fail, 1 incomplete."""
+        pass_sr = ScenarioResult(
+            scenario_name="ok_test",
+            scenario_category="data_volume_scaling",
+            status="completed",
+            steps=[StepResult(step_name="s1")],
+        )
+        fail_sr = ScenarioResult(
+            scenario_name="bad_test",
+            scenario_category="resource_exhaustion",
+            status="failed",
+            total_errors=1,
+            steps=[StepResult(step_name="s1", error_count=1)],
+        )
+        skip_sr = ScenarioResult(
+            scenario_name="skip_test",
+            scenario_category="concurrent_execution",
+            status="skipped",
+            failure_reason="runtime_context_required",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[pass_sr, fail_sr, skip_sr],
+            scenarios_completed=2,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, IngestionResult(project_path="/tmp/x"), [],
+        )
+        assert report.scenarios_passed == 1
+        assert report.scenarios_failed == 1
+        assert report.scenarios_incomplete == 1
+
+    def test_incomplete_in_as_dict(self):
+        sr = ScenarioResult(
+            scenario_name="skip_test",
+            scenario_category="concurrent_execution",
+            status="skipped",
+            failure_reason="runtime_context_required",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr], scenarios_completed=0,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, IngestionResult(project_path="/tmp/x"), [],
+        )
+        d = report.as_dict()
+        assert d["statistics"]["scenarios_incomplete"] == 1
+
+    def test_incomplete_in_as_text(self):
+        sr = ScenarioResult(
+            scenario_name="skip_test",
+            scenario_category="concurrent_execution",
+            status="skipped",
+            failure_reason="runtime_context_required",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr], scenarios_completed=0,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, IngestionResult(project_path="/tmp/x"), [],
+        )
+        text = report.as_text()
+        assert "could not test" in text.lower()
+
+
+# ── Bug 4: Non-monotonic Degradation ──
+
+
+class TestNonMonotonicDegradation:
+    """Test that non-monotonic data points are flagged."""
+
+    def test_drop_flagged(self):
+        from mycode.report import DegradationPoint
+        dp = DegradationPoint(
+            scenario_name="test",
+            metric="response_time_ms",
+            steps=[
+                ("c_1000", 50.0),
+                ("c_2500", 132.5),
+                ("c_3750", 35.9),   # drops >40% from 132.5
+                ("c_5000", 150.0),
+            ],
+            description="Response time increased.",
+        )
+        ReportGenerator._annotate_non_monotonic(dp)
+        assert "variance" in dp.description.lower()
+        assert "c_3750" in dp.description
+
+    def test_no_drop_no_flag(self):
+        from mycode.report import DegradationPoint
+        dp = DegradationPoint(
+            scenario_name="test",
+            metric="response_time_ms",
+            steps=[
+                ("c_1000", 50.0),
+                ("c_2500", 100.0),
+                ("c_3750", 150.0),
+            ],
+            description="Steadily increasing.",
+        )
+        ReportGenerator._annotate_non_monotonic(dp)
+        assert "variance" not in dp.description.lower()
+
+    def test_small_drop_not_flagged(self):
+        """A 20% drop is normal noise, not flagged."""
+        from mycode.report import DegradationPoint
+        dp = DegradationPoint(
+            scenario_name="test",
+            metric="execution_time_ms",
+            steps=[
+                ("s1", 100.0),
+                ("s2", 85.0),   # 15% drop, within threshold
+                ("s3", 200.0),
+            ],
+            description="Normal variation.",
+        )
+        ReportGenerator._annotate_non_monotonic(dp)
+        assert "variance" not in dp.description.lower()
+
+    def test_two_steps_not_annotated(self):
+        """Need at least 3 steps for annotation."""
+        from mycode.report import DegradationPoint
+        dp = DegradationPoint(
+            scenario_name="test",
+            metric="memory_peak_mb",
+            steps=[("s1", 100.0), ("s2", 30.0)],
+            description="Short curve.",
+        )
+        ReportGenerator._annotate_non_monotonic(dp)
+        assert "variance" not in dp.description.lower()

@@ -533,3 +533,150 @@ class TestFindingSourceFields:
         f = d["findings"][0]
         assert f["source_file"] == "app.py"
         assert f["source_function"] == "main"
+
+
+# ── Bug 2: Finding-specific Investigation Prompts ──
+
+
+class TestFindingSpecificPrompts:
+    """Test that investigation prompts use finding-specific data."""
+
+    def test_memory_finding_mentions_memory(self):
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="Memory Exhaustion",
+                    severity="critical",
+                    category="memory_profiling",
+                    description="Memory grew under load.",
+                    source_file="app.py",
+                    _peak_memory_mb=256.0,
+                ),
+            ],
+        )
+        md = render_fixes(report, 1)
+        assert "256 MB" in md
+        assert "memory" in md.lower()
+
+    def test_slow_response_finding_mentions_time(self):
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="Slow Response",
+                    severity="warning",
+                    category="blocking_io",
+                    description="Response time degraded.",
+                    source_file="routes.py",
+                    _execution_time_ms=6000.0,
+                ),
+            ],
+        )
+        md = render_fixes(report, 1)
+        assert "6000 ms" in md
+        assert "latency" in md.lower() or "synchronous" in md.lower()
+
+    def test_http_memory_finding_specific(self):
+        """HTTP finding about memory gets memory-specific guidance."""
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="High baseline memory",
+                    severity="warning",
+                    category="http_load_testing",
+                    description="Memory baseline is high at startup.",
+                    source_file="server.py",
+                ),
+            ],
+        )
+        md = render_fixes(report, 1)
+        assert "startup" in md.lower() or "bundle" in md.lower()
+
+    def test_http_response_time_finding_specific(self):
+        """HTTP finding about response time gets latency-specific guidance."""
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="Response time degradation",
+                    severity="warning",
+                    category="http_load_testing",
+                    description="Response time increases under concurrent load.",
+                    source_file="server.py",
+                ),
+            ],
+        )
+        md = render_fixes(report, 1)
+        assert "concurrent" in md.lower() or "middleware" in md.lower()
+
+    def test_different_http_findings_get_different_prompts(self):
+        """Two HTTP findings with different data produce different prompts."""
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="High memory baseline",
+                    severity="warning",
+                    category="http_load_testing",
+                    description="Memory baseline is high.",
+                    source_file="server.py",
+                ),
+                Finding(
+                    title="Response time degradation",
+                    severity="warning",
+                    category="http_load_testing",
+                    description="Response time increases under load.",
+                    source_file="server.py",
+                ),
+            ],
+        )
+        md = render_fixes(report, 1)
+        # Extract investigate prompts
+        prompts = [
+            line for line in md.split("\n")
+            if line.startswith("**Investigate:**")
+        ]
+        assert len(prompts) == 2
+        # They should be different
+        assert prompts[0] != prompts[1]
+
+    def test_error_count_in_prompt(self):
+        """Finding with many errors mentions error count."""
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="Error Storm",
+                    severity="critical",
+                    category="edge_case_inputs",
+                    description="Many errors occurred.",
+                    source_file="handler.py",
+                    _error_count=42,
+                ),
+            ],
+        )
+        md = render_fixes(report, 1)
+        assert "42 errors" in md
+
+
+# ── Bug 1: Document 1 incomplete count ──
+
+
+class TestDocumentIncompleteCount:
+    """Test that Document 1 shows scenarios_incomplete."""
+
+    def test_incomplete_shown_in_understanding(self):
+        report = DiagnosticReport(
+            scenarios_run=8,
+            scenarios_passed=1,
+            scenarios_failed=2,
+            scenarios_incomplete=5,
+        )
+        md = render_understanding(report, 1)
+        assert "Could not test: 5" in md
+
+    def test_no_incomplete_line_when_zero(self):
+        report = DiagnosticReport(
+            scenarios_run=3,
+            scenarios_passed=2,
+            scenarios_failed=1,
+            scenarios_incomplete=0,
+        )
+        md = render_understanding(report, 1)
+        assert "Could not test" not in md

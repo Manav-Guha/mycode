@@ -44,6 +44,23 @@ from mycode.web.worker import run_analysis
 
 logger = logging.getLogger(__name__)
 
+
+def _repo_name_from_url(url: str) -> str:
+    """Extract a human-readable project name from a GitHub URL.
+
+    E.g. "https://github.com/user/react-shopping-cart" → "React Shopping Cart"
+    """
+    try:
+        parts = url.strip().rstrip("/").split("/")
+        repo = parts[-1] if parts else ""
+        if repo.endswith(".git"):
+            repo = repo[:-4]
+        name = repo.replace("-", " ").replace("_", " ")
+        return name.title() if name else "Project"
+    except Exception:
+        return "Project"
+
+
 # Thread pool for background analysis jobs
 _executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JOBS)
 
@@ -137,8 +154,14 @@ def handle_preflight(
         )
         job.viability = viability
 
-        # Project name
+        # Project name — prefer package.json/pyproject.toml, fall back to
+        # GitHub repo name if the inferred name is generic (e.g. temp dir)
         project_name = _infer_project_name(project_path)
+        if (
+            project_name.lower() in ("project", "my project", "app")
+            and github_url
+        ):
+            project_name = _repo_name_from_url(github_url)
         job.project_name = project_name
 
         # Build dependency list
@@ -494,6 +517,7 @@ def handle_report(job_id: str) -> ReportResponse:
         "scenarios_run": job.result.report.scenarios_run,
         "scenarios_passed": job.result.report.scenarios_passed,
         "scenarios_failed": job.result.report.scenarios_failed,
+        "scenarios_incomplete": job.result.report.scenarios_incomplete,
         "total_errors": job.result.report.total_errors,
     }
 
