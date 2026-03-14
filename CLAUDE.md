@@ -19,7 +19,7 @@ myCode is not a finished product, but a sophisticated and intelligent rendition 
 3. Check filesystem state before planning — do not infer from conversation history
 4. Do not add functionality, abstractions, or interfaces beyond what is explicitly tasked
 5. If a task requires supporting changes, list them before implementing
-6. Maintain the passing test baseline (currently 1,694 passing, 0 failures)
+6. Maintain the passing test baseline (currently 1,686 passing, 0 failures)
 
 ---
 

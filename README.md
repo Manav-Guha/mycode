@@ -61,7 +61,7 @@ The CLI walks you through the same conversational flow. Requires Python 3.10+.
 
 ## Test Suite
 
-1,694 passing tests across all components.
+1,686 passing tests across all components.
 
 ## What a Report Contains
 
