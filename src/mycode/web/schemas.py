@@ -145,6 +145,9 @@ class ReportResponse:
     job_id: str = ""
     report: Optional[dict] = None
     pipeline_summary: Optional[dict] = None
+    understanding_md: str = ""
+    fixes_md: str = ""
+    edition: int = 0
     error: str = ""
 
 

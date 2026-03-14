@@ -75,6 +75,7 @@ def handle_preflight(
         job.project_path = temp_dir
 
         if github_url:
+            job.github_url = github_url
             project_path = clone_github_repo(github_url, temp_dir / "project")
         elif file_obj is not None:
             project_path = extract_zip(file_obj, temp_dir / "project")
@@ -496,10 +497,29 @@ def handle_report(job_id: str) -> ReportResponse:
         "total_errors": job.result.report.total_errors,
     }
 
+    # Render edition documents
+    understanding_md = ""
+    fixes_md = ""
+    edition = 0
+    try:
+        from mycode.documents import (
+            get_next_edition,
+            render_fixes,
+            render_understanding,
+        )
+        edition = get_next_edition(github_url=job.github_url or None)
+        understanding_md = render_understanding(job.result.report, edition)
+        fixes_md = render_fixes(job.result.report, edition)
+    except Exception as exc:
+        logger.warning("Could not render edition documents: %s", exc)
+
     return ReportResponse(
         job_id=job_id,
         report=report_dict,
         pipeline_summary=pipeline_summary,
+        understanding_md=understanding_md,
+        fixes_md=fixes_md,
+        edition=edition,
     )
 
 

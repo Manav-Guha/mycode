@@ -202,6 +202,8 @@ class ScenarioResult:
     failure_reason: str = ""
     probe_skipped: list[dict] = field(default_factory=list)
     hit_user_timeout: bool = False
+    source_files: list[str] = field(default_factory=list)
+    source_functions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -743,6 +745,13 @@ class ExecutionEngine:
         )
         harness_config = self._build_harness_config(scenario)
 
+        # Extract source file/function info for downstream documents
+        _src_files: list[str] = list(harness_config.get("target_modules", []))
+        _src_funcs: list[str] = [
+            f["name"] for f in harness_config.get("target_functions", [])
+            if isinstance(f, dict) and "name" in f
+        ]
+
         # Per-scenario skip: JS/TS files that Node.js can't require() natively.
         # .ts, .tsx, .jsx need a transpiler (tsc, babel) — plain `node` crashes.
         # Coupling/behavior scenarios (no target_functions) still run fine.
@@ -865,6 +874,10 @@ class ExecutionEngine:
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+        # Attach source file/function info for document generation
+        result.source_files = _src_files
+        result.source_functions = _src_funcs
 
         # Mark when scenario was capped by the user's timeout
         if hit_user_cap and result.failure_reason == "timeout":

@@ -87,6 +87,8 @@ class Finding:
     failure_domain: str = ""
     failure_pattern: Optional[str] = None
     operational_trigger: str = ""
+    source_file: str = ""
+    source_function: str = ""
     _peak_memory_mb: float = 0.0
     _execution_time_ms: float = 0.0
     _error_count: int = 0
@@ -599,6 +601,8 @@ class DiagnosticReport:
                 "failure_pattern": f.failure_pattern,
                 "operational_trigger": f.operational_trigger,
                 "failure_reason": f._failure_reason,
+                "source_file": f.source_file,
+                "source_function": f.source_function,
             }
             if f.grouped_findings:
                 d["grouped_findings"] = [
@@ -1070,6 +1074,10 @@ class ReportGenerator:
             else:
                 failed += 1
 
+            # Extract source file/function for document generation
+            sr_source_file = sr.source_files[0] if sr.source_files else ""
+            sr_source_function = sr.source_functions[0] if sr.source_functions else ""
+
             # Extract metrics for grouping
             sr_peak_memory = max(
                 (s.memory_peak_mb for s in sr.steps), default=0.0,
@@ -1077,6 +1085,12 @@ class ReportGenerator:
             sr_exec_time = max(
                 (s.execution_time_ms for s in sr.steps), default=0.0,
             )
+
+            def _tag_source(f: Finding) -> Finding:
+                """Attach source file/function from scenario result."""
+                f.source_file = sr_source_file
+                f.source_function = sr_source_function
+                return f
 
             # ── User timeout → INFO finding with re-run suggestion ──
             if sr.hit_user_timeout:
@@ -1092,7 +1106,7 @@ class ReportGenerator:
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
                 f._failure_reason = "user_timeout"
-                report.incomplete_tests.append(f)
+                report.incomplete_tests.append(_tag_source(f))
                 continue
 
             # ── Harness failures → incomplete tests (myCode limitation) ──
@@ -1111,7 +1125,7 @@ class ReportGenerator:
                 )
                 f._failure_reason = sr.failure_reason
                 f._error_count = sr.total_errors
-                report.incomplete_tests.append(f)
+                report.incomplete_tests.append(_tag_source(f))
                 continue
 
             # ── Probe-skipped functions on a scenario that still ran ──
@@ -1127,7 +1141,7 @@ class ReportGenerator:
                         ),
                     )
                     pf._failure_reason = "runtime_context_required"
-                    report.incomplete_tests.append(pf)
+                    report.incomplete_tests.append(_tag_source(pf))
 
             # ── Environment-only failures → incomplete tests ──
             if self._is_environment_only(sr):
@@ -1143,7 +1157,7 @@ class ReportGenerator:
                     affected_dependencies=self._deps_from_name(sr.scenario_name),
                 )
                 f._error_count = sr.total_errors
-                report.incomplete_tests.append(f)
+                report.incomplete_tests.append(_tag_source(f))
                 continue
 
             # Extract load level info from steps (for contextualisation)
@@ -1175,7 +1189,7 @@ class ReportGenerator:
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
                 f._load_level = failing_load
-                report.findings.append(f)
+                report.findings.append(_tag_source(f))
 
             # Check resource cap hits
             if sr.resource_cap_hit:
@@ -1201,7 +1215,7 @@ class ReportGenerator:
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
                 f._load_level = failing_load
-                report.findings.append(f)
+                report.findings.append(_tag_source(f))
 
             # Check for errors — skip if a CRITICAL finding already covers
             # this scenario (resource_cap_hit or failed status) to avoid
@@ -1233,7 +1247,7 @@ class ReportGenerator:
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
                 f._load_level = failing_load
-                report.findings.append(f)
+                report.findings.append(_tag_source(f))
 
             # Check failure indicators — skip if a CRITICAL finding
             # already covers this scenario to avoid duplicate findings.
@@ -1259,7 +1273,7 @@ class ReportGenerator:
                 f._execution_time_ms = sr_exec_time
                 f._error_count = sr.total_errors
                 f._load_level = failing_load
-                report.findings.append(f)
+                report.findings.append(_tag_source(f))
 
             # Detect degradation curves
             self._detect_degradation(sr, report)

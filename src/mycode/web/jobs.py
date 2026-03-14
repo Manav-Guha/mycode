@@ -57,6 +57,7 @@ class Job:
     status: str = "preflight_running"
     created_at: float = 0.0
     project_path: Optional[Path] = None
+    github_url: str = ""
     language: str = ""
     project_name: str = ""
 

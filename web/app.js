@@ -388,13 +388,17 @@ async function fetchReport() {
     $("progress-scenario").textContent = "";
 
     show("report-section");
-    renderReport(data.report, data.pipeline_summary);
+    renderReport(data.report, data.pipeline_summary, data.understanding_md, data.fixes_md, data.edition);
 }
 
-function renderReport(report, summary) {
+function renderReport(report, summary, understandingMd, fixesMd, edition) {
     if (!report) return;
 
     const content = $("report-content");
+    // Store edition documents for download
+    content.dataset.understandingMd = understandingMd || "";
+    content.dataset.fixesMd = fixesMd || "";
+    content.dataset.edition = edition || "0";
     let html = "";
 
     // Stats
@@ -445,6 +449,8 @@ function renderReport(report, summary) {
     html += `<div class="download-row">
         <button class="btn btn-secondary btn-sm" onclick="downloadJSON()">Download JSON</button>
         <button class="btn btn-secondary btn-sm" onclick="downloadMarkdown()">Download Markdown</button>
+        <button class="btn btn-secondary btn-sm" onclick="downloadUnderstanding()">Understanding Your Results</button>
+        <button class="btn btn-secondary btn-sm" onclick="downloadFixes()">Recommended Fixes</button>
     </div>`;
 
     content.innerHTML = html;
@@ -571,6 +577,24 @@ function downloadMarkdown() {
     const md = reportToMarkdown(report);
     const blob = new Blob([md], { type: "text/markdown" });
     downloadBlob(blob, "mycode-report.md");
+}
+
+function downloadUnderstanding() {
+    const content = $("report-content");
+    const md = content.dataset.understandingMd;
+    if (!md) return;
+    const edition = content.dataset.edition || "1";
+    const blob = new Blob([md], { type: "text/markdown" });
+    downloadBlob(blob, `mycode-understanding-your-results-edition-${edition}.md`);
+}
+
+function downloadFixes() {
+    const content = $("report-content");
+    const md = content.dataset.fixesMd;
+    if (!md) return;
+    const edition = content.dataset.edition || "1";
+    const blob = new Blob([md], { type: "text/markdown" });
+    downloadBlob(blob, `mycode-recommended-fixes-edition-${edition}.md`);
 }
 
 function downloadBlob(blob, filename) {

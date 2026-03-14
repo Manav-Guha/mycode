@@ -581,6 +581,24 @@ def main(argv: list[str] | None = None) -> int:
             for w in result.warnings:
                 print(f"  - {w}")
 
+    # Edition documents (always generated when report exists)
+    if result.report:
+        try:
+            from mycode.documents import write_edition_documents
+            understanding_path, fixes_path, edition = write_edition_documents(
+                report=result.report,
+                project_name=project.name,
+                project_path=project,
+            )
+            print(f"\nEdition {edition} reports written:")
+            print(f"  {understanding_path}")
+            print(f"  {fixes_path}")
+        except Exception as exc:
+            print(
+                f"\nWarning: Could not write edition documents: {exc}",
+                file=sys.stderr,
+            )
+
     # JSON output
     if args.json_output and result.report:
         json_path = project / "mycode-report.json"
