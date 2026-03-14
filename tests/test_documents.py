@@ -11,9 +11,12 @@ import pytest
 
 from mycode.documents import (
     _EDITIONS_DIR,
+    _MAX_EDITIONS,
     _REPORTS_DIR,
+    _edition_number,
     _hash_key,
     _normalize_github_url,
+    _prune_old_editions,
     _sanitize_dirname,
     get_next_edition,
     render_fixes,
@@ -680,3 +683,74 @@ class TestDocumentIncompleteCount:
         )
         md = render_understanding(report, 1)
         assert "Could not test" not in md
+
+
+# ── Edition Pruning ──
+
+
+class TestEditionPruning:
+    """Test that old editions are pruned to keep at most 10."""
+
+    def test_no_pruning_under_limit(self, tmp_path):
+        project_dir = tmp_path / "my-project"
+        for i in range(1, 6):
+            (project_dir / f"edition-{i}").mkdir(parents=True)
+        removed = _prune_old_editions(project_dir)
+        assert removed == 0
+        assert len(list(project_dir.iterdir())) == 5
+
+    def test_pruning_at_limit(self, tmp_path):
+        project_dir = tmp_path / "my-project"
+        for i in range(1, 11):
+            (project_dir / f"edition-{i}").mkdir(parents=True)
+        removed = _prune_old_editions(project_dir)
+        assert removed == 0
+        assert len(list(project_dir.iterdir())) == 10
+
+    def test_pruning_over_limit(self, tmp_path):
+        project_dir = tmp_path / "my-project"
+        for i in range(1, 14):
+            d = project_dir / f"edition-{i}"
+            d.mkdir(parents=True)
+            (d / "report.md").write_text("content")
+        removed = _prune_old_editions(project_dir)
+        assert removed == 3
+        remaining = {d.name for d in project_dir.iterdir()}
+        assert remaining == {f"edition-{i}" for i in range(4, 14)}
+
+    def test_preserves_newest(self, tmp_path):
+        project_dir = tmp_path / "my-project"
+        for i in range(1, 16):
+            (project_dir / f"edition-{i}").mkdir(parents=True)
+        _prune_old_editions(project_dir)
+        remaining = {d.name for d in project_dir.iterdir()}
+        # Editions 6-15 should remain
+        for i in range(6, 16):
+            assert f"edition-{i}" in remaining
+        for i in range(1, 6):
+            assert f"edition-{i}" not in remaining
+
+    def test_nonexistent_dir(self, tmp_path):
+        removed = _prune_old_editions(tmp_path / "does-not-exist")
+        assert removed == 0
+
+    def test_non_edition_dirs_ignored(self, tmp_path):
+        project_dir = tmp_path / "my-project"
+        project_dir.mkdir()
+        for i in range(1, 13):
+            (project_dir / f"edition-{i}").mkdir()
+        (project_dir / "other-dir").mkdir()
+        (project_dir / "notes.txt").write_text("hi")
+        _prune_old_editions(project_dir)
+        # other-dir and notes.txt should still exist
+        assert (project_dir / "other-dir").exists()
+        assert (project_dir / "notes.txt").exists()
+        # 10 edition dirs remain
+        edition_dirs = [d for d in project_dir.iterdir() if d.name.startswith("edition-")]
+        assert len(edition_dirs) == 10
+
+    def test_edition_number_parsing(self):
+        assert _edition_number("edition-1") == 1
+        assert _edition_number("edition-42") == 42
+        assert _edition_number("edition-") == 0
+        assert _edition_number("other") == 0

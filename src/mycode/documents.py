@@ -540,4 +540,47 @@ def write_edition_documents(
     understanding_path.write_text(understanding, encoding="utf-8")
     fixes_path.write_text(fixes, encoding="utf-8")
 
+    # Clean up old editions — keep only the last 10
+    _prune_old_editions(_REPORTS_DIR / safe_name)
+
     return understanding_path, fixes_path, edition
+
+
+_MAX_EDITIONS = 10
+
+
+def _prune_old_editions(project_dir: Path, max_keep: int = _MAX_EDITIONS) -> int:
+    """Remove oldest edition directories if more than max_keep exist.
+
+    Returns the number of editions removed.
+    """
+    if not project_dir.is_dir():
+        return 0
+
+    edition_dirs = sorted(
+        (d for d in project_dir.iterdir() if d.is_dir() and d.name.startswith("edition-")),
+        key=lambda d: _edition_number(d.name),
+    )
+
+    if len(edition_dirs) <= max_keep:
+        return 0
+
+    to_remove = edition_dirs[: len(edition_dirs) - max_keep]
+    removed = 0
+    for d in to_remove:
+        try:
+            import shutil
+            shutil.rmtree(d)
+            removed += 1
+        except OSError as exc:
+            logger.debug("Could not remove old edition %s: %s", d, exc)
+
+    return removed
+
+
+def _edition_number(dirname: str) -> int:
+    """Extract the edition number from a directory name like 'edition-3'."""
+    try:
+        return int(dirname.split("-", 1)[1])
+    except (IndexError, ValueError):
+        return 0
