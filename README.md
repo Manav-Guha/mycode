@@ -1,143 +1,123 @@
 # myCode
 
-**Built it with AI? Test it before it breaks.**
+Runtime stress-testing and reliability verification for AI-generated applications.
 
-Stress-testing tool for AI-generated code. Point it at your project, describe what it does, and find out where it breaks under real-world conditions.
+You built it with AI. myCode finds where it breaks.
 
 ## What It Does
 
-You built an app with ChatGPT, Cursor, Claude, or Copilot. It works on your machine. But what happens when 100 users hit it at once? When the CSV grows to 100,000 rows? When someone uploads a 50MB file? When the API you depend on goes slow?
+myCode takes a GitHub repository, runs the actual code under progressively escalating conditions, and produces a diagnostic report showing where and how it fails. It tests dependency interactions as systems, not individual components in isolation.
 
-myCode answers these questions. It reads your code, understands your dependencies, generates stress scenarios, runs your actual code under escalating conditions, and tells you — in plain language — where it breaks.
-
-## Quick Start
-
-```bash
-pip install mycode-ai
-mycode ~/path/to/your/project
-```
-
-That's it. myCode will:
-1. Ask you what your project does (in your words, not engineering language)
-2. Show you what it plans to test and let you approve
-3. Run stress tests in a safe sandbox (your original files are never touched)
-4. Give you a diagnostic report
-
-## What It Tests
-
-- **Data volume scaling** — what happens as your data grows from 100 rows to 100,000
-- **Memory pressure** — does your app leak memory over repeated use
-- **Concurrent load** — multiple users or processes hitting shared resources
-- **Edge case inputs** — malformed data, empty values, unexpected types
-- **Dependency interactions** — where one component's failure cascades into another
-
-## Supported Languages
-
-- Python (Flask, FastAPI, Streamlit, pandas, NumPy, SQLAlchemy, LangChain, and more)
-- JavaScript/Node.js (React, Next.js, Express, Three.js, Prisma, Socket.io, and more)
-
-36 dependency profiles included. Unrecognized dependencies get generic stress testing.
-
-## Example Output
-
-```
-============================================================
-  myCode Diagnostic Report
-============================================================
-
-We found some problems that could affect your Incident Tracker under real-world conditions.
-
-- When your Incident Tracker is handling multiple users at once, requests timed out under load.
-- When your Incident Tracker is downloading large responses, the system hits memory limits.
-- When your Incident Tracker receives unexpected input, the code crashes instead of handling it gracefully.
-
-Found 3 critical issue(s) and 25 warning(s) across 70 scenarios.
-Performance degradation detected in 11 area(s).
-```
-
-## Offline Mode
-
-Run without any API calls:
-
-```bash
-mycode ~/path/to/your/project --offline
-```
-
-Uses template-based scenario generation instead of LLM. Still runs all stress tests and produces a full report.
-
-## Online Mode (Gemini Flash)
-
-With an API key, myCode uses Gemini Flash to generate a natural-language summary of findings:
-
-```bash
-export GEMINI_API_KEY=your_key_here
-mycode ~/path/to/your/project
-```
-
-Or pass it directly:
-
-```bash
-mycode ~/path/to/your/project --api-key your_key_here
-```
-
-Free tier: get a Gemini API key at https://aistudio.google.com/apikey (1,000 requests/day, no credit card).
+It is not a linter, not a static analysis tool, not a code reviewer, and not a security scanner. It does not generate patches or modify your code. It runs your code, breaks it under controlled conditions, and tells you what happened.
 
 ## How It Works
 
-1. **Ingester** parses your code (AST analysis), maps dependencies, identifies coupling points
-2. **Conversational interface** asks what your project does and how you expect it to be used
-3. **Scenario generator** creates stress test configurations based on your code + your intent
-4. **Execution engine** runs your actual code in a sandbox with synthetic data under escalating conditions
-5. **Report generator** translates raw results into plain-language diagnostics
+1. Point myCode at a GitHub repo URL via the [web interface](https://mycode-ai.vercel.app/).
+2. Answer 2–3 questions about your project in plain language (what it does, who uses it, what conditions it operates under).
+3. myCode clones the repo, resolves dependencies, parses the codebase via AST, matches against its component library of 36 dependency profiles, generates stress scenarios from the intersection of your stated intent and parsed code structure, then executes them.
+4. You get a diagnostic report: what broke, at what load level, and under what conditions.
 
-Your original files are never modified. Everything runs in a temporary environment that is destroyed on completion.
+All tests run inside isolated temporary environments. Your original files are never touched.
 
-## Safety
+## Supported Languages and Frameworks
 
-- Your code is copied into a temporary sandbox — originals are never touched
-- Resource caps (memory, CPU, timeout) prevent runaway processes
-- Sandbox is destroyed on completion, crash, or interrupt (Ctrl+C)
-- No data is collected without explicit opt-in consent
-- No source code is ever sent to any API — only project descriptions and dependency names
+**Python (18 profiles):** Flask, FastAPI, Streamlit, Gradio, pandas, NumPy, SQLite3, SQLAlchemy, Supabase, LangChain, LlamaIndex, ChromaDB, OpenAI SDK, Anthropic SDK, requests, httpx, Pydantic, os/pathlib.
 
-**Important:** myCode executes your project's code on your machine. Do not point it at code you do not trust.
+**JavaScript / Node.js (18 profiles):** React, Next.js, Express, Node.js core (fs, path, http), Tailwind CSS, Three.js, Svelte, OpenAI Node SDK, Anthropic Node SDK, LangChain.js, Supabase JS, Prisma, Axios/fetch, Mongoose/MongoDB driver, Stripe SDK, dotenv, Zod, Socket.io.
 
-## What myCode Is NOT
+Dependencies not in the library are flagged as unrecognised and tested generically based on how the code uses them.
 
-- Not a linter or code reviewer
-- Not a security scanner
-- Not a code generator — myCode never modifies your code
-- Not a guarantee of code quality — it's a diagnostic tool
+## Stress Categories
 
-## Requirements
+- **Data volume scaling** — progressively larger inputs until something gives
+- **Memory profiling** — repeated runs tracking accumulation over time
+- **Edge case inputs** — malformed, empty, unexpected type data
+- **Concurrent execution** — multiple instances against shared resources
+- **Language-specific** — GIL contention and blocking I/O (Python); async/promise chain failures, event listener accumulation, state management degradation (JavaScript)
 
-- Python 3.10+
-- Node.js 18+ (for JavaScript project testing)
+## Installation
 
-## Validated Against Real Projects
+### Web Interface (recommended)
 
-myCode has been tested against real-world projects across Python and JavaScript:
+Go to [mycode-ai.vercel.app](https://mycode-ai.vercel.app/). Paste a GitHub repo URL. No account required.
 
-| Project | Language | Scenarios | Critical Issues | Result |
-|---------|----------|-----------|-----------------|--------|
-| Multi-framework web app (Flask + FastAPI + Streamlit) | Python | 70 | 3 | Timeouts under load, memory scaling issues |
-| Analysis tool (React + charting libraries) | JavaScript | 25 | 4 | Edge case input crashes, memory growth |
-| Multi-component framework (React) | JavaScript | 19 | 0 | All clean |
-| Expense tracker (React) | JavaScript | 5 | 0 | Mostly clean |
-| CLI tool — myCode self-test (26 files, 24K lines) | Python | 279 | 0 | All clean |
+### CLI
 
-398 total scenarios, 7 critical issues found, 0 myCode errors.
+```bash
+pip install mycode-ai
+```
 
-[See full anonymized test reports →](docs/validation-reports.md)
+```bash
+mycode
+```
+
+The CLI walks you through the same conversational flow. Requires Python 3.10+.
+
+## Offline and Online Modes
+
+**Offline mode** (default, no API key): Scenarios are generated from template-based matching against the component library. Reports use structured templates. No external API calls.
+
+**Online mode** (Gemini Flash API key): Adds LLM-generated natural language scenario descriptions and report summaries. Set your API key when prompted or via environment variable.
+
+## Test Suite
+
+1,694 passing tests across all components.
+
+## What a Report Contains
+
+- Project summary and detected dependency stack
+- Findings grouped by severity (critical, warning, info)
+- Per-finding: what broke, at what scale step, under what conditions
+- Unrecognised dependencies flagged with generic test results
+- Probe-and-skip classification for functions requiring runtime context (e.g., Streamlit session state, database connections) — reported honestly as untestable in isolation, not as false failures
+
+Reports diagnose. They do not prescribe fixes.
+
+## What myCode Is Not
+
+- Not a replacement for your coding tool — it complements Cursor, Claude Code, Copilot, Lovable, and similar.
+- Not a guarantee of code quality — diagnostic tool only.
+- Not a security scanner.
+- Not a code generator — myCode never writes or modifies code.
+
+## License
+
+myCode is source-available under the **Business Source License 1.1** (BSL 1.1).
+
+### What this means
+
+The complete source code is publicly available. You can read it, study it, fork it, and build on it for non-production purposes. **Production use of myCode requires a commercial license from the licensor.**
+
+### What you can do without a commercial license
+
+- **Evaluate and test** myCode in development and non-production environments.
+- **Read, study, and learn** from the source code.
+- **Fork and modify** the code for non-production use.
+- **Contribute** to the project via pull requests.
+
+### What requires a commercial license
+
+- **Any production use** — running myCode against your projects in a production or commercial context.
+- **Offering myCode as a service** — hosting myCode or a derivative and providing it to third parties.
+
+### Why BSL
+
+The source is open for transparency and scrutiny. The license protects the project commercially while the product is young. This is the same license used by HashiCorp, Sentry, CockroachDB, and SurrealDB.
+
+### Conversion to open source
+
+Each version of myCode converts to the **Apache License 2.0** four years after its first public distribution. At that point, all restrictions lapse and the code is fully open source under Apache 2.0.
+
+**Licensor:** Manabrata Guha
+**Licensed Work:** myCode
+**Additional Use Grant:** None
+**Change License:** Apache License 2.0
+**Change Date:** Four years from first public distribution of each version
+
+The full license text is in [LICENSE](LICENSE).
+
+For commercial licensing enquiries: Machine.Adjacent.Systems@protonmail.com
 
 ## Contact
 
 Machine.Adjacent.Systems@protonmail.com
-
-## License
-
-MIT
-
----
-
-*myCode diagnoses — it does not prescribe. Interpret results in your context.*
