@@ -2,7 +2,7 @@
 
 Runtime stress-testing and reliability verification for AI-generated applications.
 
-You built it with AI. myCode finds where it breaks.
+"You built it with AI. myCode finds where it breaks"
 
 ## What It Does
 
