@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 _RESULTS_START = "__MYCODE_RESULTS_START__"
 _RESULTS_END = "__MYCODE_RESULTS_END__"
 
+# Track B: standalone JS scripts for function-level stress testing
+_JS_LOADER_SCRIPT = Path(__file__).parent / "js_module_loader.js"
+_JS_STRESS_RUNNER_SCRIPT = Path(__file__).parent / "js_stress_runner.js"
+
 # Truncation limits
 _SNIPPET_MAX = 2000
 
@@ -783,6 +787,37 @@ class ExecutionEngine:
                         f["module"] for f in requireable
                     })
 
+        # Track B: try the callable harness (B1 discovery + B2 stress runner)
+        # for JS scenarios with target_functions. Coupling/behavior scenarios
+        # and scenarios with no target_functions skip this path.
+        if is_js and not harness_config.get("behavior"):
+            callable_result = self._try_js_callable_harness(
+                scenario, harness_config, timeout,
+            )
+            if callable_result is not None:
+                total_ms = (time.perf_counter() - start) * 1000
+                callable_result.total_execution_time_ms = round(total_ms, 2)
+                callable_result.failure_indicators_triggered = (
+                    self._check_failure_indicators(
+                        scenario, callable_result.steps,
+                        # Build a minimal SessionResult for indicator check
+                        SessionResult(
+                            returncode=0,
+                            stdout="",
+                            stderr="",
+                        ),
+                    )
+                )
+                if hit_user_cap and callable_result.failure_reason == "timeout":
+                    callable_result.hit_user_timeout = True
+                logger.info(
+                    "Scenario '%s' %s (callable): %d steps, %d errors, %.0f ms",
+                    scenario.name, callable_result.status,
+                    len(callable_result.steps), callable_result.total_errors,
+                    callable_result.total_execution_time_ms,
+                )
+                return callable_result
+
         if is_js:
             harness_content = self._build_js_harness(
                 scenario.category,
@@ -898,6 +933,228 @@ class ExecutionEngine:
                 )
 
         return result
+
+    # ── Track B: function-level JS stress testing via callable harness ──
+
+    def _try_js_callable_harness(
+        self,
+        scenario: StressTestScenario,
+        harness_config: dict,
+        timeout: int,
+    ) -> ScenarioResult | None:
+        """Try the B1/B2 callable harness path for JS scenarios.
+
+        Returns a ScenarioResult if the callable harness produced usable
+        results, or None to fall through to the existing embedded harness.
+        """
+        target_funcs = harness_config.get("target_functions", [])
+        if not target_funcs:
+            return None
+
+        # Collect unique target modules (JS files)
+        modules = list({f["module"] for f in target_funcs})
+
+        # Phase 1: discover exports via js_module_loader.js
+        all_exports: list[dict] = []
+        param_names: dict[str, list[str]] = {}
+
+        for mod_path in modules:
+            discovery = self._discover_js_exports(mod_path, timeout=min(timeout, 15))
+            if discovery is None:
+                continue
+            exports = discovery.get("exports", [])
+            if not exports:
+                continue
+
+            # Match discovered exports against ingester-known functions
+            # to carry over param names from static analysis
+            known_funcs = {
+                f["name"]: f.get("args", [])
+                for f in target_funcs if f["module"] == mod_path
+            }
+            for exp in exports:
+                exp["_source_file"] = mod_path
+                args = known_funcs.get(exp["name"], [])
+                if args:
+                    param_names[exp["name"]] = args
+
+            all_exports.extend(exports)
+
+        if not all_exports:
+            logger.debug(
+                "Callable harness: no exports discovered for %s, "
+                "falling back to embedded harness",
+                scenario.name,
+            )
+            return None
+
+        # Phase 2: run stress via js_stress_runner.js
+        params = harness_config.get("parameters", {})
+        scale_levels = (
+            params.get("data_sizes")
+            or params.get("concurrent")
+            or [100, 1000, 10000]
+        )
+        step_timeout_s = harness_config.get(
+            "resource_limits", {},
+        ).get("step_timeout_seconds", 60)
+
+        # Build the stress task — one run per unique module
+        for mod_path in modules:
+            mod_exports = [e for e in all_exports if e.get("_source_file") == mod_path]
+            if not mod_exports:
+                continue
+
+            session_result = self._run_js_stress(
+                mod_path, mod_exports, scale_levels,
+                step_timeout_s * 1000, param_names, timeout,
+            )
+            if session_result is None:
+                continue
+
+            # Parse through existing _parse_harness_output
+            result = self._parse_harness_output(session_result, scenario)
+
+            # Populate source info from discovered exports
+            result.source_files = [mod_path]
+            result.source_functions = [e["name"] for e in mod_exports]
+
+            logger.info(
+                "Callable harness succeeded for '%s': %d steps, %d errors",
+                scenario.name, len(result.steps), result.total_errors,
+            )
+            return result
+
+        return None
+
+    def _discover_js_exports(
+        self, module_path: str, timeout: int = 15,
+    ) -> dict | None:
+        """Run js_module_loader.js in the session to discover exports."""
+        if not _JS_LOADER_SCRIPT.is_file():
+            logger.warning("js_module_loader.js not found at %s", _JS_LOADER_SCRIPT)
+            return None
+
+        # Write task JSON to a temp file in the project copy
+        task = json.dumps({
+            "command": "discover",
+            "file_path": module_path,
+        })
+        task_path = (
+            self.session.project_copy_dir / f"_mycode_discover_{uuid.uuid4().hex[:8]}.json"
+        )
+        task_path.write_text(task, encoding="utf-8")
+
+        try:
+            # Run: echo task | node js_module_loader.js
+            # We pipe via a shell command since session.run_in_session
+            # doesn't support stdin. Instead, use node -e to read the file.
+            cmd = [
+                "node", "-e",
+                f"const fs=require('fs');"
+                f"const input=fs.readFileSync({str(task_path)!r},'utf8');"
+                f"process.stdin=require('stream').Readable.from([input]);"
+                f"require({str(_JS_LOADER_SCRIPT)!r});",
+            ]
+            result = self.session.run_in_session(cmd, timeout=timeout)
+
+            if result.returncode != 0 and not result.stdout.strip():
+                logger.debug(
+                    "Discovery failed for %s: exit %d, stderr: %s",
+                    module_path, result.returncode, result.stderr[:200],
+                )
+                return None
+
+            # Parse JSON from stdout (loader outputs a single JSON line)
+            stdout = result.stdout.strip()
+            if not stdout:
+                return None
+
+            # The loader may have console.log noise from the module itself.
+            # Take the last JSON line.
+            for line in reversed(stdout.splitlines()):
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        data = json.loads(line)
+                        if data.get("status") == "ok":
+                            return data
+                        logger.debug(
+                            "Discovery error for %s: %s",
+                            module_path, data.get("error", "unknown"),
+                        )
+                        return None
+                    except json.JSONDecodeError:
+                        continue
+            return None
+
+        except Exception as exc:
+            logger.debug("Discovery exception for %s: %s", module_path, exc)
+            return None
+        finally:
+            try:
+                task_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _run_js_stress(
+        self,
+        module_path: str,
+        exports: list[dict],
+        scale_levels: list[int],
+        step_timeout_ms: int,
+        param_names: dict[str, list[str]],
+        timeout: int,
+    ) -> SessionResult | None:
+        """Run js_stress_runner.js in the session sandbox."""
+        if not _JS_STRESS_RUNNER_SCRIPT.is_file():
+            logger.warning("js_stress_runner.js not found at %s", _JS_STRESS_RUNNER_SCRIPT)
+            return None
+
+        task = json.dumps({
+            "command": "stress",
+            "file_path": module_path,
+            "functions": [
+                {"name": e["name"], "arity": e["arity"], "is_async": e.get("is_async", False)}
+                for e in exports
+            ],
+            "scale_levels": scale_levels,
+            "step_timeout_ms": step_timeout_ms,
+            "param_names": param_names,
+        })
+        task_path = (
+            self.session.project_copy_dir / f"_mycode_stress_{uuid.uuid4().hex[:8]}.json"
+        )
+        task_path.write_text(task, encoding="utf-8")
+
+        try:
+            heap_mb = self.session.resource_caps.memory_mb
+            cmd = [
+                "node",
+                f"--max-old-space-size={heap_mb}",
+                "-e",
+                f"const fs=require('fs');"
+                f"const input=fs.readFileSync({str(task_path)!r},'utf8');"
+                f"process.stdin=require('stream').Readable.from([input]);"
+                f"require({str(_JS_STRESS_RUNNER_SCRIPT)!r});",
+            ]
+            result = self.session.run_in_session(cmd, timeout=timeout)
+            # Check that output contains our markers
+            if _RESULTS_START in result.stdout:
+                return result
+            logger.debug(
+                "Stress runner produced no markers for %s (exit %d)",
+                module_path, result.returncode,
+            )
+            return None
+        except Exception as exc:
+            logger.debug("Stress runner exception for %s: %s", module_path, exc)
+            return None
+        finally:
+            try:
+                task_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _build_harness_config(self, scenario: StressTestScenario) -> dict:
         """Build the configuration dict passed to the harness script."""
