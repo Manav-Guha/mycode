@@ -219,3 +219,15 @@ failed_repos.json
 timeout_repos.json
 CLAUDE.md
 MEMORY.md
+mycode_session_*
+pip-build-tracker-*
+pip-ephem-wheel-cache-*
+pip-install-*
+tmp*
+results/
+corpus_results/
+corpus_results_retry/
+corpus_results_timeout/
+discovered_repos*.json
+failed_repos.json
+timeout_repos.json
