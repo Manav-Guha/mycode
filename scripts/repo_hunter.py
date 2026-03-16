@@ -69,7 +69,7 @@ def _api_get(url: str, token: str | None, delay: float) -> dict | None:
     """GET a GitHub API URL. Returns parsed JSON or None on failure."""
     headers = {"Accept": "application/vnd.github+json"}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers["Authorization"] = f"token {token}"
 
     req = urllib.request.Request(url, headers=headers)
 
