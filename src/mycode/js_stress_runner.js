@@ -142,6 +142,7 @@ const _CONTEXT_ERROR_TYPES = new Set([
 ]);
 
 function isContextError(err) {
+  if (err == null) return false;
   const errType = (err && err.constructor) ? err.constructor.name : "Error";
   const msg = String(err.message || err);
 
@@ -213,8 +214,8 @@ async function probeFunction(funcEntry, mod) {
     await invokeWithTimeout(fn, minArgs, 5000);
     return null; // probe passed
   } catch (err) {
-    if (isContextError(err)) {
-      const errType = (err && err.constructor) ? err.constructor.name : "Error";
+    if (err != null && isContextError(err)) {
+      const errType = (err.constructor) ? err.constructor.name : "Error";
       return {
         name: funcEntry.name,
         error: { type: errType, message: String(err.message || err).slice(0, 500) },
@@ -234,8 +235,8 @@ async function measureStep(stepName, params, fn, stepTimeoutMs) {
   try {
     await invokeWithTimeout(fn, [], stepTimeoutMs);
   } catch (err) {
-    const errType = (err && err.constructor) ? err.constructor.name : "Error";
-    const errMsg = String(err.message || err).slice(0, 500);
+    const errType = (err != null && err.constructor) ? err.constructor.name : "Error";
+    const errMsg = (err != null) ? String(err.message || err).slice(0, 500) : "Unknown error";
 
     if (/timed out/i.test(errMsg)) {
       capHit = "timeout";
