@@ -644,6 +644,11 @@ class ExecutionEngine:
         # whose functions are all already covered.
         scenarios = self._deduplicate_by_function(scenarios)
 
+        # Cap parallel workers for JS/TS — each Node.js subprocess reserves
+        # ~1.5GB V8 CodeRange; 4 workers × 1.5GB exceeds 8GB Railway containers.
+        if self.language == "javascript":
+            max_workers = min(max_workers, 2)
+
         total = len(scenarios)
         logger.info(
             "Starting execution of %d scenarios (%d workers)",

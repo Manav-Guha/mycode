@@ -3675,3 +3675,77 @@ class TestJSCallableHarness:
         # Only one call — embedded harness, no discovery
         assert session.run_in_session.call_count == 1
         assert result.status == "completed"
+
+
+class TestJSMaxWorkersCap:
+    """JS/TS projects cap max_workers to 2 to avoid V8 OOM on constrained hosts."""
+
+    def test_js_caps_workers_to_2(self, tmp_path):
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(
+            session=session,
+            ingestion=_make_js_ingestion(),
+            language="javascript",
+        )
+        with patch.object(engine, "_check_node_available", return_value=True), \
+             patch.object(engine, "_is_browser_only_project", return_value=False), \
+             patch.object(engine, "_execute_scenario") as mock_exec, \
+             patch("mycode.engine.ThreadPoolExecutor") as mock_pool_cls:
+            mock_exec.return_value = ScenarioResult(
+                scenario_name="s1", scenario_category="data_volume_scaling",
+                status="completed", summary="ok",
+            )
+            mock_pool_instance = MagicMock()
+            mock_pool_instance.__enter__ = MagicMock(return_value=mock_pool_instance)
+            mock_pool_instance.__exit__ = MagicMock(return_value=False)
+            mock_pool_instance.submit = MagicMock(side_effect=lambda fn, *a: _immediate_future(fn, *a))
+            mock_pool_cls.return_value = mock_pool_instance
+
+            scenario = _make_scenario(name="s1", category="data_volume_scaling")
+            engine.execute([scenario], max_workers=4)
+
+            # ThreadPoolExecutor should have been called with max_workers capped to 2
+            mock_pool_cls.assert_called_once()
+            call_kw = mock_pool_cls.call_args
+            actual = call_kw[1].get("max_workers") if call_kw[1] else call_kw[0][0]
+            assert actual <= 2
+
+    def test_python_keeps_default_workers(self, tmp_path):
+        session = _make_session(tmp_path)
+        engine = ExecutionEngine(
+            session=session,
+            ingestion=_make_ingestion(),
+            language="python",
+        )
+        with patch.object(engine, "_execute_scenario") as mock_exec, \
+             patch("mycode.engine.ThreadPoolExecutor") as mock_pool_cls:
+            mock_exec.return_value = ScenarioResult(
+                scenario_name="s1", scenario_category="data_volume_scaling",
+                status="completed", summary="ok",
+            )
+            mock_pool_instance = MagicMock()
+            mock_pool_instance.__enter__ = MagicMock(return_value=mock_pool_instance)
+            mock_pool_instance.__exit__ = MagicMock(return_value=False)
+            mock_pool_instance.submit = MagicMock(side_effect=lambda fn, *a: _immediate_future(fn, *a))
+            mock_pool_cls.return_value = mock_pool_instance
+
+            scenario = _make_scenario(name="s1", category="data_volume_scaling")
+            engine.execute([scenario], max_workers=4)
+
+            # Python should keep max_workers=4 (min(4, 1 scenario) = 1)
+            mock_pool_cls.assert_called_once()
+            call_kw = mock_pool_cls.call_args
+            actual = call_kw[1].get("max_workers") if call_kw[1] else call_kw[0][0]
+            assert actual == 1  # min(4, 1 scenario)
+
+
+def _immediate_future(fn, *args):
+    """Run fn immediately and return a resolved future."""
+    from concurrent.futures import Future
+    f = Future()
+    try:
+        fn(*args)
+        f.set_result(None)
+    except Exception as e:
+        f.set_exception(e)
+    return f
