@@ -21,6 +21,7 @@ No third-party dependencies — stdlib only (openpyxl optional for --report).
 """
 
 import argparse
+import gc
 import json
 import logging
 import os
@@ -738,11 +739,15 @@ def mine(
                 for dp in new_discoveries:
                     shutil.copy2(dp, disc_dest / dp.name)
 
-            # Save stdout/stderr for debugging
+            # Save stdout/stderr for debugging, then release immediately.
+            # These strings can be tens of MB per repo — holding references
+            # across 300+ iterations caused 130GB accumulation and OOM.
             if stdout:
                 (repo_result_dir / "stdout.txt").write_text(stdout)
             if stderr:
                 (repo_result_dir / "stderr.txt").write_text(stderr)
+            error_snippet = stderr[:200] if stderr else ""
+            del stdout, stderr
 
             # Classify result
             if returncode == 0:
@@ -751,7 +756,7 @@ def mine(
                 _record_processed_repo(repo_url)
             elif returncode == -1:
                 entry["status"] = "mycode_error"
-                entry["error"] = stderr[:200]
+                entry["error"] = error_snippet
                 mycode_errors += 1
                 failed += 1
             else:
@@ -775,6 +780,7 @@ def mine(
 
             dep_fails = _extract_dep_failures(report)
             all_dep_failures.update(dep_fails)
+            del report  # release parsed JSON — no longer needed
 
             repo_results.append(entry)
 
@@ -791,6 +797,10 @@ def mine(
                 shutil.rmtree(tmp_dir, ignore_errors=True)
             except Exception:
                 pass
+            # Force GC to reclaim any remaining large objects (subprocess
+            # internals can hold circular refs).  Cheap insurance against
+            # the 130GB OOM seen on 300-repo overnight runs.
+            gc.collect()
 
     # Build aggregate summary
     summary = {
