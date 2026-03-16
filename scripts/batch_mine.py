@@ -42,6 +42,33 @@ _IS_WINDOWS = sys.platform == "win32"
 _DISCOVERIES_DIR = Path.home() / ".mycode" / "discoveries"
 _CLONE_TIMEOUT = 120          # seconds
 _DEFAULT_MYCODE_TIMEOUT = 300  # seconds
+_PROCESSED_REPOS_PATH = Path.home() / ".mycode" / "processed_repos.txt"
+
+
+# ── Dedup helpers ──
+
+
+def _load_processed_repos() -> set[str]:
+    """Read the processed-repos file into a set of normalised URLs."""
+    if not _PROCESSED_REPOS_PATH.is_file():
+        return set()
+    try:
+        text = _PROCESSED_REPOS_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not read %s: %s", _PROCESSED_REPOS_PATH, exc)
+        return set()
+    return {line.strip().rstrip("/") for line in text.splitlines() if line.strip()}
+
+
+def _record_processed_repo(repo_url: str) -> None:
+    """Append a successfully-processed repo URL to the dedup file."""
+    _PROCESSED_REPOS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(_PROCESSED_REPOS_PATH, "a", encoding="utf-8") as fh:
+            fh.write(repo_url.strip().rstrip("/") + "\n")
+            fh.flush()
+    except OSError as exc:
+        logger.warning("Could not write to %s: %s", _PROCESSED_REPOS_PATH, exc)
 
 
 # ── Helpers ──
@@ -612,14 +639,31 @@ def mine(
     results_dir: Path,
     max_repos: int,
     timeout: int = _DEFAULT_MYCODE_TIMEOUT,
+    force: bool = False,
 ) -> dict:
     """Run the full batch mining pipeline. Returns aggregate summary dict."""
     # Load repo manifest
     repos = json.loads(input_path.read_text())
+
+    # Dedup: skip repos already processed in previous runs
+    if force:
+        logger.info("--force: ignoring processed_repos.txt")
+    else:
+        already_done = _load_processed_repos()
+        if already_done:
+            before = len(repos)
+            repos = [
+                r for r in repos
+                if r.get("repo_url", "").strip().rstrip("/") not in already_done
+            ]
+            skipped = before - len(repos)
+            if skipped:
+                logger.info("Skipped %d already-processed repos", skipped)
+
     if max_repos > 0:
         repos = repos[:max_repos]
 
-    logger.info("Loaded %d repos from %s", len(repos), input_path)
+    logger.info("Loaded %d repos to process from %s", len(repos), input_path)
 
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -704,6 +748,7 @@ def mine(
             if returncode == 0:
                 entry["status"] = "success"
                 passed += 1
+                _record_processed_repo(repo_url)
             elif returncode == -1:
                 entry["status"] = "mycode_error"
                 entry["error"] = stderr[:200]
@@ -713,6 +758,7 @@ def mine(
                 # Non-zero exit but ran — partial results may exist
                 entry["status"] = "completed_with_errors"
                 passed += 1  # still counts as tested
+                _record_processed_repo(repo_url)
 
             entry["findings_count"] = len(report.get("findings", []))
             entry["discovery_count"] = len(new_discoveries)
@@ -817,6 +863,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Skip mining; regenerate reports from existing results directory",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore processed_repos.txt and re-process all repos",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -864,6 +915,7 @@ def main(argv: list[str] | None = None) -> None:
         results_dir=results_dir,
         max_repos=args.max_repos,
         timeout=args.timeout,
+        force=args.force,
     )
 
     if args.report:
