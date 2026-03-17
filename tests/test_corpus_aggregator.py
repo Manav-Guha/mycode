@@ -17,8 +17,12 @@ from corpus_aggregator import (
     _finding_signature,
     _finding_deps,
     _all_deps,
+    _needs_project_classification,
+    _needs_finding_classification,
+    _extract_error_type,
     load_reports,
     aggregate,
+    reclassify_reports,
     generate_xlsx,
     print_summary,
     main,
@@ -386,6 +390,259 @@ class TestPrintSummary:
         print_summary(result)
         captured = capsys.readouterr()
         assert "0 repos" in captured.out
+
+
+# ── Reclassification Helpers ──
+
+
+class TestNeedsProjectClassification:
+    def test_missing_vertical(self):
+        assert _needs_project_classification({}) is True
+
+    def test_null_vertical(self):
+        assert _needs_project_classification({"vertical": None}) is True
+
+    def test_empty_vertical(self):
+        assert _needs_project_classification({"vertical": ""}) is True
+
+    def test_missing_arch_pattern(self):
+        assert _needs_project_classification({"vertical": "web_app"}) is True
+
+    def test_already_classified(self):
+        assert _needs_project_classification({
+            "vertical": "web_app",
+            "architectural_pattern": "fastapi",
+        }) is False
+
+
+class TestNeedsFindingClassification:
+    def test_missing_domain(self):
+        assert _needs_finding_classification({}) is True
+
+    def test_null_domain(self):
+        assert _needs_finding_classification({"failure_domain": None}) is True
+
+    def test_already_classified(self):
+        assert _needs_finding_classification({"failure_domain": "resource_exhaustion"}) is False
+
+
+class TestExtractErrorType:
+    def test_extracts_memory_error(self):
+        f = {"description": "Process crashed with MemoryError at line 42"}
+        assert _extract_error_type(f) == "MemoryError"
+
+    def test_extracts_from_title(self):
+        f = {"title": "TypeError in handler", "description": ""}
+        assert _extract_error_type(f) == "TypeError"
+
+    def test_returns_empty_when_none(self):
+        f = {"description": "Something went wrong"}
+        assert _extract_error_type(f) == ""
+
+    def test_handles_missing_fields(self):
+        assert _extract_error_type({}) == ""
+
+
+# ── Reclassification Integration ──
+
+
+class TestReclassifyReports:
+    def test_reclassifies_null_vertical(self, tmp_path):
+        """Report with null vertical gets classified from dependencies."""
+        old_report = {
+            "project": {
+                "name": "test",
+                "path": "/tmp/repo",
+                "language": "python",
+                "files_analyzed": 5,
+                "dependencies": [
+                    {"name": "streamlit", "installed_version": "1.0.0"},
+                    {"name": "pandas", "installed_version": "2.0.0"},
+                ],
+            },
+            "vertical": None,
+            "architectural_pattern": None,
+            "findings": [],
+        }
+        results = tmp_path / "corpus_results"
+        _write_report(results, "user__dashboard", old_report)
+
+        summary = reclassify_reports([results])
+
+        assert summary["project_classified"] == 1
+        assert summary["files_updated"] == 1
+
+        # Read back and verify classification was written
+        updated = json.loads(
+            (results / "user__dashboard" / "mycode-report.json").read_text()
+        )
+        assert updated["vertical"] == "dashboard"
+        assert updated["architectural_pattern"] == "dashboard"
+
+    def test_reclassifies_findings(self, tmp_path):
+        """Findings missing failure_domain get classified."""
+        old_report = {
+            "project": {
+                "name": "test",
+                "dependencies": [],
+            },
+            "vertical": "web_app",
+            "architectural_pattern": "web_app",
+            "findings": [
+                {
+                    "title": "Memory growth under load",
+                    "severity": "warning",
+                    "category": "memory_profiling",
+                    "description": "MemoryError after 1000 iterations",
+                    "affected_dependencies": [],
+                },
+            ],
+        }
+        results = tmp_path / "corpus_results"
+        _write_report(results, "user__app", old_report)
+
+        summary = reclassify_reports([results])
+
+        assert summary["findings_classified"] == 1
+        assert summary["project_classified"] == 0  # already has vertical
+
+        updated = json.loads(
+            (results / "user__app" / "mycode-report.json").read_text()
+        )
+        finding = updated["findings"][0]
+        assert finding["failure_domain"] == "resource_exhaustion"
+        assert finding["operational_trigger"] is not None
+
+    def test_skips_already_classified(self, tmp_path):
+        """Reports with existing vertical and classified findings are untouched."""
+        classified_report = {
+            "project": {"name": "test", "dependencies": []},
+            "vertical": "web_app",
+            "architectural_pattern": "fastapi",
+            "findings": [
+                {
+                    "title": "OOM",
+                    "severity": "critical",
+                    "category": "memory_profiling",
+                    "description": "",
+                    "failure_domain": "resource_exhaustion",
+                    "failure_pattern": "large_payload_oom",
+                    "operational_trigger": "sustained_load",
+                    "affected_dependencies": [],
+                },
+            ],
+        }
+        results = tmp_path / "corpus_results"
+        _write_report(results, "user__app", classified_report)
+
+        summary = reclassify_reports([results])
+
+        assert summary["files_updated"] == 0
+        assert summary["project_classified"] == 0
+        assert summary["findings_classified"] == 0
+
+    def test_no_deps_defaults_to_utility(self, tmp_path):
+        """Report with no recognisable dependencies gets 'utility'."""
+        old_report = {
+            "project": {"name": "test", "dependencies": []},
+            "vertical": None,
+            "architectural_pattern": None,
+            "findings": [],
+        }
+        results = tmp_path / "corpus_results"
+        _write_report(results, "user__empty", old_report)
+
+        reclassify_reports([results])
+
+        updated = json.loads(
+            (results / "user__empty" / "mycode-report.json").read_text()
+        )
+        assert updated["vertical"] == "utility"
+        assert updated["architectural_pattern"] == "utility"
+
+    def test_processes_all_dirs(self, tmp_path):
+        """Reclassify processes all directories, not deduplicated."""
+        old_report = {
+            "project": {
+                "name": "test",
+                "dependencies": [{"name": "flask", "installed_version": "3.0"}],
+            },
+            "vertical": None,
+            "architectural_pattern": None,
+            "findings": [],
+        }
+        dir1 = tmp_path / "corpus_results"
+        dir2 = tmp_path / "corpus_results_retry"
+        _write_report(dir1, "user__app", old_report)
+        _write_report(dir2, "user__app", old_report)
+
+        summary = reclassify_reports([dir1, dir2])
+
+        assert summary["files_updated"] == 2
+        assert summary["project_classified"] == 2
+
+    def test_skips_missing_dir(self, tmp_path):
+        summary = reclassify_reports([tmp_path / "nonexistent"])
+        assert summary["total_scanned"] == 0
+
+    def test_summary_counts(self, tmp_path):
+        """Verify summary structure and vertical breakdown."""
+        old_report = {
+            "project": {
+                "name": "test",
+                "dependencies": [{"name": "torch", "installed_version": "2.0"}],
+            },
+            "vertical": None,
+            "architectural_pattern": None,
+            "findings": [
+                {
+                    "title": "Scaling issue",
+                    "severity": "warning",
+                    "category": "data_volume_scaling",
+                    "description": "",
+                    "affected_dependencies": [],
+                },
+            ],
+        }
+        results = tmp_path / "corpus_results"
+        _write_report(results, "user__ml", old_report)
+
+        summary = reclassify_reports([results])
+
+        assert summary["total_scanned"] == 1
+        assert summary["files_updated"] == 1
+        assert summary["project_classified"] == 1
+        assert summary["findings_classified"] == 1
+        assert "ml_model" in summary["verticals_assigned"]
+
+
+class TestReclassifyCLI:
+    def test_reclassify_flag(self, tmp_path):
+        old_report = {
+            "project": {
+                "name": "test",
+                "dependencies": [{"name": "fastapi", "installed_version": "0.100"}],
+            },
+            "vertical": None,
+            "architectural_pattern": None,
+            "findings": [],
+        }
+        results = tmp_path / "corpus_results"
+        _write_report(results, "user__api", old_report)
+        output = tmp_path / "out.json"
+
+        main(["--dirs", str(results), "--output", str(output), "--reclassify"])
+
+        # Report should be reclassified on disk
+        updated = json.loads(
+            (results / "user__api" / "mycode-report.json").read_text()
+        )
+        assert updated["vertical"] is not None
+        assert updated["vertical"] != ""
+
+        # Aggregate should use the new classification
+        agg = json.loads(output.read_text())
+        assert "unclassified" not in agg["verticals"]
 
 
 # ── XLSX Output ──

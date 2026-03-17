@@ -12,6 +12,7 @@ Usage:
     python scripts/corpus_aggregator.py --output my_aggregate.json
     python scripts/corpus_aggregator.py --dirs results,corpus_results
     python scripts/corpus_aggregator.py --verbose
+    python scripts/corpus_aggregator.py --reclassify --dirs corpus_results
 
 No third-party dependencies — stdlib only (openpyxl optional for --xlsx).
 """
@@ -335,6 +336,137 @@ def print_summary(result: dict) -> None:
     print(f"\n{'=' * 60}\n")
 
 
+# ── Reclassification ──
+
+
+def _needs_project_classification(report: dict) -> bool:
+    """True if the report is missing vertical or architectural_pattern."""
+    return not report.get("vertical") or not report.get("architectural_pattern")
+
+
+def _needs_finding_classification(finding: dict) -> bool:
+    """True if a finding is missing failure_domain classification."""
+    return not finding.get("failure_domain")
+
+
+def _extract_error_type(finding: dict) -> str:
+    """Best-effort extraction of error type from finding text."""
+    desc = finding.get("description", "") or ""
+    title = finding.get("title", "") or ""
+    combined = f"{title} {desc}"
+    # Look for common Python/JS error type names
+    import re
+    match = re.search(
+        r'\b(MemoryError|TimeoutError|TypeError|ValueError|KeyError|IndexError'
+        r'|ImportError|ModuleNotFoundError|ConnectionError|ConnectionRefusedError'
+        r'|AttributeError|RuntimeError|OSError|FileNotFoundError|PermissionError'
+        r'|UnicodeDecodeError|JSONDecodeError|BrokenPipeError)\b',
+        combined,
+    )
+    return match.group(1) if match else ""
+
+
+def reclassify_reports(dirs: list[Path]) -> dict:
+    """Reclassify unclassified reports in place.
+
+    Reads each mycode-report.json, applies project-level and finding-level
+    classifiers where fields are missing, and writes updated JSON back.
+
+    Unlike load_reports(), this processes ALL copies (not deduplicated) since
+    each file on disk needs to be updated independently.
+
+    Returns a summary dict with counts.
+    """
+    # Import myCode classifiers
+    try:
+        from mycode.classifiers import classify_project, classify_finding
+    except ImportError:
+        logger.error(
+            "Cannot import mycode.classifiers — is mycode installed? "
+            "Run: pip install -e ."
+        )
+        return {"error": "mycode not installed", "reports_updated": 0}
+
+    total_scanned = 0
+    project_classified = 0
+    findings_classified = 0
+    files_updated = 0
+    vertical_counts: Counter = Counter()
+
+    for results_dir in dirs:
+        if not results_dir.is_dir():
+            logger.debug("Skipping missing directory: %s", results_dir)
+            continue
+
+        for repo_dir in sorted(results_dir.iterdir()):
+            if not repo_dir.is_dir():
+                continue
+
+            report_path = repo_dir / "mycode-report.json"
+            if not report_path.is_file():
+                continue
+
+            try:
+                report = json.loads(report_path.read_text())
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Could not read %s: %s", report_path, exc)
+                continue
+
+            total_scanned += 1
+            modified = False
+
+            # Project-level classification
+            if _needs_project_classification(report):
+                deps = _all_deps(report)
+                file_count = report.get("project", {}).get("files_analyzed", 0)
+                cls = classify_project(
+                    dependencies=deps,
+                    file_count=file_count,
+                )
+                report["vertical"] = cls["vertical"]
+                report["architectural_pattern"] = cls["architectural_pattern"]
+                project_classified += 1
+                modified = True
+                vertical_counts[cls["vertical"]] += 1
+
+            # Finding-level classification
+            for finding in report.get("findings", []):
+                if _needs_finding_classification(finding):
+                    error_type = _extract_error_type(finding)
+                    cls = classify_finding(
+                        scenario_name=finding.get("title", ""),
+                        scenario_category=finding.get("category", ""),
+                        error_type=error_type,
+                        error_details=finding.get("description", ""),
+                    )
+                    finding["failure_domain"] = cls["failure_domain"]
+                    finding["failure_pattern"] = cls["failure_pattern"]
+                    finding["operational_trigger"] = cls["operational_trigger"]
+                    findings_classified += 1
+                    modified = True
+
+            if modified:
+                report_path.write_text(json.dumps(report, indent=2) + "\n")
+                files_updated += 1
+                logger.debug("  Updated %s", report_path)
+
+    summary = {
+        "total_scanned": total_scanned,
+        "files_updated": files_updated,
+        "project_classified": project_classified,
+        "findings_classified": findings_classified,
+        "verticals_assigned": dict(vertical_counts.most_common()),
+    }
+
+    logger.info(
+        "Reclassification complete: %d/%d reports updated "
+        "(%d project, %d findings)",
+        files_updated, total_scanned, project_classified, findings_classified,
+    )
+
+    return summary
+
+
 # ── XLSX Output ──
 
 
@@ -485,6 +617,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Comma-separated list of result directories to scan (default: results,corpus_results,corpus_results_retry,corpus_results_timeout)",
     )
     parser.add_argument(
+        "--reclassify",
+        action="store_true",
+        help="Reclassify unclassified reports in place before aggregating (requires mycode installed)",
+    )
+    parser.add_argument(
         "--xlsx",
         action="store_true",
         help="Generate corpus_aggregate.xlsx alongside JSON (requires openpyxl)",
@@ -509,6 +646,20 @@ def main(argv: list[str] | None = None) -> None:
         dirs = [Path(d) for d in _DEFAULT_DIRS]
 
     logger.info("Scanning directories: %s", ", ".join(str(d) for d in dirs))
+
+    if args.reclassify:
+        reclass_summary = reclassify_reports(dirs)
+        updated = reclass_summary.get("files_updated", 0)
+        proj = reclass_summary.get("project_classified", 0)
+        fnd = reclass_summary.get("findings_classified", 0)
+        print(f"\nReclassified {updated} reports ({proj} project, {fnd} findings)")
+        verticals = reclass_summary.get("verticals_assigned", {})
+        if verticals:
+            print("Verticals assigned:")
+            for v, count in sorted(verticals.items(), key=lambda x: -x[1]):
+                print(f"  {count:4d}  {v}")
+            print()
+
     reports = load_reports(dirs)
     logger.info("Loaded %d deduplicated reports", len(reports))
 
