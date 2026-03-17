@@ -13,6 +13,7 @@ from corpus_aggregator import (
     _dir_priority,
     _get_vertical,
     _get_arch_pattern,
+    _get_business_domain,
     _get_actionable_findings,
     _finding_signature,
     _finding_deps,
@@ -35,6 +36,7 @@ from corpus_aggregator import (
 def _report(
     vertical="web_app",
     architectural_pattern="fastapi",
+    business_domain="general",
     findings=None,
     deps=None,
 ):
@@ -51,6 +53,7 @@ def _report(
         },
         "vertical": vertical,
         "architectural_pattern": architectural_pattern,
+        "business_domain": business_domain,
         "findings": findings or [],
         "statistics": {"scenarios_run": 5, "scenarios_passed": 3},
     }
@@ -119,6 +122,20 @@ class TestGetArchPattern:
 
     def test_missing_defaults_unclassified(self):
         assert _get_arch_pattern({}) == "unclassified"
+
+
+class TestGetBusinessDomain:
+    def test_returns_domain(self):
+        assert _get_business_domain({"business_domain": "fintech"}) == "fintech"
+
+    def test_missing_defaults_general(self):
+        assert _get_business_domain({}) == "general"
+
+    def test_none_defaults_general(self):
+        assert _get_business_domain({"business_domain": None}) == "general"
+
+    def test_empty_string_defaults_general(self):
+        assert _get_business_domain({"business_domain": ""}) == "general"
 
 
 class TestActionableFindings:
@@ -366,6 +383,56 @@ class TestAggregate:
         assert result["verticals"] == {}
         assert result["architectural_patterns"] == {}
         assert result["cross_tabulation"] == {}
+        assert result["business_domains"] == {}
+        assert result["business_domain_vertical_cross"] == {}
+
+    def test_business_domain_counts(self):
+        reports = {
+            "a": _report(business_domain="fintech"),
+            "b": _report(business_domain="fintech"),
+            "c": _report(business_domain="healthcare"),
+        }
+        result = aggregate(reports)
+
+        assert result["business_domains"]["fintech"]["repo_count"] == 2
+        assert result["business_domains"]["healthcare"]["repo_count"] == 1
+
+    def test_business_domain_failure_rate(self):
+        reports = {
+            "clean": _report(business_domain="fintech", findings=[]),
+            "dirty": _report(business_domain="fintech", findings=[_finding(severity="critical")]),
+        }
+        result = aggregate(reports)
+
+        bd = result["business_domains"]["fintech"]
+        assert bd["repo_count"] == 2
+        assert bd["repos_with_issues"] == 1
+        assert bd["failure_rate"] == 0.5
+
+    def test_business_domain_top_signatures(self):
+        findings = [
+            _finding(severity="warning", category="mem", title="leak"),
+            _finding(severity="warning", category="mem", title="leak"),
+        ]
+        reports = {"a": _report(business_domain="fintech", findings=findings)}
+        result = aggregate(reports)
+
+        sigs = result["business_domains"]["fintech"]["top_failure_signatures"]
+        assert len(sigs) == 1
+        assert sigs[0]["count"] == 2
+
+    def test_business_domain_vertical_cross(self):
+        reports = {
+            "a": _report(vertical="web_app", business_domain="fintech"),
+            "b": _report(vertical="dashboard", business_domain="fintech"),
+            "c": _report(vertical="web_app", business_domain="healthcare"),
+        }
+        result = aggregate(reports)
+
+        cross = result["business_domain_vertical_cross"]
+        assert cross["fintech"]["web_app"] == 1
+        assert cross["fintech"]["dashboard"] == 1
+        assert cross["healthcare"]["web_app"] == 1
 
 
 # ── Print Summary (smoke test) ──
@@ -412,7 +479,14 @@ class TestNeedsProjectClassification:
         assert _needs_project_classification({
             "vertical": "web_app",
             "architectural_pattern": "fastapi",
+            "business_domain": "general",
         }) is False
+
+    def test_missing_business_domain(self):
+        assert _needs_project_classification({
+            "vertical": "web_app",
+            "architectural_pattern": "fastapi",
+        }) is True
 
 
 class TestNeedsFindingClassification:
@@ -488,6 +562,7 @@ class TestReclassifyReports:
             },
             "vertical": "web_app",
             "architectural_pattern": "web_app",
+            "business_domain": "general",
             "findings": [
                 {
                     "title": "Memory growth under load",
@@ -519,6 +594,7 @@ class TestReclassifyReports:
             "project": {"name": "test", "dependencies": []},
             "vertical": "web_app",
             "architectural_pattern": "fastapi",
+            "business_domain": "general",
             "findings": [
                 {
                     "title": "OOM",
@@ -685,13 +761,16 @@ class TestGenerateXlsx:
         assert xlsx_path.exists()
 
         wb = openpyxl.load_workbook(str(xlsx_path))
-        assert len(wb.sheetnames) == 5
+        assert len(wb.sheetnames) == 8
         assert wb.sheetnames == [
             "Repos Per Vertical",
             "Top Failure Signatures",
             "Top Dependencies",
             "Repos Per Pattern",
             "Cross-Tabulation",
+            "Repos Per Domain",
+            "Domain Failure Signatures",
+            "Domain x Vertical",
         ]
 
     def test_repos_per_vertical_sheet(self, tmp_path):
@@ -775,6 +854,7 @@ class TestGenerateXlsx:
         assert xlsx_path.exists()
 
         wb = openpyxl.load_workbook(str(xlsx_path))
+        # Empty aggregate has no business_domain data, so no domain sheets
         assert len(wb.sheetnames) == 5
 
     def test_returns_false_without_openpyxl(self):
@@ -831,7 +911,7 @@ class TestCLI:
         assert xlsx_path.exists()
         import openpyxl
         wb = openpyxl.load_workbook(str(xlsx_path))
-        assert len(wb.sheetnames) == 5
+        assert len(wb.sheetnames) == 8
 
     def test_main_multiple_dirs(self, tmp_path):
         dir1 = tmp_path / "results"

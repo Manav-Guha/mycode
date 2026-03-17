@@ -84,6 +84,7 @@ from mycode.inference import (
 )
 from mycode.classifiers import (
     architectural_pattern_classifier,
+    business_domain_classifier,
     classify_finding,
     classify_project,
     failure_domain_classifier,
@@ -183,4 +184,5 @@ __all__ = [
     "operational_trigger_classifier",
     "vertical_classifier",
     "architectural_pattern_classifier",
+    "business_domain_classifier",
 ]

@@ -106,6 +106,10 @@ def _get_arch_pattern(report: dict) -> str:
     return report.get("architectural_pattern") or "unclassified"
 
 
+def _get_business_domain(report: dict) -> str:
+    return report.get("business_domain") or "general"
+
+
 def _get_actionable_findings(report: dict) -> list[dict]:
     """Return findings with severity critical or warning."""
     return [
@@ -154,30 +158,47 @@ def aggregate(reports: dict[str, dict]) -> dict:
     # Per-architectural-pattern
     ap_repo_count: Counter = Counter()
 
-    # Cross-tabulation
+    # Per-business-domain accumulators
+    bd_repo_count: Counter = Counter()
+    bd_repos_with_issues: Counter = Counter()
+    bd_signatures: dict[str, Counter] = defaultdict(Counter)
+    bd_deps: dict[str, Counter] = defaultdict(Counter)
+    bd_deps_with_failures: dict[str, set] = defaultdict(set)
+    bd_all_deps: dict[str, set] = defaultdict(set)
+
+    # Cross-tabulations
     cross: Counter = Counter()
+    bd_cross: Counter = Counter()
 
     for _key, report in reports.items():
         vertical = _get_vertical(report)
         arch = _get_arch_pattern(report)
+        domain = _get_business_domain(report)
 
         v_repo_count[vertical] += 1
         ap_repo_count[arch] += 1
+        bd_repo_count[domain] += 1
         cross[(vertical, arch)] += 1
+        bd_cross[(domain, vertical)] += 1
 
         actionable = _get_actionable_findings(report)
         if actionable:
             v_repos_with_issues[vertical] += 1
+            bd_repos_with_issues[domain] += 1
 
         for finding in actionable:
             sig = _finding_signature(finding)
             v_signatures[vertical][sig] += 1
+            bd_signatures[domain][sig] += 1
             for dep in _finding_deps(finding):
                 v_deps[vertical][dep] += 1
                 v_deps_with_failures[vertical].add(dep)
+                bd_deps[domain][dep] += 1
+                bd_deps_with_failures[domain].add(dep)
 
         for dep in _all_deps(report):
             v_all_deps[vertical].add(dep)
+            bd_all_deps[domain].add(dep)
 
     # Build per-vertical summaries
     verticals: dict[str, dict] = {}
@@ -212,7 +233,35 @@ def aggregate(reports: dict[str, dict]) -> dict:
     for ap in sorted(ap_repo_count):
         arch_patterns[ap] = {"repo_count": ap_repo_count[ap]}
 
-    # Build cross-tabulation
+    # Build per-business-domain summaries
+    business_domains: dict[str, dict] = {}
+    for bd in sorted(bd_repo_count):
+        total = bd_repo_count[bd]
+        with_issues = bd_repos_with_issues.get(bd, 0)
+        all_d = bd_all_deps.get(bd, set())
+        failed_d = bd_deps_with_failures.get(bd, set())
+
+        business_domains[bd] = {
+            "repo_count": total,
+            "repos_with_issues": with_issues,
+            "repos_clean": total - with_issues,
+            "failure_rate": round(with_issues / total, 3) if total else 0.0,
+            "top_failure_signatures": [
+                {"signature": sig, "count": count}
+                for sig, count in bd_signatures.get(bd, Counter()).most_common(5)
+            ],
+            "top_dependencies": [
+                {"dependency": dep, "failure_count": count}
+                for dep, count in bd_deps.get(bd, Counter()).most_common(5)
+            ],
+            "dependency_failure_rate": (
+                round(len(failed_d) / len(all_d), 3) if all_d else 0.0
+            ),
+            "total_dependencies_seen": len(all_d),
+            "dependencies_with_failures": len(failed_d),
+        }
+
+    # Build cross-tabulation: vertical × architectural_pattern
     all_verticals = sorted(v_repo_count)
     all_patterns = sorted(ap_repo_count)
     cross_tab: dict[str, dict[str, int]] = {}
@@ -224,11 +273,24 @@ def aggregate(reports: dict[str, dict]) -> dict:
                 row[ap] = count
         cross_tab[v] = row
 
+    # Build cross-tabulation: business_domain × vertical
+    all_domains = sorted(bd_repo_count)
+    bd_vert_cross: dict[str, dict[str, int]] = {}
+    for bd in all_domains:
+        row: dict[str, int] = {}
+        for v in all_verticals:
+            count = bd_cross.get((bd, v), 0)
+            if count > 0:
+                row[v] = count
+        bd_vert_cross[bd] = row
+
     return {
         "total_repos": len(reports),
         "verticals": verticals,
         "architectural_patterns": arch_patterns,
         "cross_tabulation": cross_tab,
+        "business_domains": business_domains,
+        "business_domain_vertical_cross": bd_vert_cross,
     }
 
 
@@ -309,6 +371,59 @@ def print_summary(result: dict) -> None:
         [30, 6],
     )
 
+    # ── Repos per business domain ──
+    if result.get("business_domains"):
+        print(f"\n{'─' * 60}")
+        print("REPOS PER BUSINESS DOMAIN")
+        rows = []
+        for bd, data in sorted(result["business_domains"].items(), key=lambda x: -x[1]["repo_count"]):
+            rows.append([
+                bd,
+                data["repo_count"],
+                f"{data['failure_rate'] * 100:.1f}%",
+                data["repos_with_issues"],
+                data["repos_clean"],
+            ])
+        _print_table(
+            ["Domain", "Repos", "Fail%", "Issues", "Clean"],
+            rows,
+            [30, 6, 7, 7, 6],
+        )
+
+        # ── Top signatures per business domain ──
+        print(f"\n{'─' * 60}")
+        print("TOP FAILURE SIGNATURES PER BUSINESS DOMAIN\n")
+        for bd, data in sorted(result["business_domains"].items(), key=lambda x: -x[1]["repo_count"]):
+            sigs = data["top_failure_signatures"]
+            if not sigs:
+                continue
+            print(f"  {bd} ({data['repo_count']} repos):")
+            for entry in sigs:
+                print(f"    {entry['count']:3d}  {entry['signature']}")
+            print()
+
+    # ── Business domain × vertical cross-tabulation ──
+    bd_vert_cross = result.get("business_domain_vertical_cross", {})
+    if bd_vert_cross:
+        print(f"{'─' * 60}")
+        print("CROSS-TABULATION: BUSINESS DOMAIN x VERTICAL\n")
+        all_verts = sorted({v for row in bd_vert_cross.values() for v in row})
+        if all_verts:
+            vert_width = max(len(v) for v in all_verts)
+            vert_width = max(vert_width, 5)
+            dom_width = max(len(bd) for bd in bd_vert_cross) if bd_vert_cross else 10
+
+            header = ["Domain".ljust(dom_width)] + [v[:vert_width].ljust(vert_width) for v in all_verts]
+            print("  ".join(header))
+            print("  ".join("-" * len(h) for h in header))
+            for bd in sorted(bd_vert_cross):
+                cells = [bd.ljust(dom_width)]
+                for v in all_verts:
+                    val = bd_vert_cross[bd].get(v, 0)
+                    cells.append((str(val) if val else ".").ljust(vert_width))
+                print("  ".join(cells))
+        print()
+
     # ── Cross-tabulation ──
     cross = result["cross_tabulation"]
     if cross:
@@ -340,8 +455,12 @@ def print_summary(result: dict) -> None:
 
 
 def _needs_project_classification(report: dict) -> bool:
-    """True if the report is missing vertical or architectural_pattern."""
-    return not report.get("vertical") or not report.get("architectural_pattern")
+    """True if the report is missing vertical, architectural_pattern, or business_domain."""
+    return (
+        not report.get("vertical")
+        or not report.get("architectural_pattern")
+        or not report.get("business_domain")
+    )
 
 
 def _needs_finding_classification(finding: dict) -> bool:
@@ -419,12 +538,15 @@ def reclassify_reports(dirs: list[Path]) -> dict:
             if _needs_project_classification(report):
                 deps = _all_deps(report)
                 file_count = report.get("project", {}).get("files_analyzed", 0)
+                project_name = report.get("project", {}).get("name", "")
                 cls = classify_project(
                     dependencies=deps,
                     file_count=file_count,
+                    project_name=project_name or "",
                 )
                 report["vertical"] = cls["vertical"]
                 report["architectural_pattern"] = cls["architectural_pattern"]
+                report["business_domain"] = cls["business_domain"]
                 project_classified += 1
                 modified = True
                 vertical_counts[cls["vertical"]] += 1
@@ -592,6 +714,66 @@ def generate_xlsx(result: dict, xlsx_path: Path) -> bool:
             ws5.cell(row=i, column=j, value=val if val else None)
 
     auto_width(ws5)
+
+    # ── Sheet 6: Repos Per Business Domain ──
+    if result.get("business_domains"):
+        ws6 = wb.create_sheet("Repos Per Domain")
+        write_header(ws6, ["Business Domain", "Repos", "With Issues", "Clean", "Failure Rate",
+                           "Deps Seen", "Deps Failed", "Dep Fail Rate"])
+
+        for i, (bd, data) in enumerate(
+            sorted(result["business_domains"].items(), key=lambda x: -x[1]["repo_count"]), 2
+        ):
+            ws6.cell(row=i, column=1, value=bd)
+            ws6.cell(row=i, column=2, value=data["repo_count"])
+            ws6.cell(row=i, column=3, value=data["repos_with_issues"])
+            ws6.cell(row=i, column=4, value=data["repos_clean"])
+            ws6.cell(row=i, column=5, value=f"{data['failure_rate'] * 100:.1f}%")
+            ws6.cell(row=i, column=6, value=data["total_dependencies_seen"])
+            ws6.cell(row=i, column=7, value=data["dependencies_with_failures"])
+            ws6.cell(row=i, column=8, value=f"{data['dependency_failure_rate'] * 100:.1f}%")
+
+        auto_width(ws6)
+
+    # ── Sheet 7: Domain Failure Signatures ──
+    if result.get("business_domains"):
+        ws7 = wb.create_sheet("Domain Failure Signatures")
+        write_header(ws7, ["Business Domain", "Rank", "Severity", "Category", "Title", "Count"])
+
+        row = 2
+        for bd, data in sorted(result["business_domains"].items(), key=lambda x: -x[1]["repo_count"]):
+            for rank, entry in enumerate(data["top_failure_signatures"], 1):
+                raw_sig = entry["signature"]
+                parts = raw_sig.split(":", 2)
+                severity = parts[0] if len(parts) >= 1 else ""
+                category = parts[1] if len(parts) >= 2 else ""
+                title = parts[2] if len(parts) >= 3 else raw_sig
+
+                ws7.cell(row=row, column=1, value=bd)
+                ws7.cell(row=row, column=2, value=rank)
+                ws7.cell(row=row, column=3, value=severity)
+                ws7.cell(row=row, column=4, value=category)
+                ws7.cell(row=row, column=5, value=title)
+                ws7.cell(row=row, column=6, value=entry["count"])
+                row += 1
+
+        auto_width(ws7)
+
+    # ── Sheet 8: Business Domain × Vertical ──
+    bd_vert_cross = result.get("business_domain_vertical_cross", {})
+    if bd_vert_cross:
+        all_verts_bd = sorted({v for row_data in bd_vert_cross.values() for v in row_data})
+
+        ws8 = wb.create_sheet("Domain x Vertical")
+        write_header(ws8, ["Business Domain"] + all_verts_bd)
+
+        for i, bd in enumerate(sorted(bd_vert_cross), 2):
+            ws8.cell(row=i, column=1, value=bd)
+            for j, v in enumerate(all_verts_bd, 2):
+                val = bd_vert_cross[bd].get(v, 0)
+                ws8.cell(row=i, column=j, value=val if val else None)
+
+        auto_width(ws8)
 
     # ── Save ──
     wb.save(str(xlsx_path))

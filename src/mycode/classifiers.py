@@ -3,12 +3,13 @@
 Classifies findings against the myCode Library Taxonomy (v1) automatically.
 No deferred classification — every finding gets classified on creation.
 
-Five classifiers:
+Six classifiers:
   1. failure_domain_classifier → Level 1 failure domain (8 domains)
   2. failure_pattern_classifier → Level 2 pattern name within the domain
   3. operational_trigger_classifier → What triggered the failure
   4. vertical_classifier → Project vertical from dependencies/structure
   5. architectural_pattern_classifier → Architectural pattern from project shape
+  6. business_domain_classifier → Industry/sector from deps + project metadata
 """
 
 import re
@@ -600,6 +601,189 @@ def architectural_pattern_classifier(
 
 
 # ══════════════════════════════════════════════════════════════════
+# 6. Business Domain Classifier
+# ══════════════════════════════════════════════════════════════════
+
+_BUSINESS_DOMAINS = frozenset({
+    "fintech",
+    "healthcare",
+    "education",
+    "e_commerce",
+    "real_estate",
+    "climate",
+    "entertainment",
+    "social_media",
+    "developer_tools",
+    "data_science",
+    "ai_assistant",
+    "general",
+})
+
+# Dependency sets that indicate business domains
+_BUSINESS_DOMAIN_DEPS: dict[str, list[str]] = {
+    "fintech": [
+        "yfinance", "alpaca-trade-api", "plaid", "polygon-api-client",
+        "ccxt", "ta-lib", "quantlib", "robin-stocks", "finnhub",
+        "pandas-ta", "backtrader", "zipline",
+    ],
+    "healthcare": [
+        "pydicom", "hl7", "fhir", "fhir-resources", "fhirclient",
+        "mne", "nibabel", "biopython", "medpy", "dicom",
+        "nilearn", "lifelines", "scanpy",
+    ],
+    "education": [
+        "edx", "moodle", "canvas", "nbgrader", "jupyterhub",
+        "openedx", "edx-platform",
+    ],
+    "e_commerce": [
+        "shopify", "woocommerce", "saleor", "medusa", "snipcart",
+        "commercejs", "magento", "prestashop",
+    ],
+    "real_estate": [
+        "zillow", "mls", "realtor", "rets",
+    ],
+    "climate": [
+        "xarray", "netcdf4", "cftime", "cartopy", "iris",
+        "climlab", "metpy", "cfgrib",
+    ],
+    "entertainment": [
+        "pygame", "pyglet", "arcade", "ursina", "panda3d",
+        "moviepy", "pyaudio", "librosa", "music21",
+    ],
+    "social_media": [
+        "tweepy", "praw", "instaloader", "facebook-sdk", "mastodon",
+        "python-twitter", "twython", "discord",
+    ],
+    "developer_tools": [
+        "pytest", "black", "ruff", "mypy", "flake8",
+        "eslint", "prettier", "webpack", "vite", "babel",
+        "pylint", "isort", "bandit", "coverage",
+    ],
+    "data_science": [
+        "scikit-learn", "sklearn", "tensorflow", "torch", "pytorch",
+        "keras", "xgboost", "lightgbm", "catboost",
+        "huggingface", "transformers", "datasets",
+    ],
+    "ai_assistant": [
+        "openai", "anthropic", "langchain", "crewai", "autogen",
+        "llamaindex", "llama-index", "llama_index",
+        "langgraph", "langserve", "semantic-kernel",
+    ],
+}
+
+# Keywords in project name/description that indicate business domains
+_BUSINESS_DOMAIN_KEYWORDS: dict[str, list[str]] = {
+    "fintech": [
+        "finance", "trading", "stock", "crypto", "banking",
+        "payment", "invoice", "ledger", "wallet", "forex",
+    ],
+    "healthcare": [
+        "health", "medical", "patient", "clinical", "diagnosis",
+        "hospital", "pharma", "drug", "ehr", "dicom",
+    ],
+    "education": [
+        "learn", "course", "quiz", "student", "tutor",
+        "classroom", "lms", "lesson", "curriculum",
+    ],
+    "e_commerce": [
+        "shop", "store", "cart", "checkout", "product",
+        "catalog", "inventory", "order", "ecommerce",
+    ],
+    "real_estate": [
+        "property", "listing", "tenant", "mortgage", "rental",
+        "realty", "housing", "landlord",
+    ],
+    "climate": [
+        "weather", "climate", "carbon", "emission",
+        "sustainability", "environmental",
+    ],
+    "entertainment": [
+        "game", "music", "video", "stream", "media",
+        "movie", "audio", "player",
+    ],
+    "social_media": [
+        "social", "feed", "post", "follow", "chat",
+        "message", "community", "forum",
+    ],
+    "developer_tools": [
+        "cli", "lint", "debug", "deploy", "ci",
+        "devtool", "sdk", "compiler", "formatter",
+    ],
+    "data_science": [
+        "dataset", "prediction", "regression", "classification",
+        "neural", "training", "inference",
+    ],
+    "ai_assistant": [
+        "assistant", "chatbot", "agent", "copilot", "llm",
+        "prompt", "rag", "retrieval",
+    ],
+}
+
+# Stripe disambiguation: co-occurs with finance deps → fintech,
+# co-occurs with commerce deps → e_commerce, alone → fintech.
+_STRIPE_FINTECH_COOCCUR = frozenset(
+    _normalize_dep(d) for d in _BUSINESS_DOMAIN_DEPS["fintech"]
+)
+_STRIPE_COMMERCE_COOCCUR = frozenset(
+    _normalize_dep(d) for d in _BUSINESS_DOMAIN_DEPS["e_commerce"]
+)
+
+
+def business_domain_classifier(
+    dependencies: list[str],
+    project_name: str = "",
+    project_description: str = "",
+) -> str:
+    """Classify the business domain from dependencies and project metadata.
+
+    Returns one of the _BUSINESS_DOMAINS strings, defaulting to "general".
+    """
+    deps_norm = {_normalize_dep(d) for d in dependencies}
+    dep_scores: dict[str, int] = {}
+
+    # Handle Stripe disambiguation
+    has_stripe = "stripe" in deps_norm
+    if has_stripe:
+        if deps_norm & _STRIPE_COMMERCE_COOCCUR:
+            dep_scores["e_commerce"] = dep_scores.get("e_commerce", 0) + 1
+        else:
+            # Co-occurs with finance deps OR alone → fintech
+            dep_scores["fintech"] = dep_scores.get("fintech", 0) + 1
+
+    for domain, dep_list in _BUSINESS_DOMAIN_DEPS.items():
+        score = 0
+        for dep in dep_list:
+            if _normalize_dep(dep) in deps_norm:
+                score += 1
+        if score > 0:
+            dep_scores[domain] = dep_scores.get(domain, 0) + score
+
+    # Keyword scoring from project name and description
+    keyword_scores: dict[str, int] = {}
+    text = f"{project_name} {project_description}".lower()
+    if text.strip():
+        for domain, keywords in _BUSINESS_DOMAIN_KEYWORDS.items():
+            score = sum(1 for kw in keywords if kw in text)
+            if score > 0:
+                keyword_scores[domain] = score
+
+    # Combine: deps weighted 2x over keywords
+    combined: dict[str, int] = {}
+    all_domains = set(dep_scores) | set(keyword_scores)
+    for d in all_domains:
+        combined[d] = dep_scores.get(d, 0) * 2 + keyword_scores.get(d, 0)
+
+    if not combined:
+        return "general"
+
+    best = max(combined, key=lambda d: combined[d])
+    if combined[best] > 0:
+        return best
+
+    return "general"
+
+
+# ══════════════════════════════════════════════════════════════════
 # Convenience: Classify a complete finding
 # ══════════════════════════════════════════════════════════════════
 
@@ -642,6 +826,8 @@ def classify_project(
     file_count: int = 0,
     has_frontend: bool = False,
     has_backend: bool = False,
+    project_name: str = "",
+    project_description: str = "",
 ) -> dict:
     """Run all project-level classifiers and return a classification dict.
 
@@ -649,13 +835,18 @@ def classify_project(
         {
             "vertical": str,
             "architectural_pattern": str,
+            "business_domain": str,
         }
     """
     vert = vertical_classifier(dependencies, file_structure, framework)
     arch = architectural_pattern_classifier(
         dependencies, framework, file_count, has_frontend, has_backend,
     )
+    domain = business_domain_classifier(
+        dependencies, project_name, project_description,
+    )
     return {
         "vertical": vert,
         "architectural_pattern": arch,
+        "business_domain": domain,
     }

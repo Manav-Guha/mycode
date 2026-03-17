@@ -4,6 +4,7 @@ import pytest
 
 from mycode.classifiers import (
     architectural_pattern_classifier,
+    business_domain_classifier,
     classify_finding,
     classify_project,
     failure_domain_classifier,
@@ -468,6 +469,124 @@ class TestArchitecturalPatternClassifier:
 
 
 # ══════════════════════════════════════════════════════════════════
+# 6. business_domain_classifier
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestBusinessDomainClassifier:
+    """Tests for business_domain_classifier."""
+
+    def test_fintech_from_deps(self):
+        result = business_domain_classifier(["yfinance", "pandas"])
+        assert result == "fintech"
+
+    def test_fintech_alpaca(self):
+        result = business_domain_classifier(["alpaca-trade-api"])
+        assert result == "fintech"
+
+    def test_healthcare_from_deps(self):
+        result = business_domain_classifier(["pydicom", "numpy"])
+        assert result == "healthcare"
+
+    def test_education_from_deps(self):
+        result = business_domain_classifier(["nbgrader", "jupyterhub"])
+        assert result == "education"
+
+    def test_e_commerce_from_deps(self):
+        result = business_domain_classifier(["shopify", "flask"])
+        assert result == "e_commerce"
+
+    def test_climate_from_deps(self):
+        result = business_domain_classifier(["xarray", "netcdf4"])
+        assert result == "climate"
+
+    def test_entertainment_from_deps(self):
+        result = business_domain_classifier(["pygame"])
+        assert result == "entertainment"
+
+    def test_social_media_from_deps(self):
+        result = business_domain_classifier(["tweepy", "flask"])
+        assert result == "social_media"
+
+    def test_developer_tools_from_deps(self):
+        result = business_domain_classifier(["pytest", "black", "ruff"])
+        assert result == "developer_tools"
+
+    def test_data_science_from_deps(self):
+        result = business_domain_classifier(["scikit-learn", "xgboost"])
+        assert result == "data_science"
+
+    def test_ai_assistant_from_deps(self):
+        result = business_domain_classifier(["openai", "langchain"])
+        assert result == "ai_assistant"
+
+    def test_ai_assistant_anthropic(self):
+        result = business_domain_classifier(["anthropic", "crewai"])
+        assert result == "ai_assistant"
+
+    def test_general_no_signals(self):
+        result = business_domain_classifier([])
+        assert result == "general"
+
+    def test_general_unrecognized_deps(self):
+        result = business_domain_classifier(["pyyaml", "toml"])
+        assert result == "general"
+
+    def test_keyword_fintech_from_name(self):
+        result = business_domain_classifier([], project_name="stock-trading-bot")
+        assert result == "fintech"
+
+    def test_keyword_healthcare_from_name(self):
+        result = business_domain_classifier([], project_name="patient-portal")
+        assert result == "healthcare"
+
+    def test_keyword_education_from_description(self):
+        result = business_domain_classifier(
+            [], project_description="A quiz platform for students",
+        )
+        assert result == "education"
+
+    def test_deps_weighted_over_keywords(self):
+        """Dependencies should outweigh keywords when conflicting."""
+        result = business_domain_classifier(
+            ["yfinance", "alpaca-trade-api"],
+            project_name="my-health-app",
+        )
+        assert result == "fintech"
+
+    # ── Stripe disambiguation ──
+
+    def test_stripe_alone_is_fintech(self):
+        result = business_domain_classifier(["stripe"])
+        assert result == "fintech"
+
+    def test_stripe_with_finance_deps_is_fintech(self):
+        result = business_domain_classifier(["stripe", "yfinance"])
+        assert result == "fintech"
+
+    def test_stripe_with_commerce_deps_is_ecommerce(self):
+        result = business_domain_classifier(["stripe", "shopify"])
+        assert result == "e_commerce"
+
+    def test_stripe_with_both_finance_and_commerce(self):
+        """When stripe co-occurs with both, commerce signal wins for stripe."""
+        result = business_domain_classifier(["stripe", "shopify", "yfinance"])
+        # shopify triggers e_commerce for stripe, yfinance triggers fintech from deps
+        # Both domains get points; fintech from yfinance(2) + e_commerce from shopify(2)+stripe(2)
+        assert result in ("fintech", "e_commerce")
+
+    def test_real_estate_from_name(self):
+        result = business_domain_classifier([], project_name="property-listing-app")
+        assert result == "real_estate"
+
+    def test_data_science_from_keywords(self):
+        result = business_domain_classifier(
+            [], project_description="neural network training pipeline",
+        )
+        assert result == "data_science"
+
+
+# ══════════════════════════════════════════════════════════════════
 # Convenience functions
 # ══════════════════════════════════════════════════════════════════
 
@@ -498,6 +617,7 @@ class TestClassifyProject:
         result = classify_project(["flask", "sqlalchemy"])
         assert "vertical" in result
         assert "architectural_pattern" in result
+        assert "business_domain" in result
 
     def test_streamlit_project(self):
         result = classify_project(["streamlit", "pandas"])
@@ -508,6 +628,17 @@ class TestClassifyProject:
         result = classify_project([])
         assert result["vertical"] == "utility"
         assert result["architectural_pattern"] == "utility"
+        assert result["business_domain"] == "general"
+
+    def test_business_domain_from_deps(self):
+        result = classify_project(["yfinance", "pandas"])
+        assert result["business_domain"] == "fintech"
+
+    def test_business_domain_from_name(self):
+        result = classify_project(
+            ["flask"], project_name="patient-portal",
+        )
+        assert result["business_domain"] == "healthcare"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -530,6 +661,7 @@ class TestReportIntegration:
         r = DiagnosticReport()
         assert hasattr(r, "vertical")
         assert hasattr(r, "architectural_pattern")
+        assert hasattr(r, "business_domain")
 
     def test_report_dict_includes_classification(self):
         from mycode.report import DiagnosticReport, Finding

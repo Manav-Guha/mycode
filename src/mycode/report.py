@@ -161,6 +161,7 @@ class DiagnosticReport:
     confidence_note: str = ""
     vertical: str = ""
     architectural_pattern: str = ""
+    business_domain: str = ""
     has_user_constraints: bool = False
     user_scale: int | None = None
     _usage_pattern: str = ""
@@ -659,6 +660,7 @@ class DiagnosticReport:
             "operational_context": self.operational_context,
             "vertical": self.vertical,
             "architectural_pattern": self.architectural_pattern,
+            "business_domain": self.business_domain,
             "model_used": self.model_used,
             "token_usage": dict(self.token_usage),
         }
@@ -1425,9 +1427,11 @@ class ReportGenerator:
             file_count=ingestion.files_analyzed,
             has_frontend=has_frontend,
             has_backend=has_backend,
+            project_name=report.project_name,
         )
         report.vertical = project_cls["vertical"]
         report.architectural_pattern = project_cls["architectural_pattern"]
+        report.business_domain = project_cls["business_domain"]
 
     def _detect_degradation(
         self,
