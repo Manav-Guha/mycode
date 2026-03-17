@@ -19,6 +19,7 @@ from corpus_aggregator import (
     _all_deps,
     load_reports,
     aggregate,
+    generate_xlsx,
     print_summary,
     main,
 )
@@ -387,6 +388,144 @@ class TestPrintSummary:
         assert "0 repos" in captured.out
 
 
+# ── XLSX Output ──
+
+
+class TestGenerateXlsx:
+    def _aggregate_fixture(self):
+        """Build a non-trivial aggregate result for xlsx tests."""
+        reports = {
+            "a": _report(
+                vertical="web_app",
+                architectural_pattern="fastapi",
+                findings=[
+                    _finding(severity="critical", category="memory", title="OOM", deps=["pandas"]),
+                    _finding(severity="warning", category="cpu", title="Spike", deps=["numpy"]),
+                ],
+                deps=["pandas", "numpy", "flask"],
+            ),
+            "b": _report(
+                vertical="web_app",
+                architectural_pattern="flask",
+                findings=[_finding(severity="warning", category="io", title="Blocking")],
+                deps=["flask"],
+            ),
+            "c": _report(
+                vertical="ml_model",
+                architectural_pattern="fastapi",
+                findings=[],
+                deps=["scikit-learn"],
+            ),
+        }
+        return aggregate(reports)
+
+    def test_generates_xlsx_file(self, tmp_path):
+        openpyxl = pytest.importorskip("openpyxl")
+        result = self._aggregate_fixture()
+        xlsx_path = tmp_path / "test.xlsx"
+
+        assert generate_xlsx(result, xlsx_path) is True
+        assert xlsx_path.exists()
+
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        assert len(wb.sheetnames) == 5
+        assert wb.sheetnames == [
+            "Repos Per Vertical",
+            "Top Failure Signatures",
+            "Top Dependencies",
+            "Repos Per Pattern",
+            "Cross-Tabulation",
+        ]
+
+    def test_repos_per_vertical_sheet(self, tmp_path):
+        openpyxl = pytest.importorskip("openpyxl")
+        result = self._aggregate_fixture()
+        xlsx_path = tmp_path / "test.xlsx"
+        generate_xlsx(result, xlsx_path)
+
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        ws = wb["Repos Per Vertical"]
+        # Header row
+        assert ws.cell(row=1, column=1).value == "Vertical"
+        assert ws.cell(row=1, column=5).value == "Failure Rate"
+        # web_app has 2 repos (sorted first by count desc)
+        assert ws.cell(row=2, column=1).value == "web_app"
+        assert ws.cell(row=2, column=2).value == 2
+        # ml_model has 1
+        assert ws.cell(row=3, column=1).value == "ml_model"
+        assert ws.cell(row=3, column=2).value == 1
+
+    def test_failure_signatures_sheet(self, tmp_path):
+        openpyxl = pytest.importorskip("openpyxl")
+        result = self._aggregate_fixture()
+        xlsx_path = tmp_path / "test.xlsx"
+        generate_xlsx(result, xlsx_path)
+
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        ws = wb["Top Failure Signatures"]
+        assert ws.cell(row=1, column=1).value == "Vertical"
+        assert ws.cell(row=1, column=3).value == "Severity"
+        # web_app should have signatures
+        assert ws.cell(row=2, column=1).value == "web_app"
+        assert ws.cell(row=2, column=2).value == 1  # rank
+
+    def test_top_dependencies_sheet(self, tmp_path):
+        openpyxl = pytest.importorskip("openpyxl")
+        result = self._aggregate_fixture()
+        xlsx_path = tmp_path / "test.xlsx"
+        generate_xlsx(result, xlsx_path)
+
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        ws = wb["Top Dependencies"]
+        assert ws.cell(row=1, column=3).value == "Dependency"
+        # At least one row of data
+        assert ws.cell(row=2, column=3).value is not None
+
+    def test_repos_per_pattern_sheet(self, tmp_path):
+        openpyxl = pytest.importorskip("openpyxl")
+        result = self._aggregate_fixture()
+        xlsx_path = tmp_path / "test.xlsx"
+        generate_xlsx(result, xlsx_path)
+
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        ws = wb["Repos Per Pattern"]
+        assert ws.cell(row=1, column=1).value == "Architectural Pattern"
+        # fastapi: 2, flask: 1
+        patterns = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value for r in range(2, 4)}
+        assert patterns["fastapi"] == 2
+        assert patterns["flask"] == 1
+
+    def test_cross_tabulation_sheet(self, tmp_path):
+        openpyxl = pytest.importorskip("openpyxl")
+        result = self._aggregate_fixture()
+        xlsx_path = tmp_path / "test.xlsx"
+        generate_xlsx(result, xlsx_path)
+
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        ws = wb["Cross-Tabulation"]
+        assert ws.cell(row=1, column=1).value == "Vertical"
+        # Column headers should be pattern names
+        col_headers = [ws.cell(row=1, column=c).value for c in range(2, ws.max_column + 1)]
+        assert "fastapi" in col_headers
+        assert "flask" in col_headers
+
+    def test_empty_aggregate(self, tmp_path):
+        openpyxl = pytest.importorskip("openpyxl")
+        result = aggregate({})
+        xlsx_path = tmp_path / "empty.xlsx"
+
+        assert generate_xlsx(result, xlsx_path) is True
+        assert xlsx_path.exists()
+
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        assert len(wb.sheetnames) == 5
+
+    def test_returns_false_without_openpyxl(self):
+        result = aggregate({})
+        with mock.patch.dict("sys.modules", {"openpyxl": None}):
+            assert generate_xlsx(result, Path("/tmp/nope.xlsx")) is False
+
+
 # ── CLI ──
 
 
@@ -419,6 +558,23 @@ class TestCLI:
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
         assert "No reports found" in captured.out
+
+    def test_main_xlsx_flag(self, tmp_path):
+        pytest.importorskip("openpyxl")
+        results = tmp_path / "results"
+        _write_report(results, "user__app", _report(
+            findings=[_finding(severity="critical", deps=["flask"])],
+            deps=["flask"],
+        ))
+        output = tmp_path / "out.json"
+
+        main(["--dirs", str(results), "--output", str(output), "--xlsx"])
+
+        xlsx_path = tmp_path / "out.xlsx"
+        assert xlsx_path.exists()
+        import openpyxl
+        wb = openpyxl.load_workbook(str(xlsx_path))
+        assert len(wb.sheetnames) == 5
 
     def test_main_multiple_dirs(self, tmp_path):
         dir1 = tmp_path / "results"

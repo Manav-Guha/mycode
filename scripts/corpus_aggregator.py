@@ -13,7 +13,7 @@ Usage:
     python scripts/corpus_aggregator.py --dirs results,corpus_results
     python scripts/corpus_aggregator.py --verbose
 
-No third-party dependencies — stdlib only.
+No third-party dependencies — stdlib only (openpyxl optional for --xlsx).
 """
 
 import argparse
@@ -335,6 +335,138 @@ def print_summary(result: dict) -> None:
     print(f"\n{'=' * 60}\n")
 
 
+# ── XLSX Output ──
+
+
+def generate_xlsx(result: dict, xlsx_path: Path) -> bool:
+    """Generate a formatted xlsx report from aggregate results.
+
+    Requires openpyxl.  Returns True on success, False if openpyxl missing.
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        logger.warning(
+            "openpyxl not installed — skipping xlsx report. "
+            "Install with: pip install openpyxl"
+        )
+        return False
+
+    # ── Styles ──
+    header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True, size=11)
+
+    def write_header(ws, headers):
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center")
+
+    def auto_width(ws):
+        for col_cells in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col_cells[0].column)
+            for cell in col_cells:
+                if cell.value is not None:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = min(max_len + 3, 60)
+
+    wb = Workbook()
+
+    # ── Sheet 1: Repos Per Vertical ──
+    ws1 = wb.active
+    ws1.title = "Repos Per Vertical"
+    write_header(ws1, ["Vertical", "Repos", "With Issues", "Clean", "Failure Rate",
+                       "Deps Seen", "Deps Failed", "Dep Fail Rate"])
+
+    for i, (v, data) in enumerate(
+        sorted(result["verticals"].items(), key=lambda x: -x[1]["repo_count"]), 2
+    ):
+        ws1.cell(row=i, column=1, value=v)
+        ws1.cell(row=i, column=2, value=data["repo_count"])
+        ws1.cell(row=i, column=3, value=data["repos_with_issues"])
+        ws1.cell(row=i, column=4, value=data["repos_clean"])
+        ws1.cell(row=i, column=5, value=f"{data['failure_rate'] * 100:.1f}%")
+        ws1.cell(row=i, column=6, value=data["total_dependencies_seen"])
+        ws1.cell(row=i, column=7, value=data["dependencies_with_failures"])
+        ws1.cell(row=i, column=8, value=f"{data['dependency_failure_rate'] * 100:.1f}%")
+
+    auto_width(ws1)
+
+    # ── Sheet 2: Top Failure Signatures ──
+    ws2 = wb.create_sheet("Top Failure Signatures")
+    write_header(ws2, ["Vertical", "Rank", "Severity", "Category", "Title", "Count"])
+
+    row = 2
+    for v, data in sorted(result["verticals"].items(), key=lambda x: -x[1]["repo_count"]):
+        for rank, entry in enumerate(data["top_failure_signatures"], 1):
+            raw_sig = entry["signature"]
+            parts = raw_sig.split(":", 2)
+            severity = parts[0] if len(parts) >= 1 else ""
+            category = parts[1] if len(parts) >= 2 else ""
+            title = parts[2] if len(parts) >= 3 else raw_sig
+
+            ws2.cell(row=row, column=1, value=v)
+            ws2.cell(row=row, column=2, value=rank)
+            ws2.cell(row=row, column=3, value=severity)
+            ws2.cell(row=row, column=4, value=category)
+            ws2.cell(row=row, column=5, value=title)
+            ws2.cell(row=row, column=6, value=entry["count"])
+            row += 1
+
+    auto_width(ws2)
+
+    # ── Sheet 3: Top Dependencies ──
+    ws3 = wb.create_sheet("Top Dependencies")
+    write_header(ws3, ["Vertical", "Rank", "Dependency", "Failure Count"])
+
+    row = 2
+    for v, data in sorted(result["verticals"].items(), key=lambda x: -x[1]["repo_count"]):
+        for rank, entry in enumerate(data["top_dependencies"], 1):
+            ws3.cell(row=row, column=1, value=v)
+            ws3.cell(row=row, column=2, value=rank)
+            ws3.cell(row=row, column=3, value=entry["dependency"])
+            ws3.cell(row=row, column=4, value=entry["failure_count"])
+            row += 1
+
+    auto_width(ws3)
+
+    # ── Sheet 4: Repos Per Pattern ──
+    ws4 = wb.create_sheet("Repos Per Pattern")
+    write_header(ws4, ["Architectural Pattern", "Repos"])
+
+    for i, (ap, data) in enumerate(
+        sorted(result["architectural_patterns"].items(), key=lambda x: -x[1]["repo_count"]), 2
+    ):
+        ws4.cell(row=i, column=1, value=ap)
+        ws4.cell(row=i, column=2, value=data["repo_count"])
+
+    auto_width(ws4)
+
+    # ── Sheet 5: Cross-Tabulation ──
+    cross = result["cross_tabulation"]
+    all_patterns = sorted({ap for row_data in cross.values() for ap in row_data})
+
+    ws5 = wb.create_sheet("Cross-Tabulation")
+    write_header(ws5, ["Vertical"] + all_patterns)
+
+    for i, v in enumerate(sorted(cross), 2):
+        ws5.cell(row=i, column=1, value=v)
+        for j, ap in enumerate(all_patterns, 2):
+            val = cross[v].get(ap, 0)
+            ws5.cell(row=i, column=j, value=val if val else None)
+
+    auto_width(ws5)
+
+    # ── Save ──
+    wb.save(str(xlsx_path))
+    logger.info("Wrote xlsx report to %s", xlsx_path)
+    return True
+
+
 # ── CLI ──
 
 
@@ -351,6 +483,11 @@ def main(argv: list[str] | None = None) -> None:
         "--dirs",
         default=None,
         help="Comma-separated list of result directories to scan (default: results,corpus_results,corpus_results_retry,corpus_results_timeout)",
+    )
+    parser.add_argument(
+        "--xlsx",
+        action="store_true",
+        help="Generate corpus_aggregate.xlsx alongside JSON (requires openpyxl)",
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -387,6 +524,11 @@ def main(argv: list[str] | None = None) -> None:
 
     print_summary(result)
     print(f"JSON written to {output_path}")
+
+    if args.xlsx:
+        xlsx_path = output_path.with_suffix(".xlsx")
+        if generate_xlsx(result, xlsx_path):
+            print(f"XLSX written to {xlsx_path}")
 
 
 if __name__ == "__main__":
