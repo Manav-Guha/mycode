@@ -4331,3 +4331,158 @@ class TestNonMonotonicDegradation:
         )
         ReportGenerator._annotate_non_monotonic(dp)
         assert "variance" not in dp.description.lower()
+
+
+# ── HTTP Startup-Failure + Version Discrepancy Enrichment ──
+
+
+class TestStartupFailureVersionEnrichment:
+    """Test that 'could not start' HTTP findings are enriched with version discrepancy info."""
+
+    def test_enriched_when_version_discrepancy_exists(self):
+        """Server-could-not-start with matching outdated dep gets version context."""
+        report = DiagnosticReport()
+        report.findings.append(Finding(
+            title="Application server could not start",
+            severity="critical",
+            category="http_load_testing",
+            description=(
+                "myCode detected a streamlit application but the server "
+                "failed to start: missing dependency. No users can access "
+                "your app until this is resolved."
+            ),
+            affected_dependencies=["streamlit"],
+            failure_domain="",
+            failure_pattern=None,
+        ))
+
+        ingestion = IngestionResult(
+            project_path="/fake",
+            files_analyzed=1,
+            dependencies=[
+                DependencyInfo(
+                    name="streamlit",
+                    installed_version="1.6.0",
+                    latest_version="1.41.0",
+                    is_outdated=True,
+                ),
+            ],
+        )
+
+        ReportGenerator._enrich_startup_failure_with_version(ingestion, report)
+
+        finding = report.findings[0]
+        assert "1.6.0" in finding.description
+        assert "1.41.0" in finding.description
+        assert "version gap" in finding.description
+        assert finding.failure_domain == "dependency_failure"
+        assert finding.failure_pattern == "version_incompatibility"
+
+    def test_not_enriched_when_no_version_discrepancy(self):
+        """Server-could-not-start without outdated dep stays unchanged."""
+        original_desc = (
+            "myCode detected a flask application but the server "
+            "failed to start: syntax error. No users can access "
+            "your app until this is resolved."
+        )
+        report = DiagnosticReport()
+        report.findings.append(Finding(
+            title="Application server could not start",
+            severity="critical",
+            category="http_load_testing",
+            description=original_desc,
+            affected_dependencies=["flask"],
+            failure_domain="",
+            failure_pattern=None,
+        ))
+
+        ingestion = IngestionResult(
+            project_path="/fake",
+            files_analyzed=1,
+            dependencies=[
+                DependencyInfo(
+                    name="flask",
+                    installed_version="3.0.0",
+                    latest_version="3.0.0",
+                    is_outdated=False,
+                ),
+            ],
+        )
+
+        ReportGenerator._enrich_startup_failure_with_version(ingestion, report)
+
+        finding = report.findings[0]
+        assert finding.description == original_desc
+        assert finding.failure_domain == ""
+        assert finding.failure_pattern is None
+
+    def test_enrichment_uses_correct_framework_from_affected_deps(self):
+        """Enrichment matches the framework name from affected_dependencies."""
+        report = DiagnosticReport()
+        report.findings.append(Finding(
+            title="Application server could not start",
+            severity="critical",
+            category="http_load_testing",
+            description="Server failed to start: missing dep.",
+            affected_dependencies=["fastapi", "uvicorn"],
+            failure_domain="",
+        ))
+
+        ingestion = IngestionResult(
+            project_path="/fake",
+            files_analyzed=1,
+            dependencies=[
+                DependencyInfo(
+                    name="fastapi",
+                    installed_version="0.68.0",
+                    latest_version="0.115.0",
+                    is_outdated=True,
+                ),
+                DependencyInfo(
+                    name="uvicorn",
+                    installed_version="0.20.0",
+                    latest_version="0.20.0",
+                    is_outdated=False,
+                ),
+            ],
+        )
+
+        ReportGenerator._enrich_startup_failure_with_version(ingestion, report)
+
+        finding = report.findings[0]
+        # Should reference fastapi (outdated), not uvicorn (current)
+        assert "fastapi" in finding.description
+        assert "0.68.0" in finding.description
+        assert "0.115.0" in finding.description
+        assert finding.failure_domain == "dependency_failure"
+        assert finding.failure_pattern == "version_incompatibility"
+
+    def test_non_startup_http_findings_not_enriched(self):
+        """HTTP findings that aren't startup failures are left alone."""
+        report = DiagnosticReport()
+        report.findings.append(Finding(
+            title="Application degrades under concurrent load",
+            severity="warning",
+            category="http_load_testing",
+            description="Your app degrades at 50 concurrent connections.",
+            affected_dependencies=["streamlit"],
+        ))
+
+        ingestion = IngestionResult(
+            project_path="/fake",
+            files_analyzed=1,
+            dependencies=[
+                DependencyInfo(
+                    name="streamlit",
+                    installed_version="1.6.0",
+                    latest_version="1.41.0",
+                    is_outdated=True,
+                ),
+            ],
+        )
+
+        ReportGenerator._enrich_startup_failure_with_version(ingestion, report)
+
+        finding = report.findings[0]
+        assert "version gap" not in finding.description
+        assert finding.failure_domain == ""

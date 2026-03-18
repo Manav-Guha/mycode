@@ -1027,6 +1027,9 @@ class ReportGenerator:
         # 2. Flag version discrepancies from ingester
         self._flag_version_discrepancies(ingestion, profile_matches, report)
 
+        # 2a. Enrich HTTP startup-failure findings with version discrepancy context
+        self._enrich_startup_failure_with_version(ingestion, report)
+
         # 3. Flag unrecognized dependencies
         self._flag_unrecognized_deps(profile_matches, report)
 
@@ -1874,6 +1877,53 @@ class ReportGenerator:
                 msg = f"{match.dependency_name}: {match.version_notes}"
                 if msg not in report.version_flags:
                     report.version_flags.append(msg)
+
+    # ── HTTP Startup-Failure + Version Discrepancy Enrichment ──
+
+    @staticmethod
+    def _enrich_startup_failure_with_version(
+        ingestion: IngestionResult,
+        report: DiagnosticReport,
+    ) -> None:
+        """Connect 'server could not start' findings with version discrepancies.
+
+        When an HTTP finding reports a server startup failure and the
+        framework dependency has a version discrepancy, the finding is
+        enriched with version context and reclassified from 'unclassified'
+        to 'dependency_failure' / 'version_incompatibility'.
+        """
+        # Build lookup: dep name → DependencyInfo for outdated deps
+        outdated_deps: dict[str, DependencyInfo] = {}
+        for dep in ingestion.dependencies:
+            if dep.is_outdated and dep.installed_version and dep.latest_version:
+                outdated_deps[dep.name.lower()] = dep
+
+        if not outdated_deps:
+            return
+
+        for finding in report.findings:
+            if (
+                finding.category != "http_load_testing"
+                or "could not start" not in finding.title.lower()
+            ):
+                continue
+
+            # Check affected_dependencies for a matching outdated dep
+            for dep_name in finding.affected_dependencies:
+                dep = outdated_deps.get(dep_name.lower())
+                if dep is None:
+                    continue
+
+                # Enrich the finding description
+                finding.description += (
+                    f" Your {dep.name} version ({dep.installed_version})"
+                    f" is significantly behind current"
+                    f" ({dep.latest_version}). The startup failure"
+                    f" is likely caused by this version gap."
+                )
+                finding.failure_domain = "dependency_failure"
+                finding.failure_pattern = "version_incompatibility"
+                break  # one enrichment per finding
 
     # ── Unrecognized Dependencies ──
 
