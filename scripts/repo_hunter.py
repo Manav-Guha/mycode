@@ -18,6 +18,7 @@ No third-party dependencies — stdlib only (urllib, json, time).
 """
 
 import argparse
+import gc
 import json
 import logging
 import sys
@@ -322,6 +323,7 @@ def hunt(
                 raw_repos.append(repo)
 
     logger.info("Phase 1 complete: %d unique repos found", len(raw_repos))
+    del seen_ids  # no longer needed
 
     # Phase 2: Basic filters (no extra API calls)
     logger.info("Phase 2: Basic filtering …")
@@ -332,6 +334,8 @@ def hunt(
         "Phase 2 complete: %d/%d passed (not fork, not template, not archived)",
         len(basic_passed), len(raw_repos),
     )
+    del raw_repos
+    gc.collect()
 
     # Phase 3: Deep filters (LOC + dep count — requires API calls)
     logger.info("Phase 3: Deep filtering (LOC >= %d, deps >= %d) …", min_loc, min_deps)
@@ -368,6 +372,9 @@ def hunt(
             len(candidates), max_repos, full,
             repo.get("stargazers_count", 0), loc, dep_count,
         )
+
+        if i % 50 == 0:
+            gc.collect()
 
     logger.info("Phase 3 complete: %d candidates", len(candidates))
 

@@ -17,6 +17,7 @@ No third-party dependencies — stdlib only (urllib, json, time).
 """
 
 import argparse
+import gc
 import json
 import logging
 import sys
@@ -145,6 +146,8 @@ def scrape(
         "Phase 2 complete: %d/%d passed (not archived, not empty, not fork)",
         len(basic_passed), len(raw_repos),
     )
+    del raw_repos
+    gc.collect()
 
     # Phase 3: Check for package.json (1 API call per repo)
     logger.info("Phase 3: Checking for package.json …")
@@ -154,11 +157,12 @@ def scrape(
         name = repo["name"]
         if _has_package_json(owner, name, token, delay):
             has_pkg.append(repo)
-            if i % 50 == 0:
-                logger.info(
-                    "  Checked %d/%d — %d with package.json",
-                    i + 1, len(basic_passed), len(has_pkg),
-                )
+        if i % 50 == 0:
+            logger.info(
+                "  Checked %d/%d — %d with package.json",
+                i + 1, len(basic_passed), len(has_pkg),
+            )
+            gc.collect()
     logger.info(
         "Phase 3 complete: %d/%d have package.json",
         len(has_pkg), len(basic_passed),
@@ -210,6 +214,9 @@ def scrape(
                 len(candidates), max_repos, full,
                 repo.get("stargazers_count", 0), loc, dep_count,
             )
+
+            if i % 50 == 0:
+                gc.collect()
 
     logger.info("Phase 4 complete: %d candidates", len(candidates))
 
