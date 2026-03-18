@@ -106,9 +106,9 @@ class TestListOrgRepos:
         def fake_get(url, token, delay):
             nonlocal call_count
             call_count += 1
-            if "page=1" in url:
+            if "&page=1" in url:
                 return page1
-            elif "page=2" in url:
+            elif "&page=2" in url:
                 return page2
             return []
 
@@ -181,6 +181,7 @@ class TestScrape:
             return None
 
         with mock.patch("lovable_scraper._api_get", side_effect=fake_get), \
+             mock.patch("lovable_scraper._get_loc", return_value=500), \
              mock.patch("lovable_scraper._get_dep_count", return_value=8):
             result = scrape(
                 token="tok",
@@ -278,6 +279,7 @@ class TestScrape:
             return None
 
         with mock.patch("lovable_scraper._api_get", side_effect=fake_get), \
+             mock.patch("lovable_scraper._get_loc", return_value=5), \
              mock.patch("lovable_scraper._get_dep_count", return_value=10):
             result = scrape(
                 token="tok",
@@ -301,6 +303,7 @@ class TestScrape:
             return None
 
         with mock.patch("lovable_scraper._api_get", side_effect=fake_get), \
+             mock.patch("lovable_scraper._get_loc", return_value=1000), \
              mock.patch("lovable_scraper._get_dep_count", return_value=1):
             result = scrape(
                 token="tok",
