@@ -3749,3 +3749,235 @@ def _immediate_future(fn, *args):
     except Exception as e:
         f.set_exception(e)
     return f
+
+
+# ── HTTP Deferral Tests ──
+
+
+class TestHttpDeferral:
+    """Test that framework scenarios are deferred to HTTP testing when a server is available."""
+
+    def test_streamlit_scenarios_deferred_when_server_available(self, tmp_path):
+        """Streamlit-targeting scenarios should be skipped when can_start_server() is True."""
+        session = _make_session(tmp_path)
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            files_analyzed=2,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="app.py",
+                    functions=[FunctionInfo(name="main", file_path="app.py", args=[], lineno=1)],
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="streamlit"),
+                DependencyInfo(name="pandas"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="python")
+
+        scenarios = [
+            StressTestScenario(
+                name="streamlit_cache_memory_growth",
+                category="memory_profiling",
+                description="Test streamlit caching",
+                target_dependencies=["streamlit"],
+                test_config={"behavior": "streamlit_server_stress"},
+            ),
+            StressTestScenario(
+                name="streamlit_concurrent_session_load",
+                category="concurrent_execution",
+                description="Test concurrent sessions",
+                target_dependencies=["streamlit"],
+                test_config={"behavior": "streamlit_server_stress"},
+            ),
+            StressTestScenario(
+                name="pandas_data_volume_scaling",
+                category="data_volume_scaling",
+                description="Test pandas scaling",
+                target_dependencies=["pandas"],
+                test_config={},
+            ),
+        ]
+
+        with patch("mycode.engine.can_start_server", return_value=True):
+            runnable, skipped = engine._defer_framework_scenarios_to_http(scenarios)
+
+        assert len(runnable) == 1
+        assert runnable[0].name == "pandas_data_volume_scaling"
+        assert len(skipped) == 2
+        for sr in skipped:
+            assert sr.status == "skipped"
+            assert sr.failure_reason == "http_tested"
+            assert "HTTP" in sr.summary
+
+    def test_no_deferral_when_no_server(self, tmp_path):
+        """When can_start_server() is False, all scenarios pass through."""
+        session = _make_session(tmp_path)
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="pandas")],
+        )
+        engine = ExecutionEngine(session, ingestion, language="python")
+
+        scenarios = [
+            StressTestScenario(
+                name="pandas_data_volume_scaling",
+                category="data_volume_scaling",
+                description="Test",
+                target_dependencies=["pandas"],
+            ),
+        ]
+
+        with patch("mycode.engine.can_start_server", return_value=False):
+            runnable, skipped = engine._defer_framework_scenarios_to_http(scenarios)
+
+        assert len(runnable) == 1
+        assert len(skipped) == 0
+
+    def test_coupling_scenarios_not_deferred(self, tmp_path):
+        """Coupling scenarios (empty target_dependencies) should never be deferred."""
+        session = _make_session(tmp_path)
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="streamlit")],
+        )
+        engine = ExecutionEngine(session, ingestion, language="python")
+
+        scenarios = [
+            StressTestScenario(
+                name="coupling_compute_dict",
+                category="data_volume_scaling",
+                description="Test coupling",
+                target_dependencies=[],
+                test_config={"behavior": "pure_computation"},
+            ),
+        ]
+
+        with patch("mycode.engine.can_start_server", return_value=True):
+            runnable, skipped = engine._defer_framework_scenarios_to_http(scenarios)
+
+        assert len(runnable) == 1
+        assert len(skipped) == 0
+
+    def test_all_deferred_returns_skipped_result(self, tmp_path):
+        """When all scenarios are deferred, execute() returns only skipped results."""
+        session = _make_session(tmp_path)
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[DependencyInfo(name="flask")],
+        )
+        engine = ExecutionEngine(session, ingestion, language="python")
+
+        scenarios = [
+            StressTestScenario(
+                name="flask_concurrent_request_load",
+                category="concurrent_execution",
+                description="Test Flask concurrency",
+                target_dependencies=["flask"],
+                test_config={"behavior": "flask_server_stress"},
+            ),
+        ]
+
+        with patch("mycode.engine.can_start_server", return_value=True):
+            result = engine.execute(scenarios)
+
+        assert result.scenarios_skipped == 1
+        assert result.scenarios_completed == 0
+        assert result.scenario_results[0].failure_reason == "http_tested"
+
+    def test_mixed_scenarios_deferred_and_run(self, tmp_path):
+        """Mix of framework + non-framework scenarios: only framework ones are deferred."""
+        session = _make_session(tmp_path)
+        harness_result = SessionResult(
+            returncode=0,
+            stdout=f"{_RESULTS_START}\n" + json.dumps({
+                "steps": [{"step_name": "test", "parameters": {},
+                           "execution_time_ms": 10, "memory_peak_mb": 1,
+                           "error_count": 0, "errors": [], "measurements": {}}],
+                "import_errors": [], "probe_skipped": [],
+            }) + f"\n{_RESULTS_END}",
+            stderr="",
+        )
+        session.run_in_session.return_value = harness_result
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            files_analyzed=1,
+            file_analyses=[
+                FileAnalysis(
+                    file_path="utils.py",
+                    functions=[FunctionInfo(name="compute", file_path="utils.py", args=[], lineno=1)],
+                ),
+            ],
+            dependencies=[
+                DependencyInfo(name="fastapi"),
+                DependencyInfo(name="numpy"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="python")
+
+        scenarios = [
+            StressTestScenario(
+                name="fastapi_async_concurrent_load",
+                category="concurrent_execution",
+                description="Test FastAPI",
+                target_dependencies=["fastapi"],
+                test_config={"behavior": "fastapi_server_stress"},
+            ),
+            StressTestScenario(
+                name="numpy_array_scaling",
+                category="data_volume_scaling",
+                description="Test numpy",
+                target_dependencies=["numpy"],
+                test_config={},
+            ),
+        ]
+
+        with patch("mycode.engine.can_start_server", return_value=True):
+            result = engine.execute(scenarios)
+
+        # FastAPI deferred, numpy ran
+        statuses = {sr.scenario_name: sr.failure_reason for sr in result.scenario_results}
+        assert statuses["fastapi_async_concurrent_load"] == "http_tested"
+        assert statuses.get("numpy_array_scaling", "") != "http_tested"
+
+    def test_fastapi_and_flask_deferred(self, tmp_path):
+        """Both Flask and FastAPI deps trigger deferral."""
+        session = _make_session(tmp_path)
+        ingestion = IngestionResult(
+            project_path=str(tmp_path),
+            files_analyzed=1,
+            file_analyses=[],
+            dependencies=[
+                DependencyInfo(name="fastapi"),
+                DependencyInfo(name="flask"),
+            ],
+        )
+        engine = ExecutionEngine(session, ingestion, language="python")
+
+        scenarios = [
+            StressTestScenario(
+                name="fastapi_scenario",
+                category="concurrent_execution",
+                description="Test",
+                target_dependencies=["fastapi"],
+            ),
+            StressTestScenario(
+                name="flask_scenario",
+                category="concurrent_execution",
+                description="Test",
+                target_dependencies=["flask"],
+            ),
+        ]
+
+        with patch("mycode.engine.can_start_server", return_value=True):
+            runnable, skipped = engine._defer_framework_scenarios_to_http(scenarios)
+
+        assert len(runnable) == 0
+        assert len(skipped) == 2

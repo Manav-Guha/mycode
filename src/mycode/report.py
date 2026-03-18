@@ -700,6 +700,10 @@ _FAILURE_REASON_EXPLANATIONS: dict[str, str] = {
         "server, database connection, or live API) that myCode cannot "
         "simulate in isolation."
     ),
+    "http_tested": (
+        "These scenarios target a server framework that myCode tested "
+        "via HTTP load testing instead — see HTTP findings in this report."
+    ),
     "unknown": "These tests could not run due to unexpected issues.",
 }
 
@@ -727,6 +731,7 @@ _FAILURE_REASON_HEADERS: dict[str, str] = {
     "timeout": "Timed Out",
     "user_timeout": "Reached Your Time Limit",
     "runtime_context_required": "Requires Runtime Context",
+    "http_tested": "Tested via HTTP",
     "unknown": "Other Issues",
     "": "Environment Issues",
 }
@@ -1345,8 +1350,8 @@ class ReportGenerator:
             self._detect_degradation(sr, report)
 
             # ── Count scenario outcome based on what was actually produced ──
-            # Runtime context and user-timeout are excluded from counts
-            if sr.failure_reason == "runtime_context_required" or sr.hit_user_timeout:
+            # Runtime context, HTTP-deferred, and user-timeout are excluded from counts
+            if sr.failure_reason in ("runtime_context_required", "http_tested") or sr.hit_user_timeout:
                 incomplete += 1
             elif len(report.findings) > _findings_before:
                 # Scenario produced at least one finding → failed

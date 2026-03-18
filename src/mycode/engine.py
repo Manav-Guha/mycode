@@ -22,6 +22,7 @@ from typing import Callable, Optional
 from mycode.ingester import IngestionResult
 from mycode.interface import TerminalIO, UserIO
 from mycode.scenario import StressTestScenario
+from mycode.server_manager import can_start_server
 from mycode.session import SessionManager, SessionResult
 
 logger = logging.getLogger(__name__)
@@ -264,6 +265,17 @@ _SERVER_SIDE_PACKAGES = frozenset({
     "next", "nuxt", "gatsby",
 })
 
+# Server framework dependencies whose callable harness scenarios should be
+# deferred to HTTP testing when the project has a startable server.  These
+# frameworks run user code at import time (e.g. Streamlit executes st.title()
+# on import, Flask/FastAPI register routes) — importing their entry files in
+# a harness subprocess hangs or errors because no server runtime exists.
+_HTTP_DEFERRED_FRAMEWORK_DEPS = frozenset({
+    "streamlit", "flask", "fastapi",
+    "express", "nextjs", "next",
+    "gradio",
+})
+
 
 # Error types that indicate genuine runtime context dependence
 _CONTEXT_ERROR_TYPES = frozenset({
@@ -494,6 +506,66 @@ class ExecutionEngine:
         has_server_framework = bool(non_dev_names & _SERVER_SIDE_PACKAGES)
         return has_browser_framework and not has_server_framework
 
+    def _defer_framework_scenarios_to_http(
+        self,
+        scenarios: list[StressTestScenario],
+    ) -> tuple[list[StressTestScenario], list[ScenarioResult]]:
+        """Split scenarios into runnable vs HTTP-deferred.
+
+        When the project has a startable server (``can_start_server()``),
+        scenarios that target a server framework dependency are deferred to
+        HTTP load testing.  This prevents import-time hangs (e.g. Streamlit
+        executes ``st.title()`` on import) and avoids redundant testing —
+        the HTTP phase tests real server behaviour under load.
+
+        Scenarios that pass through unchanged:
+          - Scenarios targeting non-framework deps (pandas, numpy, etc.)
+          - Coupling/computation scenarios (empty target_dependencies)
+
+        Returns (runnable_scenarios, skipped_results).
+        """
+        project_dir = (
+            self.session.project_copy_dir
+            or Path(self.ingestion.project_path)
+        )
+        if not can_start_server(self.ingestion, project_dir, self.language):
+            return scenarios, []
+
+        runnable: list[StressTestScenario] = []
+        skipped: list[ScenarioResult] = []
+
+        for s in scenarios:
+            deps = {d.lower() for d in s.target_dependencies}
+            targets_framework = bool(deps & _HTTP_DEFERRED_FRAMEWORK_DEPS)
+
+            if targets_framework:
+                logger.info(
+                    "Deferring scenario '%s' to HTTP testing "
+                    "(targets server framework: %s)",
+                    s.name, deps & _HTTP_DEFERRED_FRAMEWORK_DEPS,
+                )
+                skipped.append(ScenarioResult(
+                    scenario_name=s.name,
+                    scenario_category=s.category,
+                    status="skipped",
+                    failure_reason="http_tested",
+                    summary=(
+                        "Server framework behaviour tested via HTTP "
+                        "load testing instead of callable harness."
+                    ),
+                ))
+            else:
+                runnable.append(s)
+
+        if skipped:
+            logger.info(
+                "HTTP deferral: %d scenarios deferred, %d remain for "
+                "callable harness",
+                len(skipped), len(runnable),
+            )
+
+        return runnable, skipped
+
     def _deduplicate_by_function(
         self,
         scenarios: list[StressTestScenario],
@@ -634,6 +706,14 @@ class ExecutionEngine:
                 warnings=[],
             )
 
+        # ── Defer framework scenarios to HTTP testing ──
+        # When the project has a startable server, skip scenarios that target
+        # the server framework dep — the HTTP phase tests real server behaviour
+        # and the callable harness would hang importing framework entry files.
+        scenarios, http_deferred = self._defer_framework_scenarios_to_http(
+            scenarios,
+        )
+
         # ── Brute-force function deduplication ──
         # Profile-based scenarios each carry the full set of project functions
         # in their harness config. A project with 7 functions and 14 dependency
@@ -642,6 +722,13 @@ class ExecutionEngine:
         # Track which functions have been claimed by a scenario. For each
         # subsequent scenario, strip already-seen functions. Drop scenarios
         # whose functions are all already covered.
+        if not scenarios:
+            # All scenarios deferred to HTTP — return skipped results only
+            return ExecutionEngineResult(
+                scenario_results=http_deferred,
+                scenarios_skipped=len(http_deferred),
+            )
+
         scenarios = self._deduplicate_by_function(scenarios)
 
         # Cap parallel workers for JS/TS — each Node.js subprocess reserves
@@ -703,6 +790,8 @@ class ExecutionEngine:
                 future.result()  # re-raises if _run_one itself crashed
 
         results = [r for r in ordered_results if r is not None]
+        # Append HTTP-deferred scenario results so the report can reference them
+        results.extend(http_deferred)
 
         total_ms = (time.perf_counter() - start) * 1000
         completed = sum(1 for r in results if r.status == "completed")
