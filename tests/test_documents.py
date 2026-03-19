@@ -242,13 +242,13 @@ class TestRenderUnderstanding:
         assert "Memory leak in data processing" in md
         assert "Peak memory: 450MB" in md
 
-    def test_degradation_points_humanised(self, sample_report):
+    def test_degradation_table_present(self, sample_report):
         md = render_understanding(sample_report, 1)
-        assert "Performance Degradation" in md
+        assert "Performance Under Load" in md
+        assert "What we tested" in md
+        assert "Verdict" in md
         # Raw scenario name should NOT appear
         assert "concurrent_flask_requests" not in md
-        # Humanised label should appear
-        assert "Response time under load" in md
 
     def test_confidence_note(self, sample_report):
         md = render_understanding(sample_report, 1)
@@ -803,9 +803,9 @@ class TestPdfRendering:
 
 
 class TestDegradationHumanisation:
-    """Test that degradation curves use humanised labels in all renderers."""
+    """Test that degradation curves use humanised labels in the table."""
 
-    def test_markdown_uses_describe_scenario(self):
+    def test_markdown_table_humanised_labels(self):
         report = DiagnosticReport(
             degradation_points=[
                 DegradationPoint(
@@ -821,10 +821,12 @@ class TestDegradationHumanisation:
         assert "coupling_compute_streamlit_markdown" not in md
         assert "compute_50000" not in md
         assert "compute_100000" not in md
-        # Humanised labels should appear
+        # Table should have humanised step labels
         assert "items of data" in md
+        # Table format
+        assert "| What we tested |" in md
 
-    def test_markdown_breaking_point_humanised(self):
+    def test_markdown_verdict_column(self):
         report = DiagnosticReport(
             degradation_points=[
                 DegradationPoint(
@@ -836,10 +838,13 @@ class TestDegradationHumanisation:
             ],
         )
         md = render_understanding(report, 1)
+        # 2000ms = unresponsive
+        assert "Unresponsive at peak load" in md
+        # Step label humanised in cell context
         assert "50 simultaneous users" in md
         assert "concurrent_50" not in md
 
-    def test_markdown_metric_label_prepended(self):
+    def test_markdown_memory_label_prefix(self):
         report = DiagnosticReport(
             degradation_points=[
                 DegradationPoint(
@@ -850,11 +855,11 @@ class TestDegradationHumanisation:
             ],
         )
         md = render_understanding(report, 1)
-        assert "Memory usage under load" in md
+        assert "Memory usage" in md
 
     @pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
-    def test_pdf_degradation_humanised(self):
-        """PDF degradation section should not contain raw identifiers."""
+    def test_pdf_degradation_table(self):
+        """PDF degradation section should render as table."""
         from mycode.documents import render_understanding_pdf
         report = DiagnosticReport(
             degradation_points=[
@@ -969,25 +974,28 @@ class TestDepStackNames:
 # ── Issue 7: Breaking point includes metric context ──
 
 
-class TestBreakingPointLabel:
-    """Breaking point must state what metric breaks."""
+class TestBreakingPointInTable:
+    """Breaking point info now appears in verdict column."""
 
-    def test_time_breaking_point(self):
+    def test_time_verdict_and_data(self):
         report = DiagnosticReport(
             degradation_points=[
                 DegradationPoint(
                     scenario_name="flask_scaling",
                     metric="execution_time_ms",
-                    steps=[("data_size_1000", 10.0), ("data_size_50000", 500.0)],
+                    steps=[("data_size_1000", 10.0), ("data_size_50000", 350.0)],
                     breaking_point="data_size_50000",
                 ),
             ],
         )
         md = render_understanding(report, 1)
-        assert "response time exceeds 500ms" in md
-        assert "50,000 items" in md
+        # 350ms → noticeable, with breaking point context
+        assert "Noticeable above 50,000 items" in md
+        # Cell data present
+        assert "350ms" in md
+        assert "10ms" in md
 
-    def test_memory_breaking_point(self):
+    def test_memory_verdict_and_data(self):
         report = DiagnosticReport(
             degradation_points=[
                 DegradationPoint(
@@ -999,5 +1007,165 @@ class TestBreakingPointLabel:
             ],
         )
         md = render_understanding(report, 1)
-        assert "memory exceeds 120MB" in md
+        # Memory >50MB verdict
+        assert "Heavy" in md
+        # Cell data
+        assert "120MB" in md
         assert "10,000 items" in md
+
+
+# ── Performance Summary Table ──
+
+
+class TestPerfSummaryTable:
+    """Test the performance summary table generation."""
+
+    def test_single_curve_produces_table(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="test_scaling",
+                    metric="execution_time_ms",
+                    steps=[("data_size_100", 5.0), ("data_size_1000", 50.0), ("data_size_10000", 500.0)],
+                    breaking_point="data_size_10000",
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "| What we tested |" in md
+        assert "| Verdict |" in md
+        # 3 data cells
+        assert "5ms" in md
+        assert "50ms" in md
+        assert "500ms" in md
+
+    def test_multiple_curves_multi_row(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="flask_scaling",
+                    metric="execution_time_ms",
+                    steps=[("concurrent_1", 10.0), ("concurrent_50", 200.0)],
+                ),
+                DegradationPoint(
+                    scenario_name="flask_scaling",
+                    metric="memory_peak_mb",
+                    steps=[("concurrent_1", 20.0), ("concurrent_50", 80.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        # Should have table header once
+        assert md.count("| What we tested |") == 1
+        # Two data rows (time + memory)
+        assert "200ms" in md
+        assert "80MB" in md
+        assert "Memory usage" in md
+
+    def test_verdict_no_issues(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="http_get_root",
+                    metric="response_time_ms",
+                    steps=[("1 concurrent", 3.0), ("5 concurrent", 6.0), ("15 concurrent", 7.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "No issues" in md
+
+    def test_verdict_unresponsive(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="flask_load",
+                    metric="execution_time_ms",
+                    steps=[("concurrent_1", 100.0), ("concurrent_50", 5000.0)],
+                    breaking_point="concurrent_50",
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "Unresponsive at peak load" in md
+
+    def test_verdict_memory_fine(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="test",
+                    metric="memory_peak_mb",
+                    steps=[("data_size_100", 5.0), ("data_size_10000", 30.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "Fine at your scale" in md
+
+    def test_verdict_memory_heavy(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="test",
+                    metric="memory_peak_mb",
+                    steps=[("data_size_100", 10.0), ("data_size_100000", 250.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "Very heavy" in md
+
+    def test_verdict_errors(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="test",
+                    metric="error_count",
+                    steps=[("concurrent_1", 0.0), ("concurrent_50", 12.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "12 errors at peak" in md
+
+    def test_two_step_curve_mid_dash(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="test",
+                    metric="execution_time_ms",
+                    steps=[("data_size_100", 5.0), ("data_size_10000", 50.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        # Mid column should be dash for 2-step curves
+        lines = [l for l in md.split("\n") if l.startswith("| ") and "5ms" in l]
+        assert len(lines) == 1
+        # Should contain a dash cell
+        assert "| — |" in lines[0]
+
+    def test_empty_degradation_no_table(self):
+        report = DiagnosticReport(degradation_points=[])
+        md = render_understanding(report, 1)
+        assert "Performance Under Load" not in md
+
+    @pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+    def test_pdf_table_renders(self):
+        from mycode.documents import render_understanding_pdf
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="test_scaling",
+                    metric="execution_time_ms",
+                    steps=[("data_size_100", 5.0), ("data_size_1000", 50.0), ("data_size_10000", 500.0)],
+                ),
+                DegradationPoint(
+                    scenario_name="test_scaling",
+                    metric="memory_peak_mb",
+                    steps=[("data_size_100", 5.0), ("data_size_1000", 20.0), ("data_size_10000", 80.0)],
+                ),
+            ],
+        )
+        pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"

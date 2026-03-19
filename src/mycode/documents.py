@@ -17,12 +17,14 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from mycode.report import (
+    DegradationPoint,
     DiagnosticReport,
     Finding,
     _breaking_point_label,
     _build_degradation_narrative,
     _describe_scenario,
     _describe_step,
+    _format_ms,
     _humanize_scenario_name,
     _metric_label,
 )
@@ -65,6 +67,178 @@ def _http_tested_summary(http_tested: list[Finding]) -> str:
         f"{n} framework scenario{'s' if n != 1 else ''} "
         f"{'were' if n != 1 else 'was'} tested via HTTP load testing."
     )
+
+
+# ── Performance Summary Table ──
+
+
+def _fmt_val(value: float, metric: str) -> str:
+    """Format a degradation value with its unit."""
+    is_time = metric in ("execution_time_ms", "response_time_ms")
+    is_memory = metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")
+    if is_time:
+        return _format_ms(value)
+    if is_memory:
+        return f"{value:.0f}MB" if value >= 1 else f"{value:.2f}MB"
+    if metric == "error_count":
+        n = int(value)
+        return f"{n} error{'s' if n != 1 else ''}"
+    return f"{value:.1f}"
+
+
+def _fmt_cell(value: float, label: str, metric: str) -> str:
+    """Format a table cell: value (context)."""
+    val = _fmt_val(value, metric)
+    ctx = _describe_step(label) or label
+    return f"{val} ({ctx})"
+
+
+def _verdict(dp: DegradationPoint) -> str:
+    """One-phrase verdict for a degradation curve."""
+    if not dp.steps:
+        return ""
+    last_val = dp.steps[-1][1]
+    is_time = dp.metric in ("execution_time_ms", "response_time_ms")
+    is_memory = dp.metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")
+
+    if is_time:
+        if last_val < 100:
+            return "No issues"
+        bp_desc = _describe_step(dp.breaking_point) if dp.breaking_point else ""
+        if last_val < 500:
+            return f"Noticeable above {bp_desc}" if bp_desc else "Noticeable at peak"
+        if last_val < 2000:
+            return "Slow at peak load"
+        return "Unresponsive at peak load"
+
+    if is_memory:
+        if last_val < 50:
+            return "Fine at your scale"
+        if last_val < 200:
+            return "Heavy — limits concurrent users"
+        return "Very heavy — risk of crashes"
+
+    if dp.metric == "error_count":
+        if last_val <= 0:
+            return "No errors"
+        return f"{int(last_val)} errors at peak"
+
+    if "stable" in (dp.description or "").lower():
+        return "Stable"
+
+    return ""
+
+
+def _perf_row_label(dp: DegradationPoint) -> str:
+    """Human label for the 'What we tested' column."""
+    name = _describe_scenario(dp.scenario_name) or dp.scenario_name
+    is_memory = dp.metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")
+    if is_memory:
+        # Prefix with "Memory usage —" to distinguish from time curves
+        # for the same scenario
+        return f"Memory usage — {name}"
+    return name.capitalize() if name and name[0].islower() else name
+
+
+def _render_perf_table_md(lines: list[str], points: list[DegradationPoint]) -> None:
+    """Render degradation points as a markdown performance summary table."""
+    if not points:
+        return
+
+    lines.append("## Performance Under Load")
+    lines.append("")
+    lines.append(
+        "| What we tested | At low load | At mid load | At peak load | Verdict |"
+    )
+    lines.append("|---|---|---|---|---|")
+
+    for dp in points:
+        label = _perf_row_label(dp)
+        steps = dp.steps
+        if not steps:
+            continue
+
+        low_label, low_val = steps[0]
+        low = _fmt_cell(low_val, low_label, dp.metric)
+
+        if len(steps) >= 3:
+            mid_idx = len(steps) // 2
+            mid_label, mid_val = steps[mid_idx]
+            mid = _fmt_cell(mid_val, mid_label, dp.metric)
+        elif len(steps) == 2:
+            mid = "—"
+        else:
+            mid = "—"
+
+        if len(steps) >= 2:
+            high_label, high_val = steps[-1]
+            high = _fmt_cell(high_val, high_label, dp.metric)
+        else:
+            high = "—"
+
+        v = _verdict(dp)
+        lines.append(f"| {label} | {low} | {mid} | {high} | {v} |")
+
+    lines.append("")
+
+
+def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
+    """Render degradation points as a PDF performance summary table."""
+    if not points:
+        return
+
+    pdf.section_heading("Performance Under Load")
+
+    # Column widths (mm) — total ~160mm for A4 printable area
+    col_w = [38, 29, 29, 29, 35]
+    headers = ["What we tested", "At low load", "At mid load", "At peak load", "Verdict"]
+    row_h = 5.5
+
+    # Header row
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_text_color(*_DARK_BLUE)
+    pdf.set_fill_color(240, 248, 255)
+    for i, hdr in enumerate(headers):
+        pdf.cell(col_w[i], row_h, _safe_text(hdr), border=1, fill=True)
+    pdf.ln(row_h)
+
+    # Data rows
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(*_BODY_GREY)
+
+    for dp in points:
+        steps = dp.steps
+        if not steps:
+            continue
+
+        label = _perf_row_label(dp)
+
+        low_label, low_val = steps[0]
+        low = _fmt_cell(low_val, low_label, dp.metric)
+
+        if len(steps) >= 3:
+            mid_idx = len(steps) // 2
+            mid_label, mid_val = steps[mid_idx]
+            mid = _fmt_cell(mid_val, mid_label, dp.metric)
+        elif len(steps) == 2:
+            mid = "—"
+        else:
+            mid = "—"
+
+        if len(steps) >= 2:
+            high_label, high_val = steps[-1]
+            high = _fmt_cell(high_val, high_label, dp.metric)
+        else:
+            high = "—"
+
+        v = _verdict(dp)
+
+        cells = [label, low, mid, high, v]
+        for i, cell_text in enumerate(cells):
+            pdf.cell(col_w[i], row_h, _safe_text(cell_text), border=1)
+        pdf.ln(row_h)
+
+    pdf.ln(3)
 
 
 # ── PDF Library (optional) ──
@@ -255,30 +429,8 @@ def render_understanding(report: DiagnosticReport, edition: int) -> str:
         lines.append(f"*{_http_tested_summary(http_tested)}*")
         lines.append("")
 
-    # Degradation curves (humanised labels)
-    if report.degradation_points:
-        lines.append("## Performance Degradation")
-        lines.append("")
-        for dp in report.degradation_points:
-            name = _describe_scenario(dp.scenario_name) or dp.scenario_name
-            metric_label = _metric_label(dp.metric)
-            if metric_label:
-                name = f"{metric_label} — {name}"
-            if dp.group_count > 1:
-                name += f" (and {dp.group_count - 1} similar)"
-            lines.append(f"### {name}")
-            lines.append("")
-            narrative = _build_degradation_narrative(dp)
-            if narrative:
-                lines.append(narrative)
-                lines.append("")
-            elif dp.description:
-                lines.append(dp.description)
-                lines.append("")
-            if dp.breaking_point:
-                bp_label = _breaking_point_label(dp)
-                lines.append(f"Breaking point: **{bp_label}**")
-                lines.append("")
+    # Performance summary table
+    _render_perf_table_md(lines, report.degradation_points)
 
     # Confidence note
     if report.confidence_note:
@@ -939,28 +1091,8 @@ def render_understanding_pdf(
         pdf.multi_cell(0, 5, _safe_text(_http_tested_summary(http_tested)))
         pdf.ln(3)
 
-    # Degradation curves (humanised labels)
-    if report.degradation_points:
-        pdf.section_heading("Performance Degradation")
-        for dp in report.degradation_points:
-            name = _describe_scenario(dp.scenario_name) or dp.scenario_name
-            metric_label = _metric_label(dp.metric)
-            if metric_label:
-                name = f"{metric_label} — {name}"
-            if dp.group_count > 1:
-                name += f" (and {dp.group_count - 1} similar)"
-            pdf.section_heading(_safe_text(name), level=3)
-            narrative = _build_degradation_narrative(dp)
-            if narrative:
-                pdf.body_text(narrative)
-            elif dp.description:
-                pdf.body_text(dp.description)
-            if dp.breaking_point:
-                bp_label = _breaking_point_label(dp)
-                pdf.set_font("Helvetica", "B", 11)
-                pdf.set_text_color(*_BODY_GREY)
-                pdf.cell(0, 6, _safe_text(f"Breaking point: {bp_label}"))
-                pdf.ln(4)
+    # Performance summary table
+    _render_perf_table_pdf(pdf, report.degradation_points)
 
     # Confidence note
     if report.confidence_note:

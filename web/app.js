@@ -547,61 +547,90 @@ function humanizeScenarioName(name) {
     return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+function fmtCell(value, label, metric) {
+    const val = formatMetricValue(value, metric);
+    const ctx = humanizeStepLabel(label);
+    return val + " (" + ctx + ")";
+}
+
+function verdictForCurve(d) {
+    const steps = d.steps || [];
+    if (steps.length === 0) return "";
+    const lastVal = steps[steps.length - 1][1] || 0;
+    const metric = (d.metric || "").toLowerCase();
+    const isTime = metric.includes("time");
+    const isMemory = metric.includes("memory");
+    const isErrors = metric === "error_count";
+
+    if (isTime) {
+        if (lastVal < 100) return "No issues";
+        if (lastVal < 500) {
+            const bp = d.breaking_point ? humanizeStepLabel(d.breaking_point) : "";
+            return bp ? "Noticeable above " + bp : "Noticeable at peak";
+        }
+        if (lastVal < 2000) return "Slow at peak load";
+        return "Unresponsive at peak load";
+    }
+    if (isMemory) {
+        if (lastVal < 50) return "Fine at your scale";
+        if (lastVal < 200) return "Heavy — limits concurrent users";
+        return "Very heavy — risk of crashes";
+    }
+    if (isErrors) {
+        if (lastVal <= 0) return "No errors";
+        return Math.round(lastVal) + " errors at peak";
+    }
+    return "";
+}
+
+function perfRowLabel(d) {
+    let name = humanizeScenarioName(d.scenario_name || "");
+    const metric = (d.metric || "").toLowerCase();
+    if (metric.includes("memory")) {
+        name = "Memory usage — " + name.charAt(0).toLowerCase() + name.slice(1);
+    }
+    return name;
+}
+
 function renderDegradations(degradations) {
     let html = `<div class="degradation-section">`;
-    html += `<div class="section-title">Performance degradation</div>`;
+    html += `<div class="section-title">Performance under load</div>`;
+    html += `<table class="perf-table" style="width:100%;border-collapse:collapse;font-size:0.88rem;margin-top:0.5rem">`;
+    html += `<thead><tr style="text-align:left;border-bottom:2px solid var(--border)">`;
+    html += `<th style="padding:0.4rem 0.3rem">What we tested</th>`;
+    html += `<th style="padding:0.4rem 0.3rem">At low load</th>`;
+    html += `<th style="padding:0.4rem 0.3rem">At mid load</th>`;
+    html += `<th style="padding:0.4rem 0.3rem">At peak load</th>`;
+    html += `<th style="padding:0.4rem 0.3rem">Verdict</th>`;
+    html += `</tr></thead><tbody>`;
 
     for (const d of degradations) {
-        html += `<div class="degradation-card">`;
-        let title = humanizeScenarioName(d.scenario_name || "");
-        const metricLabel = humanizeMetricLabel(d.metric || "");
-        if (metricLabel) title = metricLabel + " — " + title;
-        if (d.group_count > 1) title += ` (and ${d.group_count - 1} similar)`;
-        html += `<div class="degradation-title">${escapeHtml(title)}</div>`;
-
         const steps = d.steps || [];
-        if (steps.length > 0) {
-            // Find max value for bar scaling
-            const maxVal = Math.max(...steps.map(s => Math.abs(s[1] || 0)), 1);
+        if (steps.length === 0) continue;
 
-            html += `<div class="degradation-steps">`;
-            for (const [label, value] of steps) {
-                const pct = Math.min(100, Math.round((Math.abs(value) / maxVal) * 100));
-                const ratio = Math.abs(value) / maxVal;
-                const color = ratio < 0.4 ? "green" : ratio < 0.7 ? "amber" : "red";
-                const displayVal = formatMetricValue(value, d.metric);
-                const stepLabel = humanizeStepLabel(label);
-
-                html += `<div class="degradation-step">`;
-                html += `<span class="degradation-step-label">${escapeHtml(stepLabel)}</span>`;
-                html += `<div class="degradation-bar-track"><div class="degradation-bar-fill ${color}" style="width:${pct}%"></div></div>`;
-                html += `<span class="degradation-step-value">${displayVal}</span>`;
-                html += `</div>`;
-            }
-            html += `</div>`;
+        const label = perfRowLabel(d);
+        const low = fmtCell(steps[0][1], steps[0][0], d.metric);
+        let mid = "—";
+        if (steps.length >= 3) {
+            const midIdx = Math.floor(steps.length / 2);
+            mid = fmtCell(steps[midIdx][1], steps[midIdx][0], d.metric);
         }
-
-        if (d.breaking_point) {
-            const bpLabel = humanizeStepLabel(d.breaking_point);
-            // Find value at breaking point to add metric context
-            let bpText = "at " + bpLabel;
-            const bpStep = (d.steps || []).find(s => s[0] === d.breaking_point || s.label === d.breaking_point);
-            if (bpStep) {
-                const bpVal = bpStep[1] !== undefined ? bpStep[1] : bpStep.value;
-                const metric = (d.metric || "").toLowerCase();
-                if (bpVal !== undefined) {
-                    if (metric.includes("time")) bpText = "response time exceeds " + formatMetricValue(bpVal, d.metric) + " at " + bpLabel;
-                    else if (metric.includes("memory")) bpText = "memory exceeds " + formatMetricValue(bpVal, d.metric) + " at " + bpLabel;
-                    else if (metric.includes("error")) bpText = "errors begin at " + bpLabel;
-                }
-            }
-            html += `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--red)">Breaking point: ${escapeHtml(bpText)}</div>`;
+        let high = "—";
+        if (steps.length >= 2) {
+            high = fmtCell(steps[steps.length - 1][1], steps[steps.length - 1][0], d.metric);
         }
+        const verdict = verdictForCurve(d);
 
-        html += `</div>`;
+        html += `<tr style="border-bottom:1px solid var(--border)">`;
+        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(label)}</td>`;
+        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(low)}</td>`;
+        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(mid)}</td>`;
+        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(high)}</td>`;
+        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(verdict)}</td>`;
+        html += `</tr>`;
     }
 
-    html += `</div>`;
+    html += `</tbody></table></div>`;
     return html;
 }
 
