@@ -17,9 +17,55 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from mycode.report import DiagnosticReport, Finding
+from mycode.report import (
+    DiagnosticReport,
+    Finding,
+    _build_degradation_narrative,
+    _describe_scenario,
+    _describe_step,
+    _humanize_scenario_name,
+    _metric_label,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _partition_http_tested(
+    incomplete: list[Finding],
+) -> tuple[list[Finding], list[Finding]]:
+    """Split incomplete tests into http_tested and other findings."""
+    http_tested: list[Finding] = []
+    other: list[Finding] = []
+    for f in incomplete:
+        if f._failure_reason == "http_tested":
+            http_tested.append(f)
+        else:
+            other.append(f)
+    return http_tested, other
+
+
+def _http_tested_summary(http_tested: list[Finding]) -> str:
+    """Build a single summary line for http_tested findings.
+
+    Returns e.g. "6 Streamlit scenarios were tested via HTTP load testing."
+    """
+    n = len(http_tested)
+    # Extract framework name from affected_dependencies
+    framework = ""
+    for f in http_tested:
+        if f.affected_dependencies:
+            framework = f.affected_dependencies[0]
+            break
+    if framework:
+        return (
+            f"{n} {framework} scenario{'s' if n != 1 else ''} "
+            f"{'were' if n != 1 else 'was'} tested via HTTP load testing."
+        )
+    return (
+        f"{n} framework scenario{'s' if n != 1 else ''} "
+        f"{'were' if n != 1 else 'was'} tested via HTTP load testing."
+    )
+
 
 # ── PDF Library (optional) ──
 
@@ -183,8 +229,13 @@ def render_understanding(report: DiagnosticReport, edition: int) -> str:
         lines.append(f"- Total errors: {report.total_errors}")
     lines.append("")
 
+    # Partition http_tested out of incomplete tests
+    http_tested, other_incomplete = _partition_http_tested(
+        report.incomplete_tests,
+    )
+
     # Findings grouped by severity
-    all_findings = list(report.findings) + list(report.incomplete_tests)
+    all_findings = list(report.findings) + other_incomplete
     severity_groups = {"critical": [], "warning": [], "info": []}
     for f in all_findings:
         severity_groups.get(f.severity, severity_groups["info"]).append(f)
@@ -199,18 +250,34 @@ def render_understanding(report: DiagnosticReport, edition: int) -> str:
         for f in group:
             _render_understanding_finding(lines, f)
 
-    # Degradation curves
+    # HTTP-tested summary (single line, not individual findings)
+    if http_tested:
+        lines.append(f"*{_http_tested_summary(http_tested)}*")
+        lines.append("")
+
+    # Degradation curves (humanised labels)
     if report.degradation_points:
         lines.append("## Performance Degradation")
         lines.append("")
         for dp in report.degradation_points:
-            lines.append(f"### {dp.scenario_name}")
+            name = _describe_scenario(dp.scenario_name) or dp.scenario_name
+            metric_label = _metric_label(dp.metric)
+            if metric_label:
+                name = f"{metric_label} — {name}"
+            if dp.group_count > 1:
+                name += f" (and {dp.group_count - 1} similar)"
+            lines.append(f"### {name}")
             lines.append("")
-            if dp.description:
+            narrative = _build_degradation_narrative(dp)
+            if narrative:
+                lines.append(narrative)
+                lines.append("")
+            elif dp.description:
                 lines.append(dp.description)
                 lines.append("")
             if dp.breaking_point:
-                lines.append(f"Breaking point: **{dp.breaking_point}**")
+                bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
+                lines.append(f"Breaking point: **at {bp_desc}**")
                 lines.append("")
 
     # Confidence note
@@ -293,8 +360,9 @@ def render_fixes(report: DiagnosticReport, edition: int) -> str:
     )
     lines.append("")
 
-    # Collect all findings (regular + incomplete)
-    all_findings = list(report.findings) + list(report.incomplete_tests)
+    # Collect all findings (regular + incomplete, excluding http_tested)
+    _, other_incomplete = _partition_http_tested(report.incomplete_tests)
+    all_findings = list(report.findings) + other_incomplete
 
     if not all_findings:
         lines.append("No findings to investigate.")
@@ -752,8 +820,13 @@ def render_understanding_pdf(
     if report.total_errors:
         pdf.bullet(f"Total errors: {report.total_errors}")
 
+    # Partition http_tested out of incomplete tests
+    http_tested, other_incomplete = _partition_http_tested(
+        report.incomplete_tests,
+    )
+
     # Findings grouped by severity
-    all_findings = list(report.findings) + list(report.incomplete_tests)
+    all_findings = list(report.findings) + other_incomplete
     severity_groups: dict[str, list] = {"critical": [], "warning": [], "info": []}
     for f in all_findings:
         severity_groups.get(f.severity, severity_groups["info"]).append(f)
@@ -766,17 +839,34 @@ def render_understanding_pdf(
         for f in group:
             _render_pdf_finding(pdf, f)
 
-    # Degradation curves
+    # HTTP-tested summary (single line, not individual findings)
+    if http_tested:
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.set_text_color(*_LIGHT_GREY)
+        pdf.multi_cell(0, 5, _safe_text(_http_tested_summary(http_tested)))
+        pdf.ln(3)
+
+    # Degradation curves (humanised labels)
     if report.degradation_points:
         pdf.section_heading("Performance Degradation")
         for dp in report.degradation_points:
-            pdf.section_heading(dp.scenario_name, level=3)
-            if dp.description:
+            name = _describe_scenario(dp.scenario_name) or dp.scenario_name
+            metric_label = _metric_label(dp.metric)
+            if metric_label:
+                name = f"{metric_label} — {name}"
+            if dp.group_count > 1:
+                name += f" (and {dp.group_count - 1} similar)"
+            pdf.section_heading(_safe_text(name), level=3)
+            narrative = _build_degradation_narrative(dp)
+            if narrative:
+                pdf.body_text(narrative)
+            elif dp.description:
                 pdf.body_text(dp.description)
             if dp.breaking_point:
+                bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
                 pdf.set_font("Helvetica", "B", 11)
                 pdf.set_text_color(*_BODY_GREY)
-                pdf.cell(0, 6, f"Breaking point: {dp.breaking_point}")
+                pdf.cell(0, 6, _safe_text(f"Breaking point: at {bp_desc}"))
                 pdf.ln(4)
 
     # Confidence note
@@ -820,8 +910,9 @@ def render_fixes_pdf(
         "(Claude Code, Cursor, Copilot, ChatGPT)."
     )
 
-    # Collect all findings
-    all_findings = list(report.findings) + list(report.incomplete_tests)
+    # Collect all findings (excluding http_tested)
+    _, other_incomplete = _partition_http_tested(report.incomplete_tests)
+    all_findings = list(report.findings) + other_incomplete
     if not all_findings:
         pdf.body_text("No findings to investigate.")
         return bytes(pdf.output())

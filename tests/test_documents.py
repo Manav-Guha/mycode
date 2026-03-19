@@ -242,10 +242,13 @@ class TestRenderUnderstanding:
         assert "Memory leak in data processing" in md
         assert "Peak memory: 450MB" in md
 
-    def test_degradation_points(self, sample_report):
+    def test_degradation_points_humanised(self, sample_report):
         md = render_understanding(sample_report, 1)
         assert "Performance Degradation" in md
-        assert "concurrent_flask_requests" in md
+        # Raw scenario name should NOT appear
+        assert "concurrent_flask_requests" not in md
+        # Humanised label should appear
+        assert "Response time under load" in md
 
     def test_confidence_note(self, sample_report):
         md = render_understanding(sample_report, 1)
@@ -899,4 +902,154 @@ class TestPdfRendering:
         )
         # Should not raise FPDFUnicodeEncodingException
         pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+
+# ── Issue 1: Degradation humanisation in documents ──
+
+
+class TestDegradationHumanisation:
+    """Test that degradation curves use humanised labels in all renderers."""
+
+    def test_markdown_uses_describe_scenario(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="coupling_compute_streamlit_markdown",
+                    metric="execution_time_ms",
+                    steps=[("compute_50000", 100.0), ("compute_100000", 500.0)],
+                    breaking_point="compute_100000",
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        # Raw names should NOT appear
+        assert "coupling_compute_streamlit_markdown" not in md
+        assert "compute_50000" not in md
+        assert "compute_100000" not in md
+        # Humanised labels should appear
+        assert "items of data" in md
+
+    def test_markdown_breaking_point_humanised(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="flask_concurrent_request_load",
+                    metric="execution_time_ms",
+                    steps=[("concurrent_10", 50.0), ("concurrent_50", 2000.0)],
+                    breaking_point="concurrent_50",
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "50 simultaneous users" in md
+        assert "concurrent_50" not in md
+
+    def test_markdown_metric_label_prepended(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="flask_concurrent_request_load",
+                    metric="memory_peak_mb",
+                    steps=[("concurrent_5", 10.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "Memory usage under load" in md
+
+    @pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+    def test_pdf_degradation_humanised(self):
+        """PDF degradation section should not contain raw identifiers."""
+        from mycode.documents import render_understanding_pdf
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="coupling_compute_streamlit_markdown",
+                    metric="execution_time_ms",
+                    steps=[("compute_50000", 100.0), ("compute_100000", 500.0)],
+                    breaking_point="compute_100000",
+                ),
+            ],
+        )
+        # Should not raise — and should produce valid PDF
+        pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+
+# ── Issue 2: http_tested collapse ──
+
+
+class TestHttpTestedCollapse:
+    """http_tested findings should collapse into a single summary line."""
+
+    def _make_http_tested_report(self, n=6, framework="streamlit"):
+        return DiagnosticReport(
+            scenarios_run=10,
+            scenarios_passed=4,
+            scenarios_incomplete=n,
+            incomplete_tests=[
+                Finding(
+                    title=f"Could not test: scenario_{i}",
+                    severity="info",
+                    _failure_reason="http_tested",
+                    affected_dependencies=[framework],
+                )
+                for i in range(n)
+            ],
+        )
+
+    def test_understanding_md_no_individual_http_tested(self):
+        report = self._make_http_tested_report()
+        md = render_understanding(report, 1)
+        # Individual findings should not appear
+        assert "Could not test: scenario_0" not in md
+        assert "Could not test: scenario_5" not in md
+        # Summary line should appear
+        assert "6 streamlit scenarios were tested via HTTP load testing." in md
+
+    def test_fixes_md_excludes_http_tested(self):
+        report = self._make_http_tested_report()
+        md = render_fixes(report, 1)
+        assert "Could not test: scenario_0" not in md
+
+    def test_mixed_incomplete_preserves_others(self):
+        """Non-http_tested incomplete findings still appear individually."""
+        report = DiagnosticReport(
+            incomplete_tests=[
+                Finding(
+                    title="Could not test: db query",
+                    severity="info",
+                    _failure_reason="runtime_context_required",
+                    affected_dependencies=["sqlalchemy"],
+                    source_file="db.py",
+                ),
+                Finding(
+                    title="Could not test: api call",
+                    severity="info",
+                    _failure_reason="http_tested",
+                    affected_dependencies=["flask"],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        # runtime_context_required finding still appears
+        assert "Could not test: db query" in md
+        # http_tested collapsed
+        assert "Could not test: api call" not in md
+        assert "1 flask scenario was tested via HTTP load testing." in md
+
+    @pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+    def test_pdf_understanding_no_individual_http_tested(self):
+        from mycode.documents import render_understanding_pdf
+        report = self._make_http_tested_report()
+        # Should produce valid PDF without individual http_tested findings
+        pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+    @pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+    def test_pdf_fixes_excludes_http_tested(self):
+        from mycode.documents import render_fixes_pdf
+        report = self._make_http_tested_report()
+        pdf_bytes = render_fixes_pdf(report, edition=1)
         assert pdf_bytes[:5] == b"%PDF-"

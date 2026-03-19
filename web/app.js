@@ -493,14 +493,57 @@ function renderFinding(f) {
     return html;
 }
 
+function humanizeStepLabel(label) {
+    if (!label) return label;
+    const s = String(label);
+    let m;
+    if ((m = s.match(/^data_size_(\d+)$/))) return Number(m[1]).toLocaleString() + " items";
+    if ((m = s.match(/^concurrent_(\d+)$/))) return Number(m[1]).toLocaleString() + " simultaneous users";
+    if ((m = s.match(/^api_concurrency_(\d+)$/))) return Number(m[1]).toLocaleString() + " concurrent API calls";
+    if ((m = s.match(/^wsgi_concurrent_(\d+)$/))) return Number(m[1]).toLocaleString() + " concurrent requests";
+    if ((m = s.match(/^async_handlers_(\d+)$/))) return Number(m[1]).toLocaleString() + " async handlers";
+    if ((m = s.match(/^async_load_(\d+)$/))) return Number(m[1]).toLocaleString() + " concurrent promises";
+    if ((m = s.match(/^sync_threadpool_(\d+)$/))) return Number(m[1]).toLocaleString() + " threads in pool";
+    if ((m = s.match(/^sqlite_writers_(\d+)$/))) return Number(m[1]).toLocaleString() + " concurrent writers";
+    if ((m = s.match(/^state_cycles_(\d+)$/))) return Number(m[1]).toLocaleString() + " state mutation cycles";
+    if ((m = s.match(/^batch_(\d+)$/))) return Number(m[1]) === 0 ? "first iteration" : "iteration " + Number(m[1]).toLocaleString();
+    if ((m = s.match(/^io_size_(\d+)$/))) {
+        const size = Number(m[1]);
+        if (size >= 1000000) return Math.round(size / 1000000) + "MB of data";
+        if (size >= 1000) return Math.round(size / 1000) + "KB of data";
+        return size.toLocaleString() + " bytes of data";
+    }
+    if ((m = s.match(/^gil_threads_(\d+)$/))) return m[1] + " parallel threads";
+    if ((m = s.match(/^compute_(\d+)$/))) return Number(m[1]).toLocaleString() + " items of data";
+    if ((m = s.match(/^rerun_rows_(\d+)$/))) return Number(m[1]).toLocaleString() + " rows of data";
+    return s.replace(/_/g, " ");
+}
+
+function humanizeMetricLabel(metric) {
+    if (metric === "execution_time_ms") return "Response time under load";
+    if (metric === "memory_peak_mb" || metric === "memory_mb" || metric === "memory_growth_mb") return "Memory usage under load";
+    if (metric === "error_count") return "Errors under load";
+    return "";
+}
+
+function humanizeScenarioName(name) {
+    if (!name) return name;
+    const s = name.replace(/_/g, " ");
+    // Capitalize first letter
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function renderDegradations(degradations) {
     let html = `<div class="degradation-section">`;
     html += `<div class="section-title">Performance degradation</div>`;
 
     for (const d of degradations) {
         html += `<div class="degradation-card">`;
-        html += `<div class="degradation-title">${escapeHtml(d.scenario_name || "").replace(/_/g, " ")}</div>`;
-        html += `<div class="degradation-metric">${escapeHtml(d.metric || "")}</div>`;
+        let title = humanizeScenarioName(d.scenario_name || "");
+        const metricLabel = humanizeMetricLabel(d.metric || "");
+        if (metricLabel) title = metricLabel + " — " + title;
+        if (d.group_count > 1) title += ` (and ${d.group_count - 1} similar)`;
+        html += `<div class="degradation-title">${escapeHtml(title)}</div>`;
 
         const steps = d.steps || [];
         if (steps.length > 0) {
@@ -513,9 +556,10 @@ function renderDegradations(degradations) {
                 const ratio = Math.abs(value) / maxVal;
                 const color = ratio < 0.4 ? "green" : ratio < 0.7 ? "amber" : "red";
                 const displayVal = formatMetricValue(value, d.metric);
+                const stepLabel = humanizeStepLabel(label);
 
                 html += `<div class="degradation-step">`;
-                html += `<span class="degradation-step-label">${escapeHtml(String(label))}</span>`;
+                html += `<span class="degradation-step-label">${escapeHtml(stepLabel)}</span>`;
                 html += `<div class="degradation-bar-track"><div class="degradation-bar-fill ${color}" style="width:${pct}%"></div></div>`;
                 html += `<span class="degradation-step-value">${displayVal}</span>`;
                 html += `</div>`;
@@ -524,7 +568,8 @@ function renderDegradations(degradations) {
         }
 
         if (d.breaking_point) {
-            html += `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--red)">Breaking point: ${escapeHtml(d.breaking_point)}</div>`;
+            const bpLabel = humanizeStepLabel(d.breaking_point);
+            html += `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--red)">Breaking point: at ${escapeHtml(bpLabel)}</div>`;
         }
 
         html += `</div>`;
@@ -545,16 +590,37 @@ function formatMetricValue(value, metric) {
 }
 
 function renderIncomplete(incomplete) {
-    let html = `<div class="incomplete-section">`;
-    html += `<button class="incomplete-toggle" onclick="toggleIncomplete(this)">`;
-    html += `<span class="arrow">&#9654;</span> ${incomplete.length} test(s) myCode could not run`;
-    html += `</button>`;
-    html += `<div class="incomplete-list hidden" id="incomplete-list">`;
-    html += `<div class="findings-list">`;
-    for (const f of incomplete) {
-        html += renderFinding(f);
+    // Separate http_tested from other incomplete findings
+    const httpTested = incomplete.filter(f => f.failure_reason === "http_tested");
+    const other = incomplete.filter(f => f.failure_reason !== "http_tested");
+
+    let html = "";
+
+    // HTTP-tested summary (single line, never individual cards)
+    if (httpTested.length > 0) {
+        const framework = (httpTested[0].affected_dependencies || [])[0] || "framework";
+        const n = httpTested.length;
+        const verb = n === 1 ? "was" : "were";
+        const plural = n === 1 ? "" : "s";
+        html += `<div class="incomplete-section" style="padding:0.5rem 0;font-style:italic;color:var(--text-secondary);font-size:0.95rem">`;
+        html += `${n} ${escapeHtml(framework)} scenario${plural} ${verb} tested via HTTP load testing.`;
+        html += `</div>`;
     }
-    html += `</div></div></div>`;
+
+    // Other incomplete findings (collapsible, individual cards)
+    if (other.length > 0) {
+        html += `<div class="incomplete-section">`;
+        html += `<button class="incomplete-toggle" onclick="toggleIncomplete(this)">`;
+        html += `<span class="arrow">&#9654;</span> ${other.length} test(s) myCode could not run`;
+        html += `</button>`;
+        html += `<div class="incomplete-list hidden" id="incomplete-list">`;
+        html += `<div class="findings-list">`;
+        for (const f of other) {
+            html += renderFinding(f);
+        }
+        html += `</div></div></div>`;
+    }
+
     return html;
 }
 

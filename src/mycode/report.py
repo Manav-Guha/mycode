@@ -774,6 +774,21 @@ def _render_incomplete_text(
     """Render incomplete tests grouped by failure reason for plain text."""
     groups = _group_by_failure_reason(findings)
     for reason, group in groups.items():
+        # http_tested: single summary line, never individual findings
+        if reason == "http_tested":
+            n = len(group)
+            framework = ""
+            for f in group:
+                if f.affected_dependencies:
+                    framework = f.affected_dependencies[0]
+                    break
+            label = f"{framework} " if framework else "framework "
+            sections.append(
+                f"\n    {n} {label}scenario{'s' if n != 1 else ''} "
+                f"{'were' if n != 1 else 'was'} tested via HTTP load testing."
+            )
+            continue
+
         header = _FAILURE_REASON_HEADERS.get(reason, "Other Issues")
         explanation = _runtime_ctx_explanation(http_ran) if reason == "runtime_context_required" else _FAILURE_REASON_EXPLANATIONS.get(
             reason,
@@ -803,6 +818,22 @@ def _render_incomplete_markdown(
     """Render incomplete tests grouped by failure reason for markdown."""
     groups = _group_by_failure_reason(findings)
     for reason, group in groups.items():
+        # http_tested: single summary line, never individual findings
+        if reason == "http_tested":
+            n = len(group)
+            framework = ""
+            for f in group:
+                if f.affected_dependencies:
+                    framework = f.affected_dependencies[0]
+                    break
+            label = f"{framework} " if framework else "framework "
+            lines.append(
+                f"*{n} {label}scenario{'s' if n != 1 else ''} "
+                f"{'were' if n != 1 else 'was'} tested via HTTP load testing.*"
+            )
+            lines.append("")
+            continue
+
         header = _FAILURE_REASON_HEADERS.get(reason, "Other Issues")
         explanation = _runtime_ctx_explanation(http_ran) if reason == "runtime_context_required" else _FAILURE_REASON_EXPLANATIONS.get(
             reason,
