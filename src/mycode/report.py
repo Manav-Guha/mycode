@@ -426,11 +426,18 @@ class DiagnosticReport:
 
         lines.append(f"**Overall:** {score_label}")
         lines.append("")
-        lines.append(
-            f"myCode ran **{total}** stress tests against your project. "
+        exec_summary = (
+            f"We tested your {display_name} with **{total}** stress tests. "
             f"**{passed}** passed cleanly"
             + (f", **{failed}** found issues." if failed else ".")
         )
+        if critical_count > 0 and self.findings:
+            first_critical = next(
+                (f for f in self.findings if f.severity == "critical"), None
+            )
+            if first_critical:
+                exec_summary += f" **Key issue:** {first_critical.title}."
+        lines.append(exec_summary)
         lines.append("")
 
         # Scenario coverage summary
@@ -573,6 +580,18 @@ class DiagnosticReport:
             lines.append("")
             for vf in self.version_flags:
                 lines.append(f"- {vf}")
+            lines.append("")
+
+        # What To Do Next
+        if self.findings:
+            lines.append("## What To Do Next")
+            lines.append("")
+            lines.append(
+                "Copy the findings above and paste them into your coding "
+                "agent (Claude Code, Cursor, Copilot). The specific issues "
+                "and affected dependencies are formatted for an AI to "
+                "understand and investigate."
+            )
             lines.append("")
 
         # Footer
@@ -3276,6 +3295,17 @@ _TEMPLATE_DESCRIPTIONS: dict[str, str] = {
     "array_size_scaling": "working with larger arrays",
     "matrix_operation_scaling": "heavy number crunching",
     "concurrent_array_access": "accessing data from multiple threads",
+    "edge_case_inputs": "handling unusual or extreme inputs",
+    "repeated_allocation_memory": "allocating memory repeatedly",
+    "async_concurrent_load": "handling many requests at once",
+    "sync_handler_thread_exhaustion": "running synchronous code under load",
+    "pydantic_validation_stress": "validating request data at scale",
+    "websocket_connection_scaling": "handling many open connections",
+    "large_response_streaming": "streaming large responses",
+    "middleware_chain_overhead": "processing middleware layers",
+    "async_error_handling": "handling errors in async operations",
+    "memory_under_load": "managing memory under heavy traffic",
+    "large_payload_handling": "processing large request payloads",
 }
 
 
@@ -3361,7 +3391,26 @@ def _describe_scenario(scenario_name: str) -> str:
         dep = name.split("_")[0] if "_" in name else name
         return f"general usage patterns for {dep}"
 
-    # Last resort: strip dep prefix and humanize the template name
+    # Last resort: strip known prefixes so raw identifiers don't leak.
+    # coupling_compute_MyModule_foo → "running calculations (MyModule foo)"
+    _COUPLING_PREFIXES = (
+        "coupling_compute_", "coupling_api_", "coupling_render_",
+        "coupling_state_", "coupling_errorhandler_", "coupling_behavior_",
+        "coupling_",
+    )
+    for prefix in _COUPLING_PREFIXES:
+        if name.startswith(prefix):
+            remainder = scenario_name[len(prefix):]
+            label = _humanize_identifier(remainder)
+            if prefix.startswith("coupling_compute"):
+                return f"running calculations ({label})"
+            if prefix.startswith("coupling_api"):
+                return f"connecting to external services ({label})"
+            if prefix.startswith("coupling_render"):
+                return f"rendering output ({label})"
+            return f"component interaction ({label})"
+
+    # Strip dep prefix and humanize
     dep_parts = name.split("_", 1)
     if len(dep_parts) > 1 and dep_parts[1]:
         return dep_parts[1].replace("_", " ")
@@ -3582,7 +3631,7 @@ def _describe_step(step_name: str) -> str:
 
     m = re.match(r"compute_(\d+)", step_name)
     if m:
-        return f"{int(m.group(1)):,} computation cycles"
+        return f"{int(m.group(1)):,} items of data"
 
     m = re.match(r"rerun_rows_(\d+)", step_name)
     if m:
@@ -3590,18 +3639,55 @@ def _describe_step(step_name: str) -> str:
 
     m = re.match(r"cached_rows_(\d+)", step_name)
     if m:
-        return f"{int(m.group(1)):,} cached entries"
+        return f"{int(m.group(1)):,} rows of cached data"
 
     m = re.match(r"table_serialize_(\d+)kb", step_name, re.IGNORECASE)
     if m:
         kb = int(m.group(1))
         if kb >= 1000:
-            return f"{kb // 1000}MB of serialised data"
-        return f"{kb}KB of serialised data"
+            return f"serialising a {kb // 1000}MB table"
+        return f"serialising a {kb}KB table"
 
     m = re.match(r"session_reruns_(\d+)", step_name)
     if m:
-        return f"{int(m.group(1)):,} session reruns"
+        return f"{int(m.group(1)):,} page refreshes"
+
+    m = re.match(r"render_nodes_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} UI elements"
+
+    if step_name == "render_memory_growth":
+        return "repeated rendering cycles"
+
+    m = re.match(r"error_flood_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} simultaneous errors"
+
+    m = re.match(r"session_writes_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} session write cycles"
+
+    m = re.match(r"validation_fields_(\d+)", step_name)
+    if m:
+        return f"{int(m.group(1)):,} fields to validate"
+
+    m = re.match(r"wsgi_payload_(\d+)kb", step_name, re.IGNORECASE)
+    if m:
+        kb = int(m.group(1))
+        if kb >= 1000:
+            return f"a {kb // 1000}MB request payload"
+        return f"a {kb}KB request payload"
+
+    if step_name == "api_timeout_handling":
+        return "slow API responses"
+
+    if step_name == "edge_no_callables":
+        return "empty input"
+
+    # HTTP load testing labels: "N concurrent"
+    m = re.match(r"(\d+) concurrent", step_name)
+    if m:
+        return f"{int(m.group(1)):,} concurrent connections"
 
     # Generic fallback: strip underscores, add spaces, capitalise
     # Only apply if the name has a recognisable word_number pattern
@@ -3838,7 +3924,41 @@ def _build_degradation_narrative(dp: "DegradationPoint") -> str:
         else:
             parts.append(f"With {step_desc}, {value:.2f}")
 
-    return ". ".join(parts) + "."
+    narrative = ". ".join(parts) + "."
+
+    # Append consequence context — the "so what" for non-technical readers
+    consequence = _consequence_line(dp.metric, dp.steps)
+    if consequence:
+        narrative += " " + consequence
+
+    return narrative
+
+
+def _consequence_line(metric: str, steps: list[tuple[str, float]]) -> str:
+    """Return a plain-language consequence for the final degradation value."""
+    if not steps:
+        return ""
+    last_val = steps[-1][1]
+
+    if metric in ("execution_time_ms", "response_time_ms"):
+        if last_val < 100:
+            return "This is within acceptable range — users won't notice."
+        if last_val >= 1000:
+            return "The application will feel unresponsive."
+        if last_val >= 500:
+            return "Users will notice significant delays at this point."
+        return ""
+
+    if metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb"):
+        if last_val > 50:
+            sessions = int(2048 / last_val)
+            return (
+                f"At this memory usage, a typical 2GB server supports "
+                f"approximately {sessions} concurrent sessions."
+            )
+        return ""
+
+    return ""
 
 
 def _select_key_points(

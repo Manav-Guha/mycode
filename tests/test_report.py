@@ -37,6 +37,8 @@ from mycode.report import (
     _human_metric,
     _human_time,
     _humanize_title_name,
+    _build_degradation_narrative,
+    _consequence_line,
     _is_significant_degradation,
     _is_significant_finding,
     _resolve_source_file,
@@ -4486,3 +4488,209 @@ class TestStartupFailureVersionEnrichment:
         finding = report.findings[0]
         assert "version gap" not in finding.description
         assert finding.failure_domain == ""
+
+
+# ── Report Humanisation Tests ──
+
+
+class TestDescribeScenarioHumanisation:
+    """Test that scenario names produce user-readable descriptions."""
+
+    def test_coupling_compute_streamlit(self):
+        result = _describe_scenario("coupling_compute_streamlit_markdown")
+        assert "running calculations" in result
+
+    def test_coupling_compute_long_path(self):
+        result = _describe_scenario(
+            "coupling_compute_My_Projects_app_render_paginated_table"
+        )
+        assert "running calculations" in result
+        assert "coupling_compute" not in result
+
+    def test_template_match_still_works(self):
+        result = _describe_scenario("pandas_data_volume_scaling")
+        assert result == "processing larger amounts of data"
+
+    def test_unknown_scenario_no_raw_underscores(self):
+        """Fallback should not contain coupling_ prefixes."""
+        result = _describe_scenario("coupling_api_some_module_call")
+        assert "coupling_api" not in result
+        assert "connecting" in result
+
+    def test_new_template_edge_case_inputs(self):
+        result = _describe_scenario("streamlit_edge_case_inputs")
+        assert result == "handling unusual or extreme inputs"
+
+
+class TestDescribeStepHumanisation:
+    """Test that step names produce user-readable labels."""
+
+    def test_compute_50000(self):
+        assert _describe_step("compute_50000") == "50,000 items of data"
+
+    def test_table_serialize_10kb(self):
+        result = _describe_step("table_serialize_10kb")
+        assert "10KB table" in result
+
+    def test_table_serialize_1000kb(self):
+        result = _describe_step("table_serialize_1000kb")
+        assert "1MB table" in result
+
+    def test_cached_rows_1000(self):
+        assert _describe_step("cached_rows_1000") == "1,000 rows of cached data"
+
+    def test_session_reruns_500(self):
+        assert _describe_step("session_reruns_500") == "500 page refreshes"
+
+    def test_render_nodes_100(self):
+        assert _describe_step("render_nodes_100") == "100 UI elements"
+
+    def test_wsgi_payload_50kb(self):
+        result = _describe_step("wsgi_payload_50kb")
+        assert "50KB" in result
+
+    def test_validation_fields_20(self):
+        assert _describe_step("validation_fields_20") == "20 fields to validate"
+
+    def test_http_concurrent_label(self):
+        assert _describe_step("10 concurrent") == "10 concurrent connections"
+
+    def test_error_flood_100(self):
+        assert _describe_step("error_flood_100") == "100 simultaneous errors"
+
+    def test_session_writes_50(self):
+        assert _describe_step("session_writes_50") == "50 session write cycles"
+
+    def test_render_memory_growth(self):
+        assert _describe_step("render_memory_growth") == "repeated rendering cycles"
+
+    def test_api_timeout_handling(self):
+        assert _describe_step("api_timeout_handling") == "slow API responses"
+
+
+class TestConsequenceLine:
+    """Test consequence context appended to degradation narratives."""
+
+    def test_time_over_1000_unresponsive(self):
+        result = _consequence_line(
+            "execution_time_ms",
+            [("s1", 10.0), ("s2", 500.0), ("s3", 2000.0)],
+        )
+        assert "unresponsive" in result
+
+    def test_time_under_100_acceptable(self):
+        result = _consequence_line(
+            "execution_time_ms",
+            [("s1", 5.0), ("s2", 50.0)],
+        )
+        assert "acceptable range" in result
+
+    def test_time_500_delays(self):
+        result = _consequence_line(
+            "execution_time_ms",
+            [("s1", 10.0), ("s2", 600.0)],
+        )
+        assert "delays" in result
+
+    def test_memory_over_50_server_estimate(self):
+        result = _consequence_line(
+            "memory_peak_mb",
+            [("s1", 10.0), ("s2", 100.0)],
+        )
+        assert "server supports" in result
+        assert "20" in result  # 2048 / 100 = 20
+
+    def test_memory_under_50_no_consequence(self):
+        result = _consequence_line(
+            "memory_peak_mb",
+            [("s1", 5.0), ("s2", 30.0)],
+        )
+        assert result == ""
+
+    def test_narrative_includes_consequence(self):
+        """Full narrative should include consequence for slow responses."""
+        dp = DegradationPoint(
+            scenario_name="test_scenario",
+            metric="execution_time_ms",
+            steps=[("data_size_100", 10.0), ("data_size_10000", 1500.0)],
+        )
+        narrative = _build_degradation_narrative(dp)
+        assert "unresponsive" in narrative
+
+    def test_http_response_time_consequence(self):
+        """response_time_ms metric (HTTP) also gets consequence."""
+        result = _consequence_line(
+            "response_time_ms",
+            [("1 concurrent", 2.0), ("100 concurrent", 5.0)],
+        )
+        assert "acceptable range" in result
+
+
+class TestMarkdownExecutiveSummary:
+    """Test executive summary and structural improvements in as_markdown."""
+
+    def test_exec_summary_contains_project_description(self):
+        report = DiagnosticReport(
+            project_description="Your financial dashboard built with streamlit",
+            scenarios_run=10,
+            scenarios_passed=8,
+            scenarios_failed=2,
+        )
+        md = report.as_markdown()
+        assert "financial dashboard" in md
+
+    def test_exec_summary_references_critical_finding(self):
+        report = DiagnosticReport(
+            project_description="Your dashboard",
+            scenarios_run=5,
+            scenarios_passed=3,
+            scenarios_failed=2,
+            findings=[
+                Finding(
+                    title="Server crashed under load",
+                    severity="critical",
+                    category="http_load_testing",
+                    description="The server crashed.",
+                ),
+            ],
+        )
+        md = report.as_markdown()
+        assert "Key issue" in md
+        assert "Server crashed under load" in md
+
+    def test_exec_summary_no_critical_no_key_issue(self):
+        report = DiagnosticReport(
+            project_description="Your app",
+            scenarios_run=5,
+            scenarios_passed=5,
+            scenarios_failed=0,
+        )
+        md = report.as_markdown()
+        assert "Key issue" not in md
+
+    def test_what_to_do_next_present(self):
+        report = DiagnosticReport(
+            scenarios_run=3,
+            scenarios_passed=2,
+            scenarios_failed=1,
+            findings=[
+                Finding(
+                    title="Some issue",
+                    severity="warning",
+                    description="Details.",
+                ),
+            ],
+        )
+        md = report.as_markdown()
+        assert "## What To Do Next" in md
+        assert "coding agent" in md
+
+    def test_what_to_do_next_absent_when_no_findings(self):
+        report = DiagnosticReport(
+            scenarios_run=3,
+            scenarios_passed=3,
+            scenarios_failed=0,
+            findings=[],
+        )
+        md = report.as_markdown()
+        assert "What To Do Next" not in md
