@@ -212,40 +212,78 @@ def _render_perf_table_md(lines: list[str], points: list[DegradationPoint]) -> N
     lines.append("")
 
 
+def _verdict_color(verdict: str) -> tuple:
+    """Return text colour for a verdict string."""
+    vl = verdict.lower()
+    if "no issues" in vl or "fine" in vl or "no errors" in vl or "stable" in vl:
+        return _GREEN
+    if "noticeable" in vl:
+        return _AMBER_TEXT
+    if "slow" in vl or "heavy" in vl or "unresponsive" in vl or "error" in vl:
+        return _RED
+    return _BODY
+
+
 def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
-    """Render degradation points as a PDF performance summary table."""
+    """Render degradation points as a styled PDF performance summary table."""
     rows = _dedup_by_label(points)
     if not rows:
         return
 
     pdf.section_heading("Performance Under Load")
+    pdf.ln(2)
 
-    # Column widths (mm) — total ~160mm for A4 printable area
-    col_w = [38, 29, 29, 29, 35]
+    # Column widths (mm) — total 170mm for A4 with 20mm margins
+    col_w = [45, 30, 30, 30, 35]
     headers = ["What we tested", "At low load", "At mid load", "At peak load", "Verdict"]
-    row_h = 6
-    pad = " "  # internal cell padding
+    row_h = 7
+    cell_pad_x = 2  # mm horizontal padding inside cells
 
-    # Header row
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(*_DARK_BLUE)
-    pdf.set_fill_color(240, 248, 255)
+    # Header row — dark blue background, white text
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*_WHITE)
+    pdf.set_fill_color(*_BRAND)
+    pdf.set_draw_color(*_RULE)
+    pdf.set_line_width(0.18)
     for i, hdr in enumerate(headers):
-        pdf.cell(col_w[i], row_h, f"{pad}{_safe_text(hdr)}{pad}", border=1, fill=True)
+        pdf.cell(col_w[i], row_h, f"  {_safe_text(hdr)}", border=1, fill=True)
     pdf.ln(row_h)
 
-    # Data rows
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(*_BODY_GREY)
-
-    for dp in rows:
+    # Data rows — alternating white/grey
+    for row_idx, dp in enumerate(rows):
         label, low, mid, high, v = _row_cells(dp)
-        cells = [label, low, mid, high, v]
+        is_alt = row_idx % 2 == 1
+
+        if is_alt:
+            pdf.set_fill_color(*_TABLE_ALT)
+        else:
+            pdf.set_fill_color(*_WHITE)
+
+        pdf.set_draw_color(*_RULE)
+        pdf.set_line_width(0.18)
+
+        cells = [label, low, mid, high]
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*_BODY)
         for i, cell_text in enumerate(cells):
-            pdf.cell(col_w[i], row_h, f"{pad}{_safe_text(cell_text)}{pad}", border=1)
+            pdf.cell(
+                col_w[i], row_h, f"  {_safe_text(cell_text)}",
+                border=1, fill=True,
+            )
+
+        # Verdict column — bold, coloured
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*_verdict_color(v))
+        pdf.cell(
+            col_w[4], row_h, f"  {_safe_text(v)}",
+            border=1, fill=True,
+        )
         pdf.ln(row_h)
 
-    pdf.ln(3)
+    # Reset
+    pdf.set_text_color(*_BODY)
+    pdf.set_line_width(0.35)
+    pdf.ln(6)
 
 
 # ── PDF Library (optional) ──
@@ -854,21 +892,41 @@ def _category_fallback_guidance(category: str) -> str:
 
 # ── PDF Rendering ──
 
-# Colour constants
-_DARK_BLUE = (26, 58, 92)     # #1a3a5c
-_BODY_GREY = (51, 51, 51)     # #333333
-_LIGHT_GREY = (128, 128, 128) # #808080
-_RED = (220, 53, 69)          # #dc3545
-_AMBER = (255, 193, 7)        # #ffc107
-_BLUE = (13, 110, 253)        # #0d6efd
+# Colour palette
+_BRAND = (26, 58, 92)            # #1a3a5c — brand, H1
+_HEADING = (51, 51, 51)          # #333333 — section headings, body
+_BODY = (51, 51, 51)             # #333333
+_SUBTLE = (136, 136, 136)        # #888888 — tagline, meta, footer
+_RULE = (204, 204, 204)          # #cccccc — horizontal rules, table borders
+_RED = (220, 53, 69)             # #dc3545 — critical
+_AMBER = (255, 193, 7)           # #ffc107 — warning badge
+_AMBER_TEXT = (133, 100, 4)      # #856404 — warning verdict text
+_GREEN = (40, 167, 69)           # #28a745 — positive verdict
+_BLUE = (13, 110, 253)           # #0d6efd — info badge
+_CALLOUT_BG = (234, 244, 251)    # #eaf4fb
+_CALLOUT_BORDER = (184, 218, 255)  # #b8daff
+_CODE_BG = (245, 245, 245)       # #f5f5f5
+_CODE_BORDER = (221, 221, 221)   # #dddddd
+_TABLE_ALT = (249, 249, 249)     # #f9f9f9
 _WHITE = (255, 255, 255)
 _BLACK = (0, 0, 0)
+
+# Keep old names as aliases for any external references
+_DARK_BLUE = _BRAND
+_BODY_GREY = _BODY
+_LIGHT_GREY = _SUBTLE
 
 _SEVERITY_COLORS: dict[str, tuple[tuple, tuple]] = {
     # (background, text)
     "critical": (_RED, _WHITE),
     "warning": (_AMBER, _BLACK),
     "info": (_BLUE, _WHITE),
+}
+
+_SEVERITY_BORDER: dict[str, tuple] = {
+    "critical": _RED,
+    "warning": _AMBER,
+    "info": _BLUE,
 }
 
 
@@ -894,21 +952,27 @@ def _make_pdf_class():
         return None
 
     class MyCodePDF(FPDF):
-        """Styled PDF with myCode header and footer on every page."""
+        """Styled PDF with myCode header and footer on every page.
+
+        Design: generous whitespace, clear hierarchy, subtle containers.
+        Professional but accessible — calm and authoritative.
+        """
 
         def header(self):
-            self.set_font("Helvetica", "B", 16)
-            self.set_text_color(*_DARK_BLUE)
+            self.set_font("Helvetica", "B", 20)
+            self.set_text_color(*_BRAND)
             self.cell(40, 10, "myCode", new_x="RIGHT")
             self.set_font("Helvetica", "I", 9)
-            self.set_text_color(*_LIGHT_GREY)
+            self.set_text_color(*_SUBTLE)
             self.cell(
                 0, 10,
                 "Stress test your AI-generated code before it breaks",
                 align="R",
             )
-            self.ln(6)
-            self.set_draw_color(*_LIGHT_GREY)
+            self.ln(4)
+            # 1pt rule
+            self.set_draw_color(*_RULE)
+            self.set_line_width(0.35)
             self.line(
                 self.l_margin, self.get_y(),
                 self.w - self.r_margin, self.get_y(),
@@ -916,98 +980,160 @@ def _make_pdf_class():
             self.ln(8)
 
         def footer(self):
-            self.set_y(-20)
-            self.set_draw_color(*_LIGHT_GREY)
+            self.set_y(-18)
+            # 1pt rule
+            self.set_draw_color(*_RULE)
+            self.set_line_width(0.35)
             self.line(
                 self.l_margin, self.get_y(),
                 self.w - self.r_margin, self.get_y(),
             )
             self.ln(3)
             self.set_font("Helvetica", "", 8)
-            self.set_text_color(*_LIGHT_GREY)
-            self.cell(0, 5, "myCode by Machine Adjacent Systems - Diagnostic tool", new_x="LEFT")
+            self.set_text_color(*_SUBTLE)
             self.cell(
-                0, 5, f"Page {self.page_no()}/{{nb}}",
-                align="R",
+                0, 4,
+                _safe_text("myCode by Machine Adjacent Systems \u2014 Diagnostic tool"),
+                new_x="LEFT",
             )
+            self.cell(0, 4, f"Page {self.page_no()}/{{nb}}", align="R")
 
         def section_heading(self, text: str, level: int = 2):
-            """Render a section heading (H1=16pt, H2=14pt, H3=12pt)."""
-            sizes = {1: 16, 2: 14, 3: 12}
-            size = sizes.get(level, 12)
+            """Render a section heading. H1=18pt, H2=14pt, H3=13pt."""
+            sizes = {1: 18, 2: 14, 3: 13}
+            size = sizes.get(level, 13)
             self.set_font("Helvetica", "B", size)
-            self.set_text_color(*_DARK_BLUE if level <= 2 else _BODY_GREY)
-            self.multi_cell(0, size * 0.5, _safe_text(text))
-            self.ln(3)
+            self.set_text_color(*(_BRAND if level == 1 else _HEADING))
+            lh = size * 0.55  # ~1.2x line height
+            self.multi_cell(0, lh, _safe_text(text))
+            self.ln(4 if level == 1 else 3)
 
         def body_text(self, text: str):
-            """Render body text in 11pt."""
+            """Render body text. 11pt, 1.4x line height, 4mm gap after."""
             self.set_font("Helvetica", "", 11)
-            self.set_text_color(*_BODY_GREY)
+            self.set_text_color(*_BODY)
             self.multi_cell(0, 6, _safe_text(text))
-            self.ln(2)
+            self.ln(4)
+
+        def body_label(self, text: str):
+            """Render a bold inline label (e.g. 'What we found:')."""
+            self.set_font("Helvetica", "B", 11)
+            self.set_text_color(*_HEADING)
+            self.cell(0, 6, _safe_text(text))
+            self.ln(4)
 
         def severity_badge(self, severity: str):
-            """Render an inline severity badge."""
+            """Render an inline severity badge with padding."""
             bg, fg = _SEVERITY_COLORS.get(severity, (_BLUE, _WHITE))
             label = severity.upper()
             self.set_font("Helvetica", "B", 9)
             w = self.get_string_width(label) + 6
-            x, y = self.get_x(), self.get_y()
             self.set_fill_color(*bg)
             self.set_text_color(*fg)
-            self.cell(w, 6, label, fill=True, new_x="RIGHT")
-            self.set_text_color(*_BODY_GREY)
-            self.cell(3, 6, " ")  # spacer
-
-        def detail_block(self, text: str):
-            """Render a quoted detail block."""
-            self.set_font("Helvetica", "I", 10)
-            self.set_text_color(*_LIGHT_GREY)
-            x = self.get_x()
-            self.set_x(x + 5)
-            self.multi_cell(0, 5, _safe_text(text[:500]))
-            self.set_x(x)
-            self.ln(2)
+            self.cell(w, 6, f" {label} ", fill=True, new_x="RIGHT")
+            self.set_text_color(*_BODY)
+            self.cell(6, 6, "")  # 6mm spacer
 
         def code_block(self, text: str):
-            """Render a code/details block with grey background."""
+            """Render a prompt box with border, background, and padding."""
+            safe = _safe_text(text[:1000])
+            x = self.l_margin
+            w = self.w - self.l_margin - self.r_margin
+            pad = 8  # mm internal padding
+
+            # Measure height needed
             self.set_font("Courier", "", 9)
-            self.set_text_color(*_BODY_GREY)
-            self.set_fill_color(245, 245, 245)
-            self.multi_cell(0, 4.5, _safe_text(text[:800]), fill=True)
-            self.ln(2)
+            self.set_xy(x + pad, self.get_y())
+            start_y = self.get_y()
+            # Dry run: measure text height
+            self.multi_cell(w - 2 * pad, 4.5, safe, dry_run=True, output="LINES")
+            line_count = len(safe.split("\n"))
+            # Estimate: each line ~4.5mm, plus wrapping
+            est_h = max(line_count * 4.5, 10) + 2 * pad
+
+            # Draw background + border
+            box_y = self.get_y()
+            self.set_fill_color(*_CODE_BG)
+            self.set_draw_color(*_CODE_BORDER)
+            self.set_line_width(0.35)
+            self.rect(x, box_y, w, est_h, style="FD")
+
+            # Render text inside
+            self.set_font("Courier", "", 9)
+            self.set_text_color(*_BODY)
+            self.set_xy(x + pad, box_y + pad)
+            self.multi_cell(w - 2 * pad, 4.5, safe)
+            actual_end = self.get_y() + pad
+
+            # If text was longer than estimate, extend
+            if actual_end > box_y + est_h:
+                real_h = actual_end - box_y
+                self.set_fill_color(*_CODE_BG)
+                self.set_draw_color(*_CODE_BORDER)
+                self.rect(x, box_y, w, real_h, style="FD")
+                # Re-render text
+                self.set_font("Courier", "", 9)
+                self.set_text_color(*_BODY)
+                self.set_xy(x + pad, box_y + pad)
+                self.multi_cell(w - 2 * pad, 4.5, safe)
+                self.set_y(self.get_y() + pad)
+            else:
+                self.set_y(box_y + est_h)
+
+            self.ln(4)
 
         def bullet(self, text: str):
-            """Render a bullet point."""
+            """Render a bullet point with 5mm indent."""
             self.set_font("Helvetica", "", 11)
-            self.set_text_color(*_BODY_GREY)
-            self.cell(5, 6, "-")
+            self.set_text_color(*_BODY)
+            x = self.get_x()
+            self.set_x(x + 5)
+            self.cell(4, 6, "-")
             self.multi_cell(0, 6, _safe_text(text))
+            self.set_x(x)
             self.ln(1)
 
         def callout_box(self, text: str):
-            """Render a prominent callout box."""
+            """Render a callout box with light blue background."""
             safe = _safe_text(text)
-            self.set_fill_color(240, 248, 255)
-            self.set_draw_color(*_DARK_BLUE)
             x = self.l_margin
-            y = self.get_y()
             w = self.w - self.l_margin - self.r_margin
-            self.set_font("Helvetica", "B", 11)
-            self.set_text_color(*_DARK_BLUE)
-            # Calculate height needed
-            self.set_xy(x + 5, y + 5)
-            self.multi_cell(w - 10, 6, safe)
-            h = self.get_y() - y + 5
+            pad = 8
+
+            # Measure
+            self.set_font("Helvetica", "", 10)
+            start_y = self.get_y()
+            # Estimate height
+            lines_est = len(safe) / ((w - 2 * pad) / 2.0)  # rough char estimate
+            est_h = max(lines_est * 5, 12) + 2 * pad
+
             # Draw box
-            self.rect(x, y, w, h, style="D")
-            self.set_fill_color(240, 248, 255)
-            self.rect(x + 0.3, y + 0.3, w - 0.6, h - 0.6, style="F")
-            # Re-render text on top of box
-            self.set_xy(x + 5, y + 5)
-            self.multi_cell(w - 10, 6, safe)
-            self.ln(5)
+            self.set_fill_color(*_CALLOUT_BG)
+            self.set_draw_color(*_CALLOUT_BORDER)
+            self.set_line_width(0.35)
+            self.rect(x, start_y, w, est_h, style="FD")
+
+            # Render text
+            self.set_font("Helvetica", "", 10)
+            self.set_text_color(*_BRAND)
+            self.set_xy(x + pad, start_y + pad)
+            self.multi_cell(w - 2 * pad, 5, safe)
+            actual_end = self.get_y() + pad
+
+            if actual_end > start_y + est_h:
+                real_h = actual_end - start_y
+                self.set_fill_color(*_CALLOUT_BG)
+                self.set_draw_color(*_CALLOUT_BORDER)
+                self.rect(x, start_y, w, real_h, style="FD")
+                self.set_font("Helvetica", "", 10)
+                self.set_text_color(*_BRAND)
+                self.set_xy(x + pad, start_y + pad)
+                self.multi_cell(w - 2 * pad, 5, safe)
+                self.set_y(self.get_y() + pad)
+            else:
+                self.set_y(start_y + est_h)
+
+            self.ln(6)
 
     return MyCodePDF
 
@@ -1024,23 +1150,24 @@ def render_understanding_pdf(
         raise ImportError("fpdf2 is required for PDF generation")
 
     pdf = PDFClass(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=25)
-    pdf.set_margins(25, 25, 25)
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_margins(20, 15, 20)
     pdf.alias_nb_pages()
     pdf.add_page()
 
     # Title
     pdf.section_heading("Understanding Your Results", level=1)
     pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(*_LIGHT_GREY)
+    pdf.set_text_color(*_SUBTLE)
     date = _dt.date.today().isoformat()
     pdf.cell(0, 5, f"Edition {edition}  |  {date}")
-    pdf.ln(8)
+    pdf.ln(10)
 
     # Project summary
     if report.project_description:
         pdf.section_heading("Project Summary")
         pdf.body_text(report.project_description)
+        pdf.ln(2)
 
     # Dependency stack
     has_deps = report.recognized_dep_count > 0 or report.unrecognized_deps
@@ -1061,6 +1188,7 @@ def render_understanding_pdf(
                 f"{len(report.unrecognized_deps)} dependencies tested "
                 f"with usage-based analysis: {names}{suffix}"
             )
+        pdf.ln(2)
 
     # Test overview
     pdf.section_heading("Test Overview")
@@ -1071,6 +1199,7 @@ def render_understanding_pdf(
         pdf.bullet(f"Could not test: {report.scenarios_incomplete}")
     if report.total_errors:
         pdf.bullet(f"Total errors: {report.total_errors}")
+    pdf.ln(6)
 
     # Partition http_tested out of incomplete tests
     http_tested, other_incomplete = _partition_http_tested(
@@ -1087,25 +1216,26 @@ def render_understanding_pdf(
         group = severity_groups[severity]
         if not group:
             continue
-        pdf.section_heading(f"{severity.upper()} ({len(group)})")
+        pdf.section_heading(f"{severity.upper()} ({len(group)})", level=3)
+        pdf.ln(2)
         for f in group:
             _render_pdf_finding(pdf, f)
 
-    # HTTP-tested summary (single line, not individual findings)
+    # HTTP-tested summary
     if http_tested:
         pdf.set_font("Helvetica", "I", 10)
-        pdf.set_text_color(*_LIGHT_GREY)
+        pdf.set_text_color(*_SUBTLE)
         pdf.multi_cell(0, 5, _safe_text(_http_tested_summary(http_tested)))
-        pdf.ln(3)
+        pdf.ln(6)
 
     # Performance summary table
     _render_perf_table_pdf(pdf, report.degradation_points)
 
     # Confidence note
     if report.confidence_note:
-        pdf.ln(5)
+        pdf.ln(6)
         pdf.set_font("Helvetica", "I", 10)
-        pdf.set_text_color(*_LIGHT_GREY)
+        pdf.set_text_color(*_SUBTLE)
         pdf.multi_cell(0, 5, _safe_text(report.confidence_note))
 
     # JSON download callout
@@ -1113,7 +1243,7 @@ def render_understanding_pdf(
         f.severity in ("critical", "warning") for f in report.findings
     )
     if has_actionable:
-        pdf.ln(5)
+        pdf.ln(10)
         pdf.callout_box(
             "Download the JSON report and attach it when you paste the "
             "prompts above into your coding agent. The JSON contains the "
@@ -1123,76 +1253,116 @@ def render_understanding_pdf(
     return bytes(pdf.output())
 
 
+def _integrate_details(description: str, details: str) -> str:
+    """Merge details into the description as a natural sentence.
+
+    Instead of showing details as a separate grey box, append them
+    to the description text for a cleaner read.
+    """
+    if not details:
+        return description
+    if not description:
+        return details
+    # If details look like they're already in the description, skip
+    if details.lower()[:20] in description.lower():
+        return description
+    # Append as additional context
+    desc = description.rstrip(". ")
+    return f"{desc}. {details.rstrip('. ')}."
+
+
 def _render_pdf_finding(pdf, f: Finding) -> None:
     """Render a single finding for the understanding PDF.
 
+    Each finding is a card with a coloured left border.
     Critical/warning: full 5-part layout with prompt box.
     Info: "What we found" only.
     """
-    # Title with severity badge
+    border_color = _SEVERITY_BORDER.get(f.severity, _BLUE)
+    card_indent = 4  # mm from left margin to content (after border)
+    original_margin = pdf.l_margin
+    card_start_y = pdf.get_y()
+
+    # Badge + title
+    pdf.set_x(original_margin + card_indent)
     pdf.severity_badge(f.severity)
     title = f.title
     if f.group_count > 1:
         title += f" (and {f.group_count - 1} similar)"
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.set_text_color(*_BODY_GREY)
-    pdf.cell(0, 6, _safe_text(title))
-    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(*_HEADING)
+    pdf.cell(0, 7, _safe_text(title))
+    pdf.ln(8)
 
-    # What we found
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*_DARK_BLUE)
-    pdf.cell(0, 5, "What we found:")
-    pdf.ln(3)
-    if f.description:
-        pdf.body_text(f.description)
-    if f.details:
-        pdf.detail_block(f.details)
+    # Temporarily indent all content inside the card
+    pdf.set_left_margin(original_margin + card_indent)
+
+    # What we found — description integrated with details
+    pdf.body_label("What we found:")
+    combined = _integrate_details(f.description or "", f.details or "")
+    if combined:
+        pdf.body_text(combined)
+    pdf.ln(2)
 
     # INFO findings: description only
     if f.severity == "info":
         if f.affected_dependencies:
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.set_text_color(*_BODY_GREY)
-            pdf.cell(0, 5, f"Related dependencies: {', '.join(f.affected_dependencies)}")
-            pdf.ln(5)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(*_SUBTLE)
+            pdf.cell(
+                0, 4,
+                f"Related dependencies: {', '.join(f.affected_dependencies)}",
+            )
+            pdf.ln(4)
+        # Draw left border and restore margin
+        card_end_y = pdf.get_y()
+        pdf.set_left_margin(original_margin)
+        pdf.set_draw_color(*border_color)
+        pdf.set_line_width(1.0)
+        pdf.line(
+            original_margin + 0.5, card_start_y,
+            original_margin + 0.5, card_end_y,
+        )
+        pdf.set_line_width(0.35)
+        pdf.ln(10)
         return
 
     # What this means for you
     consequence = _consequence_for_user(f)
     if consequence:
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*_DARK_BLUE)
-        pdf.cell(0, 5, "What this means for you:")
-        pdf.ln(3)
+        pdf.body_label("What this means for you:")
         pdf.body_text(consequence)
+        pdf.ln(2)
 
     # What to do
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*_DARK_BLUE)
-    pdf.cell(0, 5, "What to do:")
-    pdf.ln(3)
+    pdf.body_label("What to do:")
     pdf.body_text(
         "Copy the prompt below and paste it into your coding agent "
         "(Claude Code, Cursor, Copilot) along with the JSON report."
     )
+    pdf.ln(2)
 
     # Prompt (boxed)
     prompt = generate_finding_prompt(f)
     if prompt:
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*_DARK_BLUE)
-        pdf.cell(0, 5, "Prompt:")
-        pdf.ln(3)
+        pdf.body_label("Prompt:")
         pdf.code_block(prompt)
 
-    # After you fix it
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*_DARK_BLUE)
-    pdf.cell(0, 5, "After you fix it:")
-    pdf.ln(3)
+    # After you fix it — outside the prompt box
+    pdf.body_label("After you fix it:")
     pdf.body_text("Run myCode again to verify the fix worked.")
-    pdf.ln(2)
+
+    # Draw left border
+    card_end_y = pdf.get_y()
+    pdf.set_left_margin(original_margin)
+    pdf.set_draw_color(*border_color)
+    pdf.set_line_width(1.0)
+    pdf.line(
+        original_margin + 0.5, card_start_y,
+        original_margin + 0.5, card_end_y,
+    )
+    pdf.set_line_width(0.35)
+    pdf.ln(10)
 
 
 # ── File Output ──
