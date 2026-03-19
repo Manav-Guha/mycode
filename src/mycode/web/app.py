@@ -181,20 +181,6 @@ async def download_understanding(job_id: str):
     )
 
 
-@app.get("/api/report/{job_id}/fixes.pdf")
-async def download_fixes(job_id: str):
-    """Download the Recommended Fixes PDF."""
-    from fastapi.responses import Response
-    pdf_bytes, filename, error = handle_download_pdf(job_id, "fixes")
-    if error:
-        return JSONResponse(content={"error": error}, status_code=404 if "not found" in error.lower() else 400)
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
 @app.get("/api/health")
 async def health():
     """Server health check."""

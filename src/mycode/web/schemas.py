@@ -146,7 +146,6 @@ class ReportResponse:
     report: Optional[dict] = None
     pipeline_summary: Optional[dict] = None
     understanding_md: str = ""
-    fixes_md: str = ""
     edition: int = 0
     has_pdf: bool = False
     error: str = ""

@@ -526,7 +526,6 @@ def handle_report(job_id: str) -> ReportResponse:
 
     # Render edition documents and cache PDF bytes on the job
     understanding_md = ""
-    fixes_md = ""
     edition = 0
     has_pdf = False
     try:
@@ -534,25 +533,18 @@ def handle_report(job_id: str) -> ReportResponse:
             _HAS_FPDF,
             get_next_edition,
             pdf_filename,
-            render_fixes,
-            render_fixes_pdf,
             render_understanding,
             render_understanding_pdf,
         )
         edition = get_next_edition(github_url=job.github_url or None)
         understanding_md = render_understanding(job.result.report, edition)
-        fixes_md = render_fixes(job.result.report, edition)
 
         if _HAS_FPDF:
             project_name = job.result.report.project_name or "Project"
             job._understanding_pdf = render_understanding_pdf(
                 job.result.report, edition, project_name,
             )
-            job._fixes_pdf = render_fixes_pdf(
-                job.result.report, edition, project_name,
-            )
             job._understanding_filename = pdf_filename(project_name, "Results")
-            job._fixes_filename = pdf_filename(project_name, "Fixes")
             has_pdf = True
     except Exception as exc:
         logger.warning("Could not render edition documents: %s", exc)
@@ -562,7 +554,6 @@ def handle_report(job_id: str) -> ReportResponse:
         report=report_dict,
         pipeline_summary=pipeline_summary,
         understanding_md=understanding_md,
-        fixes_md=fixes_md,
         edition=edition,
         has_pdf=has_pdf,
     )
@@ -587,9 +578,6 @@ def handle_download_pdf(job_id: str, doc_type: str) -> tuple[bytes, str, str]:
     if doc_type == "understanding":
         pdf_bytes = getattr(job, "_understanding_pdf", b"")
         filename = getattr(job, "_understanding_filename", "")
-    elif doc_type == "fixes":
-        pdf_bytes = getattr(job, "_fixes_pdf", b"")
-        filename = getattr(job, "_fixes_filename", "")
     else:
         return b"", "", f"Unknown document type: {doc_type}"
 

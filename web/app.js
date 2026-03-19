@@ -397,7 +397,6 @@ function renderReport(report, summary, understandingMd, fixesMd, edition, hasPdf
     const content = $("report-content");
     // Store edition documents for download
     content.dataset.understandingMd = understandingMd || "";
-    content.dataset.fixesMd = fixesMd || "";
     content.dataset.edition = edition || "0";
     content.dataset.hasPdf = hasPdf ? "true" : "";
     let html = "";
@@ -448,12 +447,11 @@ function renderReport(report, summary, understandingMd, fixesMd, edition, hasPdf
         html += renderIncomplete(incomplete);
     }
 
-    // Download buttons
+    // Download buttons — two only
     const pdfLabel = hasPdf ? "PDF" : "Markdown";
     html += `<div class="download-row">
-        <button class="btn btn-secondary btn-sm" onclick="downloadJSON()">Download JSON</button>
-        <button class="btn btn-secondary btn-sm" onclick="downloadUnderstanding()">Understanding Your Results (${pdfLabel})</button>
-        <button class="btn btn-secondary btn-sm" onclick="downloadFixes()">Recommended Fixes (${pdfLabel})</button>
+        <button class="btn btn-primary btn-sm" onclick="downloadUnderstanding()" style="border:2px solid var(--blue)">Understanding Your Results (${pdfLabel})</button>
+        <button class="btn btn-secondary btn-sm" onclick="downloadJSON()" style="border:2px solid var(--border)">Download for Coding Agent (JSON)</button>
     </div>`;
 
     content.innerHTML = html;
@@ -680,21 +678,6 @@ function downloadUnderstanding() {
     const edition = content.dataset.edition || "1";
     const blob = new Blob([md], { type: "text/markdown" });
     downloadBlob(blob, `mycode-understanding-your-results-edition-${edition}.md`);
-}
-
-function downloadFixes() {
-    const content = $("report-content");
-    if (content.dataset.hasPdf && currentJobId) {
-        // Download PDF from dedicated endpoint
-        window.location.href = `${API}/api/report/${currentJobId}/fixes.pdf`;
-        return;
-    }
-    // Fallback to markdown
-    const md = content.dataset.fixesMd;
-    if (!md) return;
-    const edition = content.dataset.edition || "1";
-    const blob = new Blob([md], { type: "text/markdown" });
-    downloadBlob(blob, `mycode-recommended-fixes-edition-${edition}.md`);
 }
 
 function downloadBlob(blob, filename) {

@@ -4883,3 +4883,58 @@ class TestBreakingPointWithMetric:
         narrative = _build_degradation_narrative(dp)
         # Should contain time units, not bare numbers
         assert "ms" in narrative or "s" in narrative
+
+
+class TestJsonPromptField:
+    """Test that as_dict() includes prompt field on findings."""
+
+    def test_critical_finding_has_prompt(self):
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="Memory leak",
+                    severity="critical",
+                    category="memory_profiling",
+                    description="Memory grew.",
+                    source_file="app.py",
+                    source_function="run",
+                ),
+            ],
+        )
+        d = report.as_dict()
+        f = d["findings"][0]
+        assert "prompt" in f
+        assert "CRITICAL" in f["prompt"]
+        assert "app.py" in f["prompt"]
+        assert "run" in f["prompt"]
+
+    def test_info_finding_has_empty_prompt(self):
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="All clean",
+                    severity="info",
+                    description="No issues.",
+                ),
+            ],
+        )
+        d = report.as_dict()
+        f = d["findings"][0]
+        assert f["prompt"] == ""
+
+    def test_prompt_includes_fix_objective(self):
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="Concurrency issue",
+                    severity="warning",
+                    category="concurrent_execution",
+                    description="Race condition.",
+                    source_file="api.py",
+                ),
+            ],
+        )
+        d = report.as_dict()
+        prompt = d["findings"][0]["prompt"]
+        assert "thread safety" in prompt
+        assert "The attached JSON" in prompt

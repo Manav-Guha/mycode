@@ -585,14 +585,13 @@ def main(argv: list[str] | None = None) -> int:
     if result.report:
         try:
             from mycode.documents import write_edition_documents
-            understanding_path, fixes_path, edition = write_edition_documents(
+            understanding_path, edition = write_edition_documents(
                 report=result.report,
                 project_name=project.name,
                 project_path=project,
             )
-            print(f"\nEdition {edition} reports written:")
+            print(f"\nEdition {edition} report written:")
             print(f"  {understanding_path}")
-            print(f"  {fixes_path}")
         except Exception as exc:
             print(
                 f"\nWarning: Could not write edition documents: {exc}",
