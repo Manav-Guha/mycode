@@ -1,12 +1,14 @@
 """Downloadable document generation and edition tracking.
 
-Produces two markdown documents from a DiagnosticReport:
+Produces two documents from a DiagnosticReport:
   1. "Understanding Your Results" — human-readable diagnostic report
   2. "Recommended Fixes" — agent-parseable investigation directives
 
+Output format: PDF when fpdf2 is installed, markdown as fallback.
 Edition counter persists in ~/.mycode/editions/ keyed by project path hash.
 """
 
+import datetime as _dt
 import hashlib
 import json
 import logging
@@ -18,6 +20,14 @@ from urllib.parse import urlparse
 from mycode.report import DiagnosticReport, Finding
 
 logger = logging.getLogger(__name__)
+
+# ── PDF Library (optional) ──
+
+try:
+    from fpdf import FPDF
+    _HAS_FPDF = True
+except ImportError:
+    _HAS_FPDF = False
 
 # ── Edition Counter ──
 
@@ -100,6 +110,36 @@ def _sanitize_dirname(name: str) -> str:
     name = re.sub(r"-{2,}", "-", name)
     name = name.strip("-")
     return name or "project"
+
+
+def _sanitize_filename(name: str) -> str:
+    """Sanitize a project name for use in a PDF filename.
+
+    Preserves case, converts spaces to hyphens, strips special chars.
+    """
+    name = name.strip()
+    name = re.sub(r"[\s]+", "-", name)
+    name = re.sub(r"[^a-zA-Z0-9._-]", "-", name)
+    name = re.sub(r"-{2,}", "-", name)
+    name = name.strip("-")
+    return name or "Project"
+
+
+def pdf_filename(project_name: str, doc_type: str, date: str = "") -> str:
+    """Generate a PDF filename.
+
+    Args:
+        project_name: Human-readable project name.
+        doc_type: "Results" or "Fixes".
+        date: ISO date string (defaults to today).
+
+    Returns:
+        e.g. "myCode-Financial-Dashboard-Results-2026-03-19.pdf"
+    """
+    if not date:
+        date = _dt.date.today().isoformat()
+    safe = _sanitize_filename(project_name)
+    return f"myCode-{safe}-{doc_type}-{date}.pdf"
 
 
 # ── Document 1: Understanding Your Results ──
@@ -495,6 +535,390 @@ def _category_fallback_guidance(category: str) -> str:
     return fallbacks.get(category, "")
 
 
+# ── PDF Rendering ──
+
+# Colour constants
+_DARK_BLUE = (26, 58, 92)     # #1a3a5c
+_BODY_GREY = (51, 51, 51)     # #333333
+_LIGHT_GREY = (128, 128, 128) # #808080
+_RED = (220, 53, 69)          # #dc3545
+_AMBER = (255, 193, 7)        # #ffc107
+_BLUE = (13, 110, 253)        # #0d6efd
+_WHITE = (255, 255, 255)
+_BLACK = (0, 0, 0)
+
+_SEVERITY_COLORS: dict[str, tuple[tuple, tuple]] = {
+    # (background, text)
+    "critical": (_RED, _WHITE),
+    "warning": (_AMBER, _BLACK),
+    "info": (_BLUE, _WHITE),
+}
+
+
+def _safe_text(text: str) -> str:
+    """Replace Unicode characters unsupported by built-in Helvetica."""
+    return (
+        text
+        .replace("\u2014", "-")   # em-dash
+        .replace("\u2013", "-")   # en-dash
+        .replace("\u2018", "'")   # left single quote
+        .replace("\u2019", "'")   # right single quote
+        .replace("\u201c", '"')   # left double quote
+        .replace("\u201d", '"')   # right double quote
+        .replace("\u2022", "-")   # bullet
+        .replace("\u00b7", "|")   # middle dot
+        .replace("\u2026", "...")  # ellipsis
+    )
+
+
+def _make_pdf_class():
+    """Create the MyCodePDF class (requires fpdf2)."""
+    if not _HAS_FPDF:
+        return None
+
+    class MyCodePDF(FPDF):
+        """Styled PDF with myCode header and footer on every page."""
+
+        def header(self):
+            self.set_font("Helvetica", "B", 16)
+            self.set_text_color(*_DARK_BLUE)
+            self.cell(40, 10, "myCode", new_x="RIGHT")
+            self.set_font("Helvetica", "I", 9)
+            self.set_text_color(*_LIGHT_GREY)
+            self.cell(
+                0, 10,
+                "Stress test your AI-generated code before it breaks",
+                align="R",
+            )
+            self.ln(6)
+            self.set_draw_color(*_LIGHT_GREY)
+            self.line(
+                self.l_margin, self.get_y(),
+                self.w - self.r_margin, self.get_y(),
+            )
+            self.ln(8)
+
+        def footer(self):
+            self.set_y(-20)
+            self.set_draw_color(*_LIGHT_GREY)
+            self.line(
+                self.l_margin, self.get_y(),
+                self.w - self.r_margin, self.get_y(),
+            )
+            self.ln(3)
+            self.set_font("Helvetica", "", 8)
+            self.set_text_color(*_LIGHT_GREY)
+            self.cell(0, 5, "myCode by Machine Adjacent Systems - Diagnostic tool", new_x="LEFT")
+            self.cell(
+                0, 5, f"Page {self.page_no()}/{{nb}}",
+                align="R",
+            )
+
+        def section_heading(self, text: str, level: int = 2):
+            """Render a section heading (H1=16pt, H2=14pt, H3=12pt)."""
+            sizes = {1: 16, 2: 14, 3: 12}
+            size = sizes.get(level, 12)
+            self.set_font("Helvetica", "B", size)
+            self.set_text_color(*_DARK_BLUE if level <= 2 else _BODY_GREY)
+            self.multi_cell(0, size * 0.5, _safe_text(text))
+            self.ln(3)
+
+        def body_text(self, text: str):
+            """Render body text in 11pt."""
+            self.set_font("Helvetica", "", 11)
+            self.set_text_color(*_BODY_GREY)
+            self.multi_cell(0, 6, _safe_text(text))
+            self.ln(2)
+
+        def severity_badge(self, severity: str):
+            """Render an inline severity badge."""
+            bg, fg = _SEVERITY_COLORS.get(severity, (_BLUE, _WHITE))
+            label = severity.upper()
+            self.set_font("Helvetica", "B", 9)
+            w = self.get_string_width(label) + 6
+            x, y = self.get_x(), self.get_y()
+            self.set_fill_color(*bg)
+            self.set_text_color(*fg)
+            self.cell(w, 6, label, fill=True, new_x="RIGHT")
+            self.set_text_color(*_BODY_GREY)
+            self.cell(3, 6, " ")  # spacer
+
+        def detail_block(self, text: str):
+            """Render a quoted detail block."""
+            self.set_font("Helvetica", "I", 10)
+            self.set_text_color(*_LIGHT_GREY)
+            x = self.get_x()
+            self.set_x(x + 5)
+            self.multi_cell(0, 5, _safe_text(text[:500]))
+            self.set_x(x)
+            self.ln(2)
+
+        def code_block(self, text: str):
+            """Render a code/details block with grey background."""
+            self.set_font("Courier", "", 9)
+            self.set_text_color(*_BODY_GREY)
+            self.set_fill_color(245, 245, 245)
+            self.multi_cell(0, 4.5, _safe_text(text[:800]), fill=True)
+            self.ln(2)
+
+        def bullet(self, text: str):
+            """Render a bullet point."""
+            self.set_font("Helvetica", "", 11)
+            self.set_text_color(*_BODY_GREY)
+            self.cell(5, 6, "-")
+            self.multi_cell(0, 6, _safe_text(text))
+            self.ln(1)
+
+        def callout_box(self, text: str):
+            """Render a prominent callout box."""
+            safe = _safe_text(text)
+            self.set_fill_color(240, 248, 255)
+            self.set_draw_color(*_DARK_BLUE)
+            x = self.l_margin
+            y = self.get_y()
+            w = self.w - self.l_margin - self.r_margin
+            self.set_font("Helvetica", "B", 11)
+            self.set_text_color(*_DARK_BLUE)
+            # Calculate height needed
+            self.set_xy(x + 5, y + 5)
+            self.multi_cell(w - 10, 6, safe)
+            h = self.get_y() - y + 5
+            # Draw box
+            self.rect(x, y, w, h, style="D")
+            self.set_fill_color(240, 248, 255)
+            self.rect(x + 0.3, y + 0.3, w - 0.6, h - 0.6, style="F")
+            # Re-render text on top of box
+            self.set_xy(x + 5, y + 5)
+            self.multi_cell(w - 10, 6, safe)
+            self.ln(5)
+
+    return MyCodePDF
+
+
+def render_understanding_pdf(
+    report: DiagnosticReport, edition: int, project_name: str = "",
+) -> bytes:
+    """Render the understanding document as a styled PDF.
+
+    Returns raw PDF bytes.  Requires fpdf2.
+    """
+    PDFClass = _make_pdf_class()
+    if PDFClass is None:
+        raise ImportError("fpdf2 is required for PDF generation")
+
+    pdf = PDFClass(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=25)
+    pdf.set_margins(25, 25, 25)
+    pdf.alias_nb_pages()
+    pdf.add_page()
+
+    # Title
+    pdf.section_heading("Understanding Your Results", level=1)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(*_LIGHT_GREY)
+    date = _dt.date.today().isoformat()
+    pdf.cell(0, 5, f"Edition {edition}  |  {date}")
+    pdf.ln(8)
+
+    # Project summary
+    if report.project_description:
+        pdf.section_heading("Project Summary")
+        pdf.body_text(report.project_description)
+
+    # Dependency stack
+    has_deps = report.recognized_dep_count > 0 or report.unrecognized_deps
+    if has_deps:
+        pdf.section_heading("Dependency Stack")
+        if report.recognized_dep_count:
+            pdf.bullet(
+                f"{report.recognized_dep_count} dependencies with "
+                f"targeted stress profiles"
+            )
+        if report.unrecognized_deps:
+            names = ", ".join(report.unrecognized_deps[:10])
+            suffix = "..." if len(report.unrecognized_deps) > 10 else ""
+            pdf.bullet(
+                f"{len(report.unrecognized_deps)} dependencies tested "
+                f"with usage-based analysis: {names}{suffix}"
+            )
+
+    # Test overview
+    pdf.section_heading("Test Overview")
+    pdf.bullet(f"Scenarios run: {report.scenarios_run}")
+    pdf.bullet(f"Passed: {report.scenarios_passed}")
+    pdf.bullet(f"Failed: {report.scenarios_failed}")
+    if report.scenarios_incomplete:
+        pdf.bullet(f"Could not test: {report.scenarios_incomplete}")
+    if report.total_errors:
+        pdf.bullet(f"Total errors: {report.total_errors}")
+
+    # Findings grouped by severity
+    all_findings = list(report.findings) + list(report.incomplete_tests)
+    severity_groups: dict[str, list] = {"critical": [], "warning": [], "info": []}
+    for f in all_findings:
+        severity_groups.get(f.severity, severity_groups["info"]).append(f)
+
+    for severity in ("critical", "warning", "info"):
+        group = severity_groups[severity]
+        if not group:
+            continue
+        pdf.section_heading(f"{severity.upper()} ({len(group)})")
+        for f in group:
+            _render_pdf_finding(pdf, f)
+
+    # Degradation curves
+    if report.degradation_points:
+        pdf.section_heading("Performance Degradation")
+        for dp in report.degradation_points:
+            pdf.section_heading(dp.scenario_name, level=3)
+            if dp.description:
+                pdf.body_text(dp.description)
+            if dp.breaking_point:
+                pdf.set_font("Helvetica", "B", 11)
+                pdf.set_text_color(*_BODY_GREY)
+                pdf.cell(0, 6, f"Breaking point: {dp.breaking_point}")
+                pdf.ln(4)
+
+    # Confidence note
+    if report.confidence_note:
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.set_text_color(*_LIGHT_GREY)
+        pdf.multi_cell(0, 5, _safe_text(report.confidence_note))
+
+    return bytes(pdf.output())
+
+
+def render_fixes_pdf(
+    report: DiagnosticReport, edition: int, project_name: str = "",
+) -> bytes:
+    """Render the recommended fixes document as a styled PDF.
+
+    Returns raw PDF bytes.  Requires fpdf2.
+    """
+    PDFClass = _make_pdf_class()
+    if PDFClass is None:
+        raise ImportError("fpdf2 is required for PDF generation")
+
+    pdf = PDFClass(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=25)
+    pdf.set_margins(25, 25, 25)
+    pdf.alias_nb_pages()
+    pdf.add_page()
+
+    # Title
+    pdf.section_heading("Recommended Fixes", level=1)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(*_LIGHT_GREY)
+    date = _dt.date.today().isoformat()
+    pdf.cell(0, 5, f"Edition {edition}  |  {date}")
+    pdf.ln(8)
+
+    # Callout box
+    pdf.callout_box(
+        "Copy the findings below and paste them into your coding agent "
+        "(Claude Code, Cursor, Copilot, ChatGPT)."
+    )
+
+    # Collect all findings
+    all_findings = list(report.findings) + list(report.incomplete_tests)
+    if not all_findings:
+        pdf.body_text("No findings to investigate.")
+        return bytes(pdf.output())
+
+    # Group by source file
+    file_groups: dict[str, list] = {}
+    for f in all_findings:
+        key = f.source_file or "(no file identified)"
+        file_groups.setdefault(key, []).append(f)
+
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+
+    sorted_files = sorted(
+        file_groups.items(),
+        key=lambda item: (
+            min(severity_rank.get(f.severity, 9) for f in item[1]),
+            item[0],
+        ),
+    )
+
+    for file_path, findings in sorted_files:
+        pdf.section_heading(file_path)
+        findings.sort(key=lambda f: severity_rank.get(f.severity, 9))
+        for f in findings:
+            _render_pdf_fix_finding(pdf, f)
+
+    return bytes(pdf.output())
+
+
+def _render_pdf_finding(pdf, f: Finding) -> None:
+    """Render a single finding for the understanding PDF."""
+    # Title with severity badge
+    pdf.severity_badge(f.severity)
+    title = f.title
+    if f.group_count > 1:
+        title += f" (and {f.group_count - 1} similar)"
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*_BODY_GREY)
+    pdf.cell(0, 6, _safe_text(title))
+    pdf.ln(4)
+
+    if f.description:
+        pdf.body_text(f.description)
+    if f.details:
+        pdf.detail_block(f.details)
+    if f.affected_dependencies:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*_BODY_GREY)
+        pdf.cell(0, 5, f"Related dependencies: {', '.join(f.affected_dependencies)}")
+        pdf.ln(5)
+
+
+def _render_pdf_fix_finding(pdf, f: Finding) -> None:
+    """Render a single finding for the fixes PDF."""
+    # Title with severity tag
+    pdf.severity_badge(f.severity)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(*_BODY_GREY)
+    pdf.cell(0, 6, _safe_text(f.title))
+    pdf.ln(4)
+
+    # Metadata bullets
+    if f.source_function:
+        pdf.bullet(f"Function: {f.source_function}")
+    if f.category:
+        pdf.bullet(f"Category: {f.category}")
+    if f.affected_dependencies:
+        pdf.bullet(f"Dependencies: {', '.join(f.affected_dependencies)}")
+    if f._load_level is not None:
+        pdf.bullet(f"Failed at load level: {f._load_level}")
+
+    if f.description:
+        pdf.body_text(f.description)
+    if f.details:
+        pdf.code_block(f.details)
+
+    # Investigation prompt
+    if f.severity == "info":
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.set_text_color(*_LIGHT_GREY)
+        pdf.multi_cell(
+            0, 5,
+            "Context: This finding is informational. "
+            "No investigation required unless related issues appear above.",
+        )
+        pdf.ln(3)
+    else:
+        prompt = _build_investigation_prompt(f)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*_BODY_GREY)
+        pdf.cell(0, 5, "Investigate:")
+        pdf.ln(3)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 5, _safe_text(prompt))
+        pdf.ln(3)
+
+
 # ── File Output ──
 
 
@@ -527,18 +951,34 @@ def write_edition_documents(
     output_dir = _REPORTS_DIR / safe_name / f"edition-{edition}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    understanding = render_understanding(report, edition)
-    fixes = render_fixes(report, edition)
+    if _HAS_FPDF:
+        # Generate PDFs
+        date = _dt.date.today().isoformat()
+        u_fname = pdf_filename(project_name, "Results", date)
+        f_fname = pdf_filename(project_name, "Fixes", date)
 
-    understanding_path = (
-        output_dir / f"mycode-understanding-your-results-edition-{edition}.md"
-    )
-    fixes_path = (
-        output_dir / f"mycode-recommended-fixes-edition-{edition}.md"
-    )
+        understanding_bytes = render_understanding_pdf(report, edition, project_name)
+        fixes_bytes = render_fixes_pdf(report, edition, project_name)
 
-    understanding_path.write_text(understanding, encoding="utf-8")
-    fixes_path.write_text(fixes, encoding="utf-8")
+        understanding_path = output_dir / u_fname
+        fixes_path = output_dir / f_fname
+
+        understanding_path.write_bytes(understanding_bytes)
+        fixes_path.write_bytes(fixes_bytes)
+    else:
+        # Fallback to markdown
+        understanding = render_understanding(report, edition)
+        fixes = render_fixes(report, edition)
+
+        understanding_path = (
+            output_dir / f"mycode-understanding-your-results-edition-{edition}.md"
+        )
+        fixes_path = (
+            output_dir / f"mycode-recommended-fixes-edition-{edition}.md"
+        )
+
+        understanding_path.write_text(understanding, encoding="utf-8")
+        fixes_path.write_text(fixes, encoding="utf-8")
 
     # Clean up old editions — keep only the last 10
     _prune_old_editions(_REPORTS_DIR / safe_name)

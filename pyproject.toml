@@ -25,6 +25,9 @@ web = [
     "uvicorn[standard]>=0.34.0",
     "python-multipart>=0.0.18",
 ]
+pdf = [
+    "fpdf2>=2.8.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/Manav-Guha/mycode"

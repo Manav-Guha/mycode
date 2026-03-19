@@ -148,6 +148,7 @@ class ReportResponse:
     understanding_md: str = ""
     fixes_md: str = ""
     edition: int = 0
+    has_pdf: bool = False
     error: str = ""
 
 

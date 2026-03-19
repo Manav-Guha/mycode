@@ -427,8 +427,15 @@ class TestWriteEditionDocuments:
             project_name="test-project",
             project_path=Path("/tmp/test-project"),
         )
-        assert path1.name == "mycode-understanding-your-results-edition-1.md"
-        assert path2.name == "mycode-recommended-fixes-edition-1.md"
+        from mycode.documents import _HAS_FPDF
+        if _HAS_FPDF:
+            assert path1.name.startswith("myCode-test-project-Results-")
+            assert path1.name.endswith(".pdf")
+            assert path2.name.startswith("myCode-test-project-Fixes-")
+            assert path2.name.endswith(".pdf")
+        else:
+            assert path1.name == "mycode-understanding-your-results-edition-1.md"
+            assert path2.name == "mycode-recommended-fixes-edition-1.md"
 
     def test_correct_directory_structure(self, tmp_mycode_dir, sample_report):
         path1, path2, edition = write_edition_documents(
@@ -468,10 +475,16 @@ class TestWriteEditionDocuments:
             project_name="content-test",
             project_path=Path("/tmp/content-test"),
         )
-        understanding_content = path1.read_text(encoding="utf-8")
-        fixes_content = path2.read_text(encoding="utf-8")
-        assert understanding_content == render_understanding(sample_report, edition)
-        assert fixes_content == render_fixes(sample_report, edition)
+        from mycode.documents import _HAS_FPDF
+        if _HAS_FPDF:
+            # PDF output — verify it starts with PDF magic bytes
+            assert path1.read_bytes()[:5] == b"%PDF-"
+            assert path2.read_bytes()[:5] == b"%PDF-"
+        else:
+            understanding_content = path1.read_text(encoding="utf-8")
+            fixes_content = path2.read_text(encoding="utf-8")
+            assert understanding_content == render_understanding(sample_report, edition)
+            assert fixes_content == render_fixes(sample_report, edition)
 
     def test_github_url_edition(self, tmp_mycode_dir, sample_report):
         _, _, e1 = write_edition_documents(
@@ -754,3 +767,136 @@ class TestEditionPruning:
         assert _edition_number("edition-42") == 42
         assert _edition_number("edition-") == 0
         assert _edition_number("other") == 0
+
+
+# ── PDF Generation Tests ──
+
+
+from mycode.documents import _HAS_FPDF, _sanitize_filename, pdf_filename
+
+
+class TestPdfFilename:
+    """Test PDF filename generation and sanitization."""
+
+    def test_basic_name(self):
+        result = pdf_filename("Financial Dashboard", "Results", "2026-03-19")
+        assert result == "myCode-Financial-Dashboard-Results-2026-03-19.pdf"
+
+    def test_special_chars(self):
+        result = pdf_filename("my@project/v2", "Fixes", "2026-03-19")
+        assert result == "myCode-my-project-v2-Fixes-2026-03-19.pdf"
+
+    def test_empty_name(self):
+        result = pdf_filename("", "Results", "2026-03-19")
+        assert result == "myCode-Project-Results-2026-03-19.pdf"
+
+    def test_spaces_to_hyphens(self):
+        result = pdf_filename("My Cool App", "Fixes", "2026-01-01")
+        assert result == "myCode-My-Cool-App-Fixes-2026-01-01.pdf"
+
+    def test_sanitize_filename_preserves_case(self):
+        assert _sanitize_filename("MyApp") == "MyApp"
+
+    def test_sanitize_filename_strips_specials(self):
+        assert _sanitize_filename("a@b/c\\d") == "a-b-c-d"
+
+
+@pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+class TestPdfRendering:
+    """Test PDF document rendering (requires fpdf2)."""
+
+    def test_understanding_pdf_returns_bytes(self):
+        from mycode.documents import render_understanding_pdf
+        report = DiagnosticReport(
+            project_description="Test dashboard",
+            scenarios_run=5,
+            scenarios_passed=3,
+            scenarios_failed=2,
+        )
+        pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert isinstance(pdf_bytes, bytes)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+    def test_fixes_pdf_returns_bytes(self):
+        from mycode.documents import render_fixes_pdf
+        report = DiagnosticReport(
+            scenarios_run=3,
+            findings=[
+                Finding(
+                    title="Server crashed",
+                    severity="critical",
+                    category="http_load_testing",
+                    description="The server crashed under load.",
+                    affected_dependencies=["streamlit"],
+                ),
+            ],
+        )
+        pdf_bytes = render_fixes_pdf(report, edition=1)
+        assert isinstance(pdf_bytes, bytes)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+    def test_understanding_pdf_has_content(self):
+        """PDF should be non-trivial size for a report with findings."""
+        from mycode.documents import render_understanding_pdf
+        report = DiagnosticReport(
+            project_description="Financial dashboard built with streamlit",
+            scenarios_run=10,
+            scenarios_passed=7,
+            scenarios_failed=3,
+            findings=[
+                Finding(
+                    title="Memory grows unbounded",
+                    severity="critical",
+                    description="Memory usage reaches 500MB under load.",
+                    affected_dependencies=["pandas"],
+                ),
+                Finding(
+                    title="Response time degrades",
+                    severity="warning",
+                    description="Response time exceeds 2 seconds at 50 users.",
+                ),
+            ],
+        )
+        pdf_bytes = render_understanding_pdf(report, edition=2)
+        # Should be at least 1KB for a report with content
+        assert len(pdf_bytes) > 1000
+
+    def test_fixes_pdf_empty_findings(self):
+        """PDF with no findings should still be valid."""
+        from mycode.documents import render_fixes_pdf
+        report = DiagnosticReport(scenarios_run=5)
+        pdf_bytes = render_fixes_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+    def test_write_edition_creates_pdfs(self, tmp_mycode_dir):
+        """write_edition_documents creates .pdf files when fpdf2 is available."""
+        report = DiagnosticReport(
+            scenarios_run=3,
+            scenarios_passed=3,
+        )
+        path1, path2, edition = write_edition_documents(
+            report=report,
+            project_name="Test App",
+            project_path=Path("/tmp/test-app"),
+        )
+        assert path1.suffix == ".pdf"
+        assert path2.suffix == ".pdf"
+        assert path1.read_bytes()[:5] == b"%PDF-"
+        assert path2.read_bytes()[:5] == b"%PDF-"
+
+    def test_pdf_with_unicode_in_findings(self):
+        """PDF handles Unicode characters in finding text gracefully."""
+        from mycode.documents import render_understanding_pdf
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Memory crash \u2014 out of memory",
+                    severity="critical",
+                    description="App uses \u201csmart quotes\u201d and \u2026 ellipsis.",
+                ),
+            ],
+        )
+        # Should not raise FPDFUnicodeEncodingException
+        pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"
