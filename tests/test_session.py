@@ -459,7 +459,7 @@ class TestPyDependencyInstallation:
 
 
 class TestFindDepFileDir:
-    """Test _find_dep_file_dir for root and subdirectory dep files."""
+    """Test find_dep_file_dir for root and subdirectory dep files."""
 
     def _make_session(self, tmp_path, project):
         sm = SessionManager(project, temp_base=tmp_path / "sess")
@@ -478,7 +478,7 @@ class TestFindDepFileDir:
         (sub / "requirements.txt").write_text("streamlit\n")
 
         sm = self._make_session(tmp_path, project)
-        assert sm._find_dep_file_dir() == project
+        assert sm.find_dep_file_dir() == project
 
     def test_subdir_found(self, tmp_path):
         """Dep file only in subdir → returns that subdir."""
@@ -490,7 +490,7 @@ class TestFindDepFileDir:
         (sub / "app.py").write_text("import streamlit\n")
 
         sm = self._make_session(tmp_path, project)
-        assert sm._find_dep_file_dir() == sub
+        assert sm.find_dep_file_dir() == sub
 
     def test_multiple_subdirs_picks_most_source_files(self, tmp_path):
         """Two subdirs have dep files → picks the one with more .py files."""
@@ -509,7 +509,7 @@ class TestFindDepFileDir:
         (sub_b / "three.py").write_text("")
 
         sm = self._make_session(tmp_path, project)
-        assert sm._find_dep_file_dir() == sub_b
+        assert sm.find_dep_file_dir() == sub_b
 
     def test_no_dep_files_returns_root(self, tmp_path):
         """No dep files anywhere → returns root (fallback to env install)."""
@@ -518,7 +518,7 @@ class TestFindDepFileDir:
         (project / "app.py").write_text("print('hello')\n")
 
         sm = self._make_session(tmp_path, project)
-        assert sm._find_dep_file_dir() == project
+        assert sm.find_dep_file_dir() == project
 
     def test_hidden_dirs_skipped(self, tmp_path):
         """Hidden directories (.git etc.) are not searched."""
@@ -530,7 +530,7 @@ class TestFindDepFileDir:
 
         sm = self._make_session(tmp_path, project)
         # Should return root (no visible dep files), not .git
-        assert sm._find_dep_file_dir() == project
+        assert sm.find_dep_file_dir() == project
 
     def test_install_deps_from_subdir(self, tmp_path):
         """Full _install_dependencies() finds requirements.txt in subdir."""

@@ -1112,3 +1112,30 @@ class TestResolveModulePath:
         (tmp_path / "x.js").write_text("")
         ingester = JsProjectIngester(tmp_path, skip_npm_check=True)
         assert ingester._resolve_module_path("./utils.js", "app.js") == "utils"
+
+
+# ── Subdirectory Dep-File Discovery Tests ──
+
+
+class TestDepFileDirJsIngester:
+    """Test that dep_file_dir routes dep extraction to subdirectory."""
+
+    def test_extract_deps_from_subdir(self, tmp_path):
+        """With dep_file_dir pointing to subdir, deps are found."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "index.js").write_text("const express = require('express');\n")
+        sub = project / "app"
+        sub.mkdir()
+        (sub / "package.json").write_text(json.dumps({
+            "dependencies": {"express": "^4.18.0", "cors": "^2.8.5"},
+        }))
+
+        ingester = JsProjectIngester(
+            project, installed_packages=None, skip_npm_check=True,
+            dep_file_dir=sub,
+        )
+        deps = ingester._extract_dependencies()
+        names = [d.name for d in deps]
+        assert "express" in names
+        assert "cors" in names

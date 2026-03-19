@@ -455,6 +455,7 @@ class ProjectIngester:
         installed_packages: Optional[dict[str, str]] = None,
         pypi_timeout: float = 5.0,
         skip_pypi_check: bool = False,
+        dep_file_dir: Optional[Path] = None,
     ):
         self._project_path = Path(project_path).resolve()
         if not self._project_path.is_dir():
@@ -465,6 +466,7 @@ class ProjectIngester:
         self._installed_packages = installed_packages
         self._pypi_timeout = pypi_timeout
         self._skip_pypi_check = skip_pypi_check
+        self._dep_file_dir = dep_file_dir
 
     # ── Public API ──
 
@@ -635,6 +637,7 @@ class ProjectIngester:
     def _extract_dependencies(self) -> list[DependencyInfo]:
         """Extract declared dependencies from all dependency files in the project."""
         seen: dict[str, DependencyInfo] = {}  # normalized_name -> DependencyInfo
+        dep_dir = self._dep_file_dir or self._project_path
 
         parsers = [
             (
@@ -651,7 +654,7 @@ class ProjectIngester:
 
         for parser, filenames in parsers:
             for filename in filenames:
-                path = self._project_path / filename
+                path = dep_dir / filename
                 if path.is_file():
                     for name, version_spec in parser(path):
                         normalized = _normalize_package_name(name)

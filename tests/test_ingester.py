@@ -1309,3 +1309,57 @@ class TestFileToModule:
         (tmp_path / "app.py").write_text("pass")
         ingester = ProjectIngester(tmp_path, skip_pypi_check=True)
         assert ingester._file_to_module("pkg/sub/__init__.py") == "pkg.sub"
+
+
+# ── Subdirectory Dep-File Discovery Tests ──
+
+
+class TestDepFileDirIngester:
+    """Test that dep_file_dir parameter routes dep extraction to subdirectory."""
+
+    def test_extract_deps_from_subdir(self, tmp_path):
+        """With dep_file_dir pointing to subdir, deps are found."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "app.py").write_text("import streamlit\n")
+        sub = project / "My Projects"
+        sub.mkdir()
+        (sub / "requirements.txt").write_text("streamlit==1.55.0\npandas\n")
+
+        ingester = ProjectIngester(
+            project, installed_packages={}, skip_pypi_check=True,
+            dep_file_dir=sub,
+        )
+        deps = ingester._extract_dependencies()
+        names = [d.name for d in deps]
+        assert "streamlit" in names
+        assert "pandas" in names
+
+    def test_extract_deps_default_root(self, tmp_path):
+        """With dep_file_dir=None, deps at root are found (backward compat)."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "app.py").write_text("import flask\n")
+        (project / "requirements.txt").write_text("flask==3.0.0\n")
+
+        ingester = ProjectIngester(
+            project, installed_packages={}, skip_pypi_check=True,
+        )
+        deps = ingester._extract_dependencies()
+        names = [d.name for d in deps]
+        assert "flask" in names
+
+    def test_no_dep_file_dir_misses_subdir(self, tmp_path):
+        """Without dep_file_dir, subdir deps are NOT found (old behaviour)."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "app.py").write_text("import streamlit\n")
+        sub = project / "sub"
+        sub.mkdir()
+        (sub / "requirements.txt").write_text("streamlit\n")
+
+        ingester = ProjectIngester(
+            project, installed_packages={}, skip_pypi_check=True,
+        )
+        deps = ingester._extract_dependencies()
+        assert len(deps) == 0

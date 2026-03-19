@@ -368,7 +368,7 @@ class SessionManager:
 
     # ── Dependency Installation ──
 
-    def _find_dep_file_dir(self) -> Path:
+    def find_dep_file_dir(self) -> Path:
         """Find the directory containing dependency files.
 
         Checks the project root first, then one level of subdirectories.
@@ -425,7 +425,7 @@ class SessionManager:
             return
 
         # Find the directory containing dep files (root or one subdir down)
-        dep_dir = self._find_dep_file_dir()
+        dep_dir = self.find_dep_file_dir()
         installed_any = False
 
         # Try requirements*.txt files (most common for vibe-coded projects)
@@ -579,7 +579,7 @@ class SessionManager:
             return
 
         # Check root first, then dep-file subdirectory for package.json
-        dep_dir = self._find_dep_file_dir()
+        dep_dir = self.find_dep_file_dir()
         pkg_json = dep_dir / "package.json"
         logger.debug("[JS-DEPS] Checking for package.json at %s — exists=%s", pkg_json, pkg_json.is_file())
         if not pkg_json.is_file():

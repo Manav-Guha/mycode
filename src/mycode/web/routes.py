@@ -116,18 +116,21 @@ def handle_preflight(
         # Stage 3: Ingestion
         # Use venv packages (where deps were actually installed), not host
         installed = session.get_venv_packages()
+        dep_file_dir = session.find_dep_file_dir()
 
         if language == "python":
             ingester = ProjectIngester(
                 project_path=session.project_copy_dir,
                 installed_packages=installed,
                 skip_pypi_check=True,
+                dep_file_dir=dep_file_dir,
             )
         else:
             ingester = JsProjectIngester(
                 project_path=session.project_copy_dir,
                 installed_packages=None,
                 skip_npm_check=True,
+                dep_file_dir=dep_file_dir,
             )
 
         ingestion = ingester.ingest()

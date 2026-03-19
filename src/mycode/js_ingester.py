@@ -737,12 +737,14 @@ class JsProjectIngester:
         installed_packages: Optional[dict[str, str]] = None,
         npm_timeout: float = 5.0,
         skip_npm_check: bool = False,
+        dep_file_dir: Optional[Path] = None,
     ):
         self._project_path = Path(project_path).resolve()
         if not self._project_path.is_dir():
             raise IngestionError(
                 f"Project path does not exist or is not a directory: {self._project_path}"
             )
+        self._dep_file_dir = dep_file_dir
 
         self._installed_packages = installed_packages
         self._npm_timeout = npm_timeout
@@ -870,8 +872,9 @@ class JsProjectIngester:
     def _extract_dependencies(self) -> list[DependencyInfo]:
         """Extract declared dependencies from package.json."""
         seen: dict[str, DependencyInfo] = {}
+        dep_dir = self._dep_file_dir or self._project_path
 
-        pkg_json = self._project_path / "package.json"
+        pkg_json = dep_dir / "package.json"
         if pkg_json.is_file():
             for name, version_spec, is_dev in self._parse_package_json(pkg_json):
                 if name not in seen or (version_spec and not seen[name].required_version):
