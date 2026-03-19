@@ -32,7 +32,7 @@ RUN mkdir -p /etc/apt/keyrings \
 
 # Install myCode from local source
 COPY . /opt/mycode
-RUN pip install --no-cache-dir "/opt/mycode[web]"
+RUN pip install --no-cache-dir "/opt/mycode[web,pdf]"
 
 # Create workspace directory
 RUN mkdir -p /workspace
