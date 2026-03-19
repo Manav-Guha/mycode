@@ -4937,4 +4937,4 @@ class TestJsonPromptField:
         d = report.as_dict()
         prompt = d["findings"][0]["prompt"]
         assert "thread safety" in prompt
-        assert "The attached JSON" in prompt
+        assert "JSON" in prompt

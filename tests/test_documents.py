@@ -299,9 +299,8 @@ class TestGenerateFindingPrompt:
         assert "process_data" in prompt
         assert "pandas" in prompt
         assert "10000" in prompt
-        assert "Investigate:" in prompt
-        assert "The fix should:" in prompt
-        assert "The attached JSON" in prompt
+        assert "Fix:" in prompt
+        assert "JSON" in prompt
 
     def test_warning_finding_prompt(self):
         f = Finding(
@@ -314,7 +313,7 @@ class TestGenerateFindingPrompt:
         prompt = generate_finding_prompt(f)
         assert "WARNING" in prompt
         assert "api.py" in prompt
-        assert "thread safety" in prompt  # fix objective
+        assert "thread safety" in prompt
 
     def test_info_finding_no_prompt(self):
         f = Finding(
@@ -334,8 +333,8 @@ class TestGenerateFindingPrompt:
         )
         prompt = generate_finding_prompt(f)
         assert "CRITICAL" in prompt
-        assert "File:" not in prompt
-        assert "The fix should:" in prompt
+        assert "Location:" not in prompt
+        assert "Fix:" in prompt
 
     def test_http_finding_prompt(self):
         f = Finding(
@@ -557,7 +556,7 @@ class TestFindingSourceFields:
 class TestPromptSpecificData:
     """Test that generated prompts use finding-specific data."""
 
-    def test_memory_finding_mentions_memory(self):
+    def test_memory_finding_has_fix_objective(self):
         f = Finding(
             title="Memory Exhaustion",
             severity="critical",
@@ -567,10 +566,10 @@ class TestPromptSpecificData:
             _peak_memory_mb=256.0,
         )
         prompt = generate_finding_prompt(f)
-        assert "256 MB" in prompt
-        assert "memory" in prompt.lower()
+        assert "memory growth" in prompt.lower()
+        assert "app.py" in prompt
 
-    def test_slow_response_finding_mentions_time(self):
+    def test_blocking_io_finding_has_fix_objective(self):
         f = Finding(
             title="Slow Response",
             severity="warning",
@@ -580,19 +579,20 @@ class TestPromptSpecificData:
             _execution_time_ms=6000.0,
         )
         prompt = generate_finding_prompt(f)
-        assert "6000 ms" in prompt
+        assert "blocking" in prompt.lower() or "event loop" in prompt.lower()
+        assert "routes.py" in prompt
 
-    def test_error_count_in_prompt(self):
+    def test_prompt_includes_load_level(self):
         f = Finding(
             title="Error Storm",
             severity="critical",
             category="edge_case_inputs",
             description="Many errors occurred.",
             source_file="handler.py",
-            _error_count=42,
+            _load_level=42,
         )
         prompt = generate_finding_prompt(f)
-        assert "42 errors" in prompt
+        assert "42" in prompt
 
 
 # ── Bug 1: Document 1 incomplete count ──
@@ -855,7 +855,7 @@ class TestDegradationHumanisation:
             ],
         )
         md = render_understanding(report, 1)
-        assert "Memory usage" in md
+        assert "Memory" in md
 
     @pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
     def test_pdf_degradation_table(self):
@@ -1060,7 +1060,7 @@ class TestPerfSummaryTable:
         # Two data rows (time + memory)
         assert "200ms" in md
         assert "80MB" in md
-        assert "Memory usage" in md
+        assert "Memory" in md
 
     def test_verdict_no_issues(self):
         report = DiagnosticReport(

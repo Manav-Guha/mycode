@@ -86,10 +86,51 @@ def _fmt_val(value: float, metric: str) -> str:
     return f"{value:.1f}"
 
 
+def _short_step(label: str) -> str:
+    """Abbreviated step label for tight table cells.
+
+    '100,000 items' → '100K', '25,000 items of data' → '25K',
+    '50 simultaneous users' → '50 users', '1 concurrent connection' → '1 conn'.
+    """
+    import re as _re
+    desc = _describe_step(label) or label
+
+    # Shorten large numbers: "100,000 items" → "100K"
+    m = _re.match(r"([\d,]+)\s+(items?|rows?|items? of data|rows? of data)", desc)
+    if m:
+        n = int(m.group(1).replace(",", ""))
+        if n >= 1_000_000:
+            return f"{n // 1_000_000}M"
+        if n >= 1_000:
+            return f"{n // 1_000}K"
+        return str(n)
+
+    # Shorten user/connection counts
+    m = _re.match(r"([\d,]+)\s+simultaneous\s+users?", desc)
+    if m:
+        return f"{m.group(1)} users"
+    m = _re.match(r"([\d,]+)\s+concurrent\s+connections?", desc)
+    if m:
+        return f"{m.group(1)} conn"
+    m = _re.match(r"([\d,]+)\s+concurrent\s+", desc)
+    if m:
+        return desc  # already short enough
+
+    # Generic: just return the step label cleaned
+    return desc
+
+
 def _fmt_cell(value: float, label: str, metric: str) -> str:
     """Format a table cell: value (context)."""
     val = _fmt_val(value, metric)
     ctx = _describe_step(label) or label
+    return f"{val} ({ctx})"
+
+
+def _fmt_cell_short(value: float, label: str, metric: str) -> str:
+    """Format a table cell with abbreviated context for PDF."""
+    val = _fmt_val(value, metric)
+    ctx = _short_step(label)
     return f"{val} ({ctx})"
 
 
@@ -129,15 +170,20 @@ def _verdict(dp: DegradationPoint) -> str:
     return ""
 
 
-def _perf_row_label(dp: DegradationPoint) -> str:
-    """Human label for the 'What we tested' column."""
+def _perf_row_label(dp: DegradationPoint, max_len: int = 0) -> str:
+    """Human label for the 'What we tested' column.
+
+    If max_len > 0, truncate with ellipsis.
+    """
     name = _describe_scenario(dp.scenario_name) or dp.scenario_name
     is_memory = dp.metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")
     if is_memory:
-        # Prefix with "Memory usage —" to distinguish from time curves
-        # for the same scenario
-        return f"Memory usage — {name}"
-    return name.capitalize() if name and name[0].islower() else name
+        label = f"Memory — {name}"
+    else:
+        label = name.capitalize() if name and name[0].islower() else name
+    if max_len and len(label) > max_len:
+        label = label[: max_len - 3] + "..."
+    return label
 
 
 def _dedup_by_label(points: list[DegradationPoint]) -> list[DegradationPoint]:
@@ -168,24 +214,28 @@ def _dedup_by_label(points: list[DegradationPoint]) -> list[DegradationPoint]:
     return list(groups.values())
 
 
-def _row_cells(dp: DegradationPoint) -> tuple[str, str, str, str, str]:
-    """Extract (label, low, mid, high, verdict) for a table row."""
-    label = _perf_row_label(dp)
+def _row_cells(dp: DegradationPoint, short: bool = False) -> tuple[str, str, str, str, str]:
+    """Extract (label, low, mid, high, verdict) for a table row.
+
+    If short=True, use abbreviated step labels for tight PDF cells.
+    """
+    label = _perf_row_label(dp, max_len=30 if short else 0)
     steps = dp.steps
+    fmt = _fmt_cell_short if short else _fmt_cell
 
     low_label, low_val = steps[0]
-    low = _fmt_cell(low_val, low_label, dp.metric)
+    low = fmt(low_val, low_label, dp.metric)
 
     if len(steps) >= 3:
         mid_idx = len(steps) // 2
         mid_label, mid_val = steps[mid_idx]
-        mid = _fmt_cell(mid_val, mid_label, dp.metric)
+        mid = fmt(mid_val, mid_label, dp.metric)
     else:
         mid = "\u2014"
 
     if len(steps) >= 2:
         high_label, high_val = steps[-1]
-        high = _fmt_cell(high_val, high_label, dp.metric)
+        high = fmt(high_val, high_label, dp.metric)
     else:
         high = "\u2014"
 
@@ -233,14 +283,13 @@ def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
     pdf.section_heading("Performance Under Load")
     pdf.ln(2)
 
-    # Column widths (mm) — total 170mm for A4 with 20mm margins
-    col_w = [45, 30, 30, 30, 35]
+    # Column widths (mm) — total 161mm for A4 with 20mm margins
+    col_w = [50, 27, 27, 27, 30]
     headers = ["What we tested", "At low load", "At mid load", "At peak load", "Verdict"]
-    row_h = 7
-    cell_pad_x = 2  # mm horizontal padding inside cells
+    row_h = 6
 
     # Header row — dark blue background, white text
-    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_font("Helvetica", "B", 8)
     pdf.set_text_color(*_WHITE)
     pdf.set_fill_color(*_BRAND)
     pdf.set_draw_color(*_RULE)
@@ -251,7 +300,7 @@ def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
 
     # Data rows — alternating white/grey
     for row_idx, dp in enumerate(rows):
-        label, low, mid, high, v = _row_cells(dp)
+        label, low, mid, high, v = _row_cells(dp, short=True)
         is_alt = row_idx % 2 == 1
 
         if is_alt:
@@ -263,7 +312,7 @@ def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
         pdf.set_line_width(0.18)
 
         cells = [label, low, mid, high]
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(*_BODY)
         for i, cell_text in enumerate(cells):
             pdf.cell(
@@ -272,7 +321,7 @@ def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
             )
 
         # Verdict column — bold, coloured
-        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_font("Helvetica", "B", 8)
         pdf.set_text_color(*_verdict_color(v))
         pdf.cell(
             col_w[4], row_h, f"  {_safe_text(v)}",
@@ -652,35 +701,25 @@ def generate_finding_prompt(f: Finding) -> str:
         return ""
 
     parts: list[str] = []
-    parts.append(f"myCode found a {f.severity.upper()} issue.")
+    parts.append(f"[{f.severity.upper()}] {f.title}")
 
     if f.source_file:
-        parts.append(f"File: {f.source_file}")
-    if f.source_function:
-        parts.append(f"Function: {f.source_function}")
-
-    # Problem description
-    problem = f.title
-    if f.description:
-        # Take first sentence only to keep it concise
-        first_sentence = f.description.split(". ")[0].rstrip(".")
-        problem += f" — {first_sentence}."
-    if f._load_level is not None:
-        problem += f" At load level {f._load_level}."
-    parts.append(f"Problem: {problem}")
+        loc = f.source_file
+        if f.source_function:
+            loc += f" -> {f.source_function}"
+        parts.append(f"Location: {loc}")
 
     if f.affected_dependencies:
-        parts.append(f"Dependencies: {', '.join(f.affected_dependencies)}")
+        parts.append(f"Deps: {', '.join(f.affected_dependencies)}")
 
-    # Investigation guidance
-    guidance = _build_investigation_prompt(f)
-    parts.append(f"Investigate: {guidance}")
+    if f._load_level is not None:
+        parts.append(f"Failed at load level: {f._load_level}")
 
-    # Fix objective
+    # Fix objective — single actionable sentence
     fix_goal = _fix_objective(f)
-    parts.append(f"The fix should: {fix_goal}")
+    parts.append(f"Fix: {fix_goal}")
 
-    parts.append("The attached JSON contains the full diagnostic data.")
+    parts.append("See attached JSON for full diagnostic data.")
 
     return "\n".join(parts)
 
@@ -952,188 +991,163 @@ def _make_pdf_class():
         return None
 
     class MyCodePDF(FPDF):
-        """Styled PDF with myCode header and footer on every page.
-
-        Design: generous whitespace, clear hierarchy, subtle containers.
-        Professional but accessible — calm and authoritative.
-        """
+        """Styled PDF with myCode header and footer on every page."""
 
         def header(self):
             self.set_font("Helvetica", "B", 20)
             self.set_text_color(*_BRAND)
-            self.cell(40, 10, "myCode", new_x="RIGHT")
+            self.cell(40, 8, "myCode", new_x="RIGHT")
             self.set_font("Helvetica", "I", 9)
             self.set_text_color(*_SUBTLE)
             self.cell(
-                0, 10,
+                0, 8,
                 "Stress test your AI-generated code before it breaks",
                 align="R",
             )
-            self.ln(4)
-            # 1pt rule
+            self.ln(10)  # clear below the text descenders
             self.set_draw_color(*_RULE)
             self.set_line_width(0.35)
             self.line(
                 self.l_margin, self.get_y(),
                 self.w - self.r_margin, self.get_y(),
             )
-            self.ln(8)
+            self.ln(6)
 
         def footer(self):
-            self.set_y(-18)
-            # 1pt rule
+            self.set_y(-15)
             self.set_draw_color(*_RULE)
             self.set_line_width(0.35)
             self.line(
                 self.l_margin, self.get_y(),
                 self.w - self.r_margin, self.get_y(),
             )
-            self.ln(3)
+            self.ln(2)
             self.set_font("Helvetica", "", 8)
             self.set_text_color(*_SUBTLE)
             self.cell(
                 0, 4,
-                _safe_text("myCode by Machine Adjacent Systems \u2014 Diagnostic tool"),
+                _safe_text("myCode by Machine Adjacent Systems - Diagnostic tool"),
                 new_x="LEFT",
             )
             self.cell(0, 4, f"Page {self.page_no()}/{{nb}}", align="R")
 
         def section_heading(self, text: str, level: int = 2):
-            """Render a section heading. H1=18pt, H2=14pt, H3=13pt."""
-            sizes = {1: 18, 2: 14, 3: 13}
-            size = sizes.get(level, 13)
+            """H1=16pt brand, H2=12pt heading, H3=11pt heading."""
+            sizes = {1: 16, 2: 12, 3: 11}
+            size = sizes.get(level, 11)
             self.set_font("Helvetica", "B", size)
             self.set_text_color(*(_BRAND if level == 1 else _HEADING))
-            lh = size * 0.55  # ~1.2x line height
-            self.multi_cell(0, lh, _safe_text(text))
-            self.ln(4 if level == 1 else 3)
+            self.multi_cell(0, size * 0.55, _safe_text(text))
+            self.ln(2)
 
         def body_text(self, text: str):
-            """Render body text. 11pt, 1.4x line height, 4mm gap after."""
-            self.set_font("Helvetica", "", 11)
+            """10pt body text."""
+            self.set_font("Helvetica", "", 10)
             self.set_text_color(*_BODY)
-            self.multi_cell(0, 6, _safe_text(text))
-            self.ln(4)
+            self.multi_cell(0, 4.5, _safe_text(text))
+            self.ln(1.5)
 
         def body_label(self, text: str):
-            """Render a bold inline label (e.g. 'What we found:')."""
-            self.set_font("Helvetica", "B", 11)
+            """Bold inline label."""
+            self.set_font("Helvetica", "B", 10)
             self.set_text_color(*_HEADING)
-            self.cell(0, 6, _safe_text(text))
-            self.ln(4)
+            self.multi_cell(0, 4.5, _safe_text(text))
+            self.ln(1)
 
         def severity_badge(self, severity: str):
-            """Render an inline severity badge with padding."""
+            """Inline severity badge."""
             bg, fg = _SEVERITY_COLORS.get(severity, (_BLUE, _WHITE))
             label = severity.upper()
-            self.set_font("Helvetica", "B", 9)
-            w = self.get_string_width(label) + 6
+            self.set_font("Helvetica", "B", 8)
+            w = self.get_string_width(label) + 5
             self.set_fill_color(*bg)
             self.set_text_color(*fg)
-            self.cell(w, 6, f" {label} ", fill=True, new_x="RIGHT")
+            self.cell(w, 5, f" {label} ", fill=True, new_x="RIGHT")
             self.set_text_color(*_BODY)
-            self.cell(6, 6, "")  # 6mm spacer
+            self.cell(4, 5, "")  # spacer
 
         def code_block(self, text: str):
-            """Render a prompt box with border, background, and padding."""
-            safe = _safe_text(text[:1000])
+            """Prompt box: grey bg, border, monospace text."""
+            safe = _safe_text(text[:800])
             x = self.l_margin
             w = self.w - self.l_margin - self.r_margin
-            pad = 8  # mm internal padding
+            pad = 4  # mm internal padding
 
-            # Measure height needed
-            self.set_font("Courier", "", 9)
-            self.set_xy(x + pad, self.get_y())
-            start_y = self.get_y()
-            # Dry run: measure text height
-            self.multi_cell(w - 2 * pad, 4.5, safe, dry_run=True, output="LINES")
-            line_count = len(safe.split("\n"))
-            # Estimate: each line ~4.5mm, plus wrapping
-            est_h = max(line_count * 4.5, 10) + 2 * pad
+            # Two-pass: first measure, then draw box, then render
+            self.set_font("Courier", "", 8)
+            box_y = self.get_y()
+            # Measure by rendering to nowhere
+            self.set_xy(x + pad, box_y + pad)
+            start_measure = self.get_y()
+            self.multi_cell(w - 2 * pad, 3.8, safe, dry_run=True)
+            text_h = self.get_y() - start_measure
+            # dry_run doesn't move cursor in all fpdf2 versions,
+            # so also estimate from line count
+            line_count = safe.count("\n") + 1
+            # Account for wrapping: estimate chars per line
+            chars_per_line = max(1, int((w - 2 * pad) / 1.9))
+            wrapped_lines = sum(
+                max(1, (len(ln) + chars_per_line - 1) // chars_per_line)
+                for ln in safe.split("\n")
+            )
+            text_h = max(text_h, wrapped_lines * 3.8)
+            box_h = text_h + 2 * pad
 
             # Draw background + border
-            box_y = self.get_y()
             self.set_fill_color(*_CODE_BG)
             self.set_draw_color(*_CODE_BORDER)
             self.set_line_width(0.35)
-            self.rect(x, box_y, w, est_h, style="FD")
+            self.rect(x, box_y, w, box_h, style="FD")
 
             # Render text inside
-            self.set_font("Courier", "", 9)
+            self.set_font("Courier", "", 8)
             self.set_text_color(*_BODY)
             self.set_xy(x + pad, box_y + pad)
-            self.multi_cell(w - 2 * pad, 4.5, safe)
-            actual_end = self.get_y() + pad
-
-            # If text was longer than estimate, extend
-            if actual_end > box_y + est_h:
-                real_h = actual_end - box_y
-                self.set_fill_color(*_CODE_BG)
-                self.set_draw_color(*_CODE_BORDER)
-                self.rect(x, box_y, w, real_h, style="FD")
-                # Re-render text
-                self.set_font("Courier", "", 9)
-                self.set_text_color(*_BODY)
-                self.set_xy(x + pad, box_y + pad)
-                self.multi_cell(w - 2 * pad, 4.5, safe)
-                self.set_y(self.get_y() + pad)
-            else:
-                self.set_y(box_y + est_h)
-
-            self.ln(4)
+            self.multi_cell(w - 2 * pad, 3.8, safe)
+            self.set_y(box_y + box_h)
+            self.ln(2)
 
         def bullet(self, text: str):
-            """Render a bullet point with 5mm indent."""
-            self.set_font("Helvetica", "", 11)
+            """Bullet point with indent."""
+            self.set_font("Helvetica", "", 10)
             self.set_text_color(*_BODY)
             x = self.get_x()
-            self.set_x(x + 5)
-            self.cell(4, 6, "-")
-            self.multi_cell(0, 6, _safe_text(text))
+            self.set_x(x + 3)
+            self.cell(4, 4.5, "-")
+            self.multi_cell(0, 4.5, _safe_text(text))
             self.set_x(x)
-            self.ln(1)
 
         def callout_box(self, text: str):
-            """Render a callout box with light blue background."""
+            """Callout box with light blue background."""
             safe = _safe_text(text)
             x = self.l_margin
             w = self.w - self.l_margin - self.r_margin
-            pad = 8
+            pad = 5
 
             # Measure
-            self.set_font("Helvetica", "", 10)
-            start_y = self.get_y()
-            # Estimate height
-            lines_est = len(safe) / ((w - 2 * pad) / 2.0)  # rough char estimate
-            est_h = max(lines_est * 5, 12) + 2 * pad
+            self.set_font("Helvetica", "", 9)
+            box_y = self.get_y()
+            chars_per_line = max(1, int((w - 2 * pad) / 2.0))
+            line_count = sum(
+                max(1, (len(ln) + chars_per_line - 1) // chars_per_line)
+                for ln in safe.split("\n")
+            )
+            text_h = line_count * 4.5
+            box_h = text_h + 2 * pad
 
             # Draw box
             self.set_fill_color(*_CALLOUT_BG)
             self.set_draw_color(*_CALLOUT_BORDER)
             self.set_line_width(0.35)
-            self.rect(x, start_y, w, est_h, style="FD")
+            self.rect(x, box_y, w, box_h, style="FD")
 
             # Render text
-            self.set_font("Helvetica", "", 10)
+            self.set_font("Helvetica", "", 9)
             self.set_text_color(*_BRAND)
-            self.set_xy(x + pad, start_y + pad)
-            self.multi_cell(w - 2 * pad, 5, safe)
-            actual_end = self.get_y() + pad
-
-            if actual_end > start_y + est_h:
-                real_h = actual_end - start_y
-                self.set_fill_color(*_CALLOUT_BG)
-                self.set_draw_color(*_CALLOUT_BORDER)
-                self.rect(x, start_y, w, real_h, style="FD")
-                self.set_font("Helvetica", "", 10)
-                self.set_text_color(*_BRAND)
-                self.set_xy(x + pad, start_y + pad)
-                self.multi_cell(w - 2 * pad, 5, safe)
-                self.set_y(self.get_y() + pad)
-            else:
-                self.set_y(start_y + est_h)
-
-            self.ln(6)
+            self.set_xy(x + pad, box_y + pad)
+            self.multi_cell(w - 2 * pad, 4.5, safe)
+            self.set_y(box_y + box_h)
+            self.ln(4)
 
     return MyCodePDF
 
@@ -1157,49 +1171,51 @@ def render_understanding_pdf(
 
     # Title
     pdf.section_heading("Understanding Your Results", level=1)
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*_SUBTLE)
     date = _dt.date.today().isoformat()
-    pdf.cell(0, 5, f"Edition {edition}  |  {date}")
-    pdf.ln(10)
+    pdf.cell(0, 4, f"Edition {edition}  |  {date}")
+    pdf.ln(6)
 
     # Project summary
     if report.project_description:
         pdf.section_heading("Project Summary")
         pdf.body_text(report.project_description)
-        pdf.ln(2)
 
-    # Dependency stack
+    # Test overview — compact single-line stats
+    stats = (
+        f"Scenarios: {report.scenarios_run} run, "
+        f"{report.scenarios_passed} passed, "
+        f"{report.scenarios_failed} failed"
+    )
+    if report.scenarios_incomplete:
+        stats += f", {report.scenarios_incomplete} could not test"
+    if report.total_errors:
+        stats += f" | {report.total_errors} errors"
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*_BODY)
+    pdf.multi_cell(0, 4.5, stats)
+    pdf.ln(1)
+
+    # Dependency stack — compact
     has_deps = report.recognized_dep_count > 0 or report.unrecognized_deps
     if has_deps:
-        pdf.section_heading("Dependency Stack")
+        dep_parts: list[str] = []
         if report.recognized_dep_count:
             rec_names = ""
             if report.recognized_dep_names:
-                rec_names = f": {', '.join(report.recognized_dep_names[:10])}"
-            pdf.bullet(
-                f"{report.recognized_dep_count} dependencies with "
-                f"targeted stress profiles{rec_names}"
+                rec_names = f" ({', '.join(report.recognized_dep_names[:10])})"
+            dep_parts.append(
+                f"{report.recognized_dep_count} profiled{rec_names}"
             )
         if report.unrecognized_deps:
-            names = ", ".join(report.unrecognized_deps[:10])
-            suffix = "..." if len(report.unrecognized_deps) > 10 else ""
-            pdf.bullet(
-                f"{len(report.unrecognized_deps)} dependencies tested "
-                f"with usage-based analysis: {names}{suffix}"
+            dep_parts.append(
+                f"{len(report.unrecognized_deps)} usage-tested"
             )
-        pdf.ln(2)
-
-    # Test overview
-    pdf.section_heading("Test Overview")
-    pdf.bullet(f"Scenarios run: {report.scenarios_run}")
-    pdf.bullet(f"Passed: {report.scenarios_passed}")
-    pdf.bullet(f"Failed: {report.scenarios_failed}")
-    if report.scenarios_incomplete:
-        pdf.bullet(f"Could not test: {report.scenarios_incomplete}")
-    if report.total_errors:
-        pdf.bullet(f"Total errors: {report.total_errors}")
-    pdf.ln(6)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*_SUBTLE)
+        pdf.multi_cell(0, 4, f"Dependencies: {', '.join(dep_parts)}")
+    pdf.ln(2)
 
     # Partition http_tested out of incomplete tests
     http_tested, other_incomplete = _partition_http_tested(
@@ -1217,7 +1233,6 @@ def render_understanding_pdf(
         if not group:
             continue
         pdf.section_heading(f"{severity.upper()} ({len(group)})", level=3)
-        pdf.ln(2)
         for f in group:
             _render_pdf_finding(pdf, f)
 
@@ -1228,22 +1243,35 @@ def render_understanding_pdf(
         pdf.multi_cell(0, 5, _safe_text(_http_tested_summary(http_tested)))
         pdf.ln(6)
 
-    # Performance summary table
-    _render_perf_table_pdf(pdf, report.degradation_points)
-
-    # Confidence note
-    if report.confidence_note:
-        pdf.ln(6)
-        pdf.set_font("Helvetica", "I", 10)
-        pdf.set_text_color(*_SUBTLE)
-        pdf.multi_cell(0, 5, _safe_text(report.confidence_note))
-
-    # JSON download callout
+    # Performance summary table + confidence + callout — keep together
+    rows = _dedup_by_label(report.degradation_points)
     has_actionable = any(
         f.severity in ("critical", "warning") for f in report.findings
     )
+    # Estimate total height of remaining content
+    tail_h = 0
+    if rows:
+        tail_h += 10 + 6 + len(rows) * 6 + 4  # heading + header + rows + gap
+    if report.confidence_note:
+        tail_h += 10
     if has_actionable:
-        pdf.ln(10)
+        tail_h += 25  # callout box
+    remaining = pdf.h - pdf.get_y() - 18  # footer margin
+    if tail_h > 0 and remaining < tail_h:
+        pdf.add_page()
+
+    if rows:
+        _render_perf_table_pdf(pdf, report.degradation_points)
+
+    # Confidence note
+    if report.confidence_note:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(*_SUBTLE)
+        pdf.multi_cell(0, 4, _safe_text(report.confidence_note))
+        pdf.ln(2)
+
+    # JSON download callout
+    if has_actionable:
         pdf.callout_box(
             "Download the JSON report and attach it when you paste the "
             "prompts above into your coding agent. The JSON contains the "
@@ -1251,6 +1279,14 @@ def render_understanding_pdf(
         )
 
     return bytes(pdf.output())
+
+
+def _draw_card_border(pdf, color: tuple, margin: float, y_start: float, y_end: float) -> None:
+    """Draw a coloured left border for a finding card."""
+    pdf.set_draw_color(*color)
+    pdf.set_line_width(1.0)
+    pdf.line(margin + 0.5, y_start, margin + 0.5, y_end)
+    pdf.set_line_width(0.35)
 
 
 def _integrate_details(description: str, details: str) -> str:
@@ -1283,18 +1319,18 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     original_margin = pdf.l_margin
     card_start_y = pdf.get_y()
 
-    # Badge + title
+    # Badge + title on one line
     pdf.set_x(original_margin + card_indent)
     pdf.severity_badge(f.severity)
     title = f.title
     if f.group_count > 1:
         title += f" (and {f.group_count - 1} similar)"
-    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_font("Helvetica", "B", 11)
     pdf.set_text_color(*_HEADING)
-    pdf.cell(0, 7, _safe_text(title))
-    pdf.ln(8)
+    pdf.cell(0, 5, _safe_text(title))
+    pdf.ln(6)
 
-    # Temporarily indent all content inside the card
+    # Indent card content
     pdf.set_left_margin(original_margin + card_indent)
 
     # What we found — description integrated with details
@@ -1302,7 +1338,6 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     combined = _integrate_details(f.description or "", f.details or "")
     if combined:
         pdf.body_text(combined)
-    pdf.ln(2)
 
     # INFO findings: description only
     if f.severity == "info":
@@ -1313,18 +1348,11 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
                 0, 4,
                 f"Related dependencies: {', '.join(f.affected_dependencies)}",
             )
-            pdf.ln(4)
-        # Draw left border and restore margin
+            pdf.ln(3)
         card_end_y = pdf.get_y()
         pdf.set_left_margin(original_margin)
-        pdf.set_draw_color(*border_color)
-        pdf.set_line_width(1.0)
-        pdf.line(
-            original_margin + 0.5, card_start_y,
-            original_margin + 0.5, card_end_y,
-        )
-        pdf.set_line_width(0.35)
-        pdf.ln(10)
+        _draw_card_border(pdf, border_color, original_margin, card_start_y, card_end_y)
+        pdf.ln(4)
         return
 
     # What this means for you
@@ -1332,37 +1360,25 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     if consequence:
         pdf.body_label("What this means for you:")
         pdf.body_text(consequence)
-        pdf.ln(2)
 
-    # What to do
-    pdf.body_label("What to do:")
-    pdf.body_text(
-        "Copy the prompt below and paste it into your coding agent "
-        "(Claude Code, Cursor, Copilot) along with the JSON report."
-    )
-    pdf.ln(2)
-
-    # Prompt (boxed)
+    # What to do + Prompt combined
     prompt = generate_finding_prompt(f)
     if prompt:
-        pdf.body_label("Prompt:")
+        pdf.body_label("What to do: paste this into your coding agent with the JSON report.")
         pdf.code_block(prompt)
 
-    # After you fix it — outside the prompt box
+    # After you fix it
     pdf.body_label("After you fix it:")
-    pdf.body_text("Run myCode again to verify the fix worked.")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(*_BODY)
+    pdf.cell(0, 5, "Run myCode again to verify the fix worked.")
+    pdf.ln(4)
 
     # Draw left border
     card_end_y = pdf.get_y()
     pdf.set_left_margin(original_margin)
-    pdf.set_draw_color(*border_color)
-    pdf.set_line_width(1.0)
-    pdf.line(
-        original_margin + 0.5, card_start_y,
-        original_margin + 0.5, card_end_y,
-    )
-    pdf.set_line_width(0.35)
-    pdf.ln(10)
+    _draw_card_border(pdf, border_color, original_margin, card_start_y, card_end_y)
+    pdf.ln(4)
 
 
 # ── File Output ──
