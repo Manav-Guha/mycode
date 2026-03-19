@@ -50,6 +50,14 @@ COPY_EXCLUDE_PREFIXES = ("pytest-of-",)
 
 COPY_EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
 
+# Dependency file names to search for (in project root and one level of subdirs)
+_DEP_FILENAMES = (
+    "requirements.txt", "requirement.txt",
+    "requirements-dev.txt", "requirements_dev.txt",
+    "pyproject.toml", "setup.py", "setup.cfg",
+    "package.json",
+)
+
 
 @dataclass
 class ResourceCaps:
@@ -360,6 +368,55 @@ class SessionManager:
 
     # ── Dependency Installation ──
 
+    def _find_dep_file_dir(self) -> Path:
+        """Find the directory containing dependency files.
+
+        Checks the project root first, then one level of subdirectories.
+        If multiple subdirectories contain dep files, prefers the one with
+        the most source files (.py, .js, .ts).  Returns the project root
+        as fallback when no dep files are found anywhere.
+        """
+        root = self.project_copy_dir
+        assert root is not None
+
+        # 1. Check root — if any dep file exists, use root
+        for name in _DEP_FILENAMES:
+            if (root / name).is_file():
+                return root
+
+        # 2. Check one level of subdirectories
+        candidates: list[tuple[Path, int]] = []
+        try:
+            children = sorted(root.iterdir())
+        except OSError:
+            return root
+
+        for child in children:
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            has_dep_file = any(
+                (child / name).is_file() for name in _DEP_FILENAMES
+            )
+            if has_dep_file:
+                py_count = len(list(child.glob("*.py")))
+                js_count = (
+                    len(list(child.glob("*.js")))
+                    + len(list(child.glob("*.ts")))
+                )
+                candidates.append((child, py_count + js_count))
+
+        if candidates:
+            candidates.sort(key=lambda c: c[1], reverse=True)
+            winner = candidates[0][0]
+            logger.info(
+                "[PY-DEPS] Dep files found in subdirectory: %s",
+                winner.name,
+            )
+            return winner
+
+        # 3. No dep files found — return root (fallback to env install)
+        return root
+
     def _install_dependencies(self):
         """Install the user's dependencies into the venv from the project copy."""
         logger.debug("[PY-DEPS] _install_dependencies called, project_copy_dir=%s", self.project_copy_dir)
@@ -367,6 +424,8 @@ class SessionManager:
             logger.debug("[PY-DEPS] No project_copy_dir, skipping")
             return
 
+        # Find the directory containing dep files (root or one subdir down)
+        dep_dir = self._find_dep_file_dir()
         installed_any = False
 
         # Try requirements*.txt files (most common for vibe-coded projects)
@@ -376,7 +435,7 @@ class SessionManager:
             "requirements-dev.txt",
             "requirements_dev.txt",
         ]:
-            req_path = self.project_copy_dir / req_file
+            req_path = dep_dir / req_file
             logger.debug("[PY-DEPS] Checking %s — exists=%s", req_file, req_path.is_file())
             if req_path.is_file():
                 try:
@@ -392,13 +451,13 @@ class SessionManager:
                         installed_any = True
                     logger.debug("[PY-DEPS] Individual install from %s: %d packages succeeded", req_file, count)
 
-        # Try pyproject.toml (install from copy dir so originals are untouched)
-        pyproject = self.project_copy_dir / "pyproject.toml"
+        # Try pyproject.toml (install from dep dir so originals are untouched)
+        pyproject = dep_dir / "pyproject.toml"
         logger.debug("[PY-DEPS] Checking pyproject.toml — exists=%s", pyproject.is_file())
         if pyproject.is_file() and not installed_any:
             try:
                 logger.debug("[PY-DEPS] Installing from pyproject.toml")
-                self._pip_install([str(self.project_copy_dir)])
+                self._pip_install([str(dep_dir)])
                 installed_any = True
                 logger.debug("[PY-DEPS] Successfully installed from pyproject.toml")
             except DependencyInstallError as e:
@@ -407,12 +466,12 @@ class SessionManager:
                 )
 
         # Try setup.py
-        setup_py = self.project_copy_dir / "setup.py"
+        setup_py = dep_dir / "setup.py"
         logger.debug("[PY-DEPS] Checking setup.py — exists=%s", setup_py.is_file())
         if setup_py.is_file() and not installed_any:
             try:
                 logger.debug("[PY-DEPS] Installing from setup.py")
-                self._pip_install([str(self.project_copy_dir)])
+                self._pip_install([str(dep_dir)])
                 installed_any = True
                 logger.debug("[PY-DEPS] Successfully installed from setup.py")
             except DependencyInstallError as e:
@@ -519,20 +578,22 @@ class SessionManager:
             logger.debug("[JS-DEPS] No project_copy_dir, skipping")
             return
 
-        pkg_json = self.project_copy_dir / "package.json"
+        # Check root first, then dep-file subdirectory for package.json
+        dep_dir = self._find_dep_file_dir()
+        pkg_json = dep_dir / "package.json"
         logger.debug("[JS-DEPS] Checking for package.json at %s — exists=%s", pkg_json, pkg_json.is_file())
         if not pkg_json.is_file():
             logger.debug("[JS-DEPS] No package.json found, skipping")
             return
 
         # If node_modules already present (e.g. user pre-installed), skip
-        node_modules = self.project_copy_dir / "node_modules"
+        node_modules = dep_dir / "node_modules"
         if node_modules.is_dir() and any(node_modules.iterdir()):
             logger.info("node_modules already exists, skipping npm install")
             self.js_deps_installed = True
             return
 
-        lock_file = self.project_copy_dir / "package-lock.json"
+        lock_file = dep_dir / "package-lock.json"
         if lock_file.is_file():
             cmd = ["npm", "ci"]
         else:
@@ -543,7 +604,7 @@ class SessionManager:
         env = os.environ.copy()
         env["NODE_ENV"] = "development"
 
-        logger.debug("[JS-DEPS] Running command: %s in cwd=%s", cmd, self.project_copy_dir)
+        logger.debug("[JS-DEPS] Running command: %s in cwd=%s", cmd, dep_dir)
 
         try:
             result = subprocess.run(
@@ -551,7 +612,7 @@ class SessionManager:
                 capture_output=True,
                 text=True,
                 timeout=120,
-                cwd=str(self.project_copy_dir),
+                cwd=str(dep_dir),
                 env=env,
             )
             logger.debug("[JS-DEPS] Exit code: %d", result.returncode)
@@ -568,7 +629,7 @@ class SessionManager:
                     capture_output=True,
                     text=True,
                     timeout=120,
-                    cwd=str(self.project_copy_dir),
+                    cwd=str(dep_dir),
                     env=env,
                 )
 

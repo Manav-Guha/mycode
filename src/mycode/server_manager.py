@@ -637,12 +637,43 @@ def start_server(
     )
 
 
+# Framework package prefixes — used to distinguish "missing dep" from
+# "installed but crashes on import" when the ImportError is inside the
+# framework's own package tree.
+_FRAMEWORK_PACKAGES: dict[str, set[str]] = {
+    "streamlit": {"streamlit"},
+    "fastapi": {"fastapi", "starlette"},
+    "flask": {"flask", "werkzeug", "jinja2"},
+    "express": set(),
+    "nextjs": set(),
+}
+
+
 def _diagnose_startup_failure(stderr: str, framework: str) -> str:
     """Translate raw stderr into a human-readable startup failure reason."""
     stderr_lower = stderr.lower()
 
     if "address already in use" in stderr_lower or "eaddrinuse" in stderr_lower:
         return "port conflict — another process is using the assigned port"
+
+    # Import error INSIDE the framework package (installed but crashes).
+    # Must come before the generic "no module named" check so that
+    # e.g. "from streamlit.proto.X import Y" is not misclassified as
+    # "missing dependency: streamlit".
+    if "importerror" in stderr_lower or "modulenotfounderror" in stderr_lower:
+        # Look for "from <pkg>.submodule import" or "import <pkg>.submodule"
+        m = re.search(
+            r"(?:from|import)\s+(\w+)\.\S+",
+            stderr,
+        )
+        if m:
+            failing_pkg = m.group(1).lower()
+            known = _FRAMEWORK_PACKAGES.get(framework, set())
+            if failing_pkg == framework.lower() or failing_pkg in known:
+                return (
+                    f"{framework} is installed but crashes on import "
+                    f"— likely incompatible with this Python version"
+                )
 
     if "no module named" in stderr_lower or "modulenotfounderror" in stderr_lower:
         # Extract the module name

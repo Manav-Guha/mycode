@@ -455,6 +455,101 @@ class TestPyDependencyInstallation:
         assert len(req_files_installed) == 2
 
 
+# ── Subdirectory Dep-File Discovery Tests ──
+
+
+class TestFindDepFileDir:
+    """Test _find_dep_file_dir for root and subdirectory dep files."""
+
+    def _make_session(self, tmp_path, project):
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+        sm.venv_python = Path("/fake/venv/bin/python")
+        sm.environment_info = EnvironmentInfo()
+        return sm
+
+    def test_root_preferred(self, tmp_path):
+        """Dep file at root → returns root, even if subdir also has one."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "requirements.txt").write_text("flask\n")
+        sub = project / "sub"
+        sub.mkdir()
+        (sub / "requirements.txt").write_text("streamlit\n")
+
+        sm = self._make_session(tmp_path, project)
+        assert sm._find_dep_file_dir() == project
+
+    def test_subdir_found(self, tmp_path):
+        """Dep file only in subdir → returns that subdir."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sub = project / "My Projects"
+        sub.mkdir()
+        (sub / "requirements.txt").write_text("streamlit\n")
+        (sub / "app.py").write_text("import streamlit\n")
+
+        sm = self._make_session(tmp_path, project)
+        assert sm._find_dep_file_dir() == sub
+
+    def test_multiple_subdirs_picks_most_source_files(self, tmp_path):
+        """Two subdirs have dep files → picks the one with more .py files."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sub_a = project / "alpha"
+        sub_a.mkdir()
+        (sub_a / "requirements.txt").write_text("flask\n")
+        (sub_a / "one.py").write_text("")
+
+        sub_b = project / "beta"
+        sub_b.mkdir()
+        (sub_b / "requirements.txt").write_text("streamlit\n")
+        (sub_b / "one.py").write_text("")
+        (sub_b / "two.py").write_text("")
+        (sub_b / "three.py").write_text("")
+
+        sm = self._make_session(tmp_path, project)
+        assert sm._find_dep_file_dir() == sub_b
+
+    def test_no_dep_files_returns_root(self, tmp_path):
+        """No dep files anywhere → returns root (fallback to env install)."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "app.py").write_text("print('hello')\n")
+
+        sm = self._make_session(tmp_path, project)
+        assert sm._find_dep_file_dir() == project
+
+    def test_hidden_dirs_skipped(self, tmp_path):
+        """Hidden directories (.git etc.) are not searched."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        git = project / ".git"
+        git.mkdir()
+        (git / "package.json").write_text("{}\n")
+
+        sm = self._make_session(tmp_path, project)
+        # Should return root (no visible dep files), not .git
+        assert sm._find_dep_file_dir() == project
+
+    def test_install_deps_from_subdir(self, tmp_path):
+        """Full _install_dependencies() finds requirements.txt in subdir."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sub = project / "app"
+        sub.mkdir()
+        (sub / "requirements.txt").write_text("streamlit==1.55.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        with mock.patch.object(sm, "_pip_install") as mock_pip:
+            sm._install_dependencies()
+
+        mock_pip.assert_called_once_with(
+            ["-r", str(sub / "requirements.txt")]
+        )
+
+
 # ── JS Dependency Installation Tests ──
 
 

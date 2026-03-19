@@ -472,6 +472,38 @@ class TestDiagnoseStartupFailure:
         )
         assert "syntax error" in msg
 
+    def test_internal_import_error_streamlit(self):
+        """ImportError inside streamlit's own package → 'installed but crashes'."""
+        stderr = (
+            'Traceback (most recent call last):\n'
+            '  File "/venv/bin/streamlit", line 3, in <module>\n'
+            '    from streamlit.cli import main\n'
+            '  File "/venv/lib/streamlit/__init__.py", line 48, in <module>\n'
+            '    from streamlit.proto.RootContainer_pb2 import RootContainer\n'
+            'ImportError: cannot import name \'RootContainer\'\n'
+        )
+        msg = _diagnose_startup_failure(stderr, "streamlit")
+        assert "installed but crashes" in msg
+        assert "missing dependency" not in msg
+
+    def test_internal_import_error_fastapi_starlette(self):
+        """ImportError in starlette (fastapi dep) → 'installed but crashes'."""
+        stderr = (
+            'Traceback (most recent call last):\n'
+            '  File "/venv/lib/uvicorn/main.py", line 5, in <module>\n'
+            '    from starlette.routing import Router\n'
+            'ImportError: cannot import name \'Router\'\n'
+        )
+        msg = _diagnose_startup_failure(stderr, "fastapi")
+        assert "installed but crashes" in msg
+
+    def test_missing_external_dep_still_detected(self):
+        """ImportError for an unrelated package → 'missing dependency'."""
+        stderr = "ModuleNotFoundError: No module named 'psycopg2'"
+        msg = _diagnose_startup_failure(stderr, "fastapi")
+        assert "missing dependency" in msg
+        assert "psycopg2" in msg
+
     def test_eaddrinuse_node(self):
         msg = _diagnose_startup_failure(
             "Error: listen EADDRINUSE: address already in use :::3000", "express"
