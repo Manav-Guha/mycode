@@ -493,19 +493,23 @@ function renderFinding(f) {
     return html;
 }
 
+function _pl(n, singular, plural) {
+    return n === 1 ? singular : (plural || singular + "s");
+}
+
 function humanizeStepLabel(label) {
     if (!label) return label;
     const s = String(label);
-    let m;
-    if ((m = s.match(/^data_size_(\d+)$/))) return Number(m[1]).toLocaleString() + " items";
-    if ((m = s.match(/^concurrent_(\d+)$/))) return Number(m[1]).toLocaleString() + " simultaneous users";
-    if ((m = s.match(/^api_concurrency_(\d+)$/))) return Number(m[1]).toLocaleString() + " concurrent API calls";
-    if ((m = s.match(/^wsgi_concurrent_(\d+)$/))) return Number(m[1]).toLocaleString() + " concurrent requests";
-    if ((m = s.match(/^async_handlers_(\d+)$/))) return Number(m[1]).toLocaleString() + " async handlers";
-    if ((m = s.match(/^async_load_(\d+)$/))) return Number(m[1]).toLocaleString() + " concurrent promises";
-    if ((m = s.match(/^sync_threadpool_(\d+)$/))) return Number(m[1]).toLocaleString() + " threads in pool";
-    if ((m = s.match(/^sqlite_writers_(\d+)$/))) return Number(m[1]).toLocaleString() + " concurrent writers";
-    if ((m = s.match(/^state_cycles_(\d+)$/))) return Number(m[1]).toLocaleString() + " state mutation cycles";
+    let m, n;
+    if ((m = s.match(/^data_size_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " " + _pl(n, "item"); }
+    if ((m = s.match(/^concurrent_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " simultaneous " + _pl(n, "user"); }
+    if ((m = s.match(/^api_concurrency_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " concurrent API " + _pl(n, "call"); }
+    if ((m = s.match(/^wsgi_concurrent_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " concurrent " + _pl(n, "request"); }
+    if ((m = s.match(/^async_handlers_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " async " + _pl(n, "handler"); }
+    if ((m = s.match(/^async_load_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " concurrent " + _pl(n, "promise"); }
+    if ((m = s.match(/^sync_threadpool_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " " + _pl(n, "thread") + " in pool"; }
+    if ((m = s.match(/^sqlite_writers_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " concurrent " + _pl(n, "writer"); }
+    if ((m = s.match(/^state_cycles_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " state mutation " + _pl(n, "cycle"); }
     if ((m = s.match(/^batch_(\d+)$/))) return Number(m[1]) === 0 ? "first iteration" : "iteration " + Number(m[1]).toLocaleString();
     if ((m = s.match(/^io_size_(\d+)$/))) {
         const size = Number(m[1]);
@@ -513,9 +517,11 @@ function humanizeStepLabel(label) {
         if (size >= 1000) return Math.round(size / 1000) + "KB of data";
         return size.toLocaleString() + " bytes of data";
     }
-    if ((m = s.match(/^gil_threads_(\d+)$/))) return m[1] + " parallel threads";
-    if ((m = s.match(/^compute_(\d+)$/))) return Number(m[1]).toLocaleString() + " items of data";
-    if ((m = s.match(/^rerun_rows_(\d+)$/))) return Number(m[1]).toLocaleString() + " rows of data";
+    if ((m = s.match(/^gil_threads_(\d+)$/))) { n = Number(m[1]); return n + " parallel " + _pl(n, "thread"); }
+    if ((m = s.match(/^compute_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " " + _pl(n, "item") + " of data"; }
+    if ((m = s.match(/^rerun_rows_(\d+)$/))) { n = Number(m[1]); return n.toLocaleString() + " " + _pl(n, "row") + " of data"; }
+    // HTTP load testing labels: "N concurrent"
+    if ((m = s.match(/^(\d+) concurrent$/))) { n = Number(m[1]); return n.toLocaleString() + " concurrent " + _pl(n, "connection"); }
     return s.replace(/_/g, " ");
 }
 
@@ -528,8 +534,18 @@ function humanizeMetricLabel(metric) {
 
 function humanizeScenarioName(name) {
     if (!name) return name;
+    const lower = name.toLowerCase();
+    if (lower === "http_get_root" || lower === "http_post_root") {
+        return "Loading your application's main page";
+    }
+    if (lower.startsWith("http_get_") || lower.startsWith("http_post_")) {
+        const parts = lower.split("_");
+        if (parts.length >= 3) {
+            const path = parts.slice(2).join("/");
+            if (path && path !== "root") return "Loading the /" + path + " endpoint";
+        }
+    }
     const s = name.replace(/_/g, " ");
-    // Capitalize first letter
     return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -569,7 +585,19 @@ function renderDegradations(degradations) {
 
         if (d.breaking_point) {
             const bpLabel = humanizeStepLabel(d.breaking_point);
-            html += `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--red)">Breaking point: at ${escapeHtml(bpLabel)}</div>`;
+            // Find value at breaking point to add metric context
+            let bpText = "at " + bpLabel;
+            const bpStep = (d.steps || []).find(s => s[0] === d.breaking_point || s.label === d.breaking_point);
+            if (bpStep) {
+                const bpVal = bpStep[1] !== undefined ? bpStep[1] : bpStep.value;
+                const metric = (d.metric || "").toLowerCase();
+                if (bpVal !== undefined) {
+                    if (metric.includes("time")) bpText = "response time exceeds " + formatMetricValue(bpVal, d.metric) + " at " + bpLabel;
+                    else if (metric.includes("memory")) bpText = "memory exceeds " + formatMetricValue(bpVal, d.metric) + " at " + bpLabel;
+                    else if (metric.includes("error")) bpText = "errors begin at " + bpLabel;
+                }
+            }
+            html += `<div style="margin-top:0.4rem;font-size:0.78rem;color:var(--red)">Breaking point: ${escapeHtml(bpText)}</div>`;
         }
 
         html += `</div>`;

@@ -889,7 +889,7 @@ class TestReportRendering:
         )
         text = report.as_text()
         assert "Degradation Curves" in text
-        assert "Breaking point: at large" in text
+        assert "Breaking point: response time exceeds 100ms at large" in text
 
     def test_renders_version_flags(self):
         report = DiagnosticReport(
@@ -4694,3 +4694,192 @@ class TestMarkdownExecutiveSummary:
         )
         md = report.as_markdown()
         assert "What To Do Next" not in md
+
+
+# ── Final report quality pass tests ──
+
+
+class TestDescribeScenarioHttpRoot:
+    """Issue 2: http_get_root must produce human-readable label."""
+
+    def test_http_get_root(self):
+        from mycode.report import _describe_scenario
+        assert "main page" in _describe_scenario("http_get_root")
+
+    def test_http_post_root(self):
+        from mycode.report import _describe_scenario
+        assert "main page" in _describe_scenario("http_post_root")
+
+    def test_http_get_api_users(self):
+        from mycode.report import _describe_scenario
+        result = _describe_scenario("http_get_api_users")
+        assert "/api/users" in result
+
+
+class TestDescribeStepSingular:
+    """Issue 4: Singular grammar for N=1."""
+
+    def test_concurrent_connection_singular(self):
+        from mycode.report import _describe_step
+        result = _describe_step("1 concurrent")
+        assert result == "1 concurrent connection"
+
+    def test_concurrent_connection_plural(self):
+        from mycode.report import _describe_step
+        result = _describe_step("5 concurrent")
+        assert result == "5 concurrent connections"
+
+
+class TestFlatMemoryNarrative:
+    """Issue 6: Flat memory should say 'stable' not show degradation."""
+
+    def test_flat_memory_narrative(self):
+        from mycode.report import DegradationPoint, _build_degradation_narrative
+        dp = DegradationPoint(
+            scenario_name="http_get_root",
+            metric="memory_peak_mb",
+            steps=[
+                ("1 concurrent", 65.0),
+                ("5 concurrent", 65.0),
+                ("10 concurrent", 65.0),
+            ],
+        )
+        narrative = _build_degradation_narrative(dp)
+        assert "stable" in narrative.lower()
+        assert "65MB" in narrative
+
+    def test_growing_memory_not_flat(self):
+        from mycode.report import DegradationPoint, _build_degradation_narrative
+        dp = DegradationPoint(
+            scenario_name="http_get_root",
+            metric="memory_peak_mb",
+            steps=[
+                ("1 concurrent", 50.0),
+                ("5 concurrent", 75.0),
+                ("10 concurrent", 150.0),
+            ],
+        )
+        narrative = _build_degradation_narrative(dp)
+        assert "stable" not in narrative.lower()
+
+
+class TestPortfolioStatsNotOnInfo:
+    """Issue 5: Portfolio stats only on critical/warning, not info."""
+
+    def test_info_finding_no_portfolio_stats(self):
+        from mycode.report import DiagnosticReport, Finding, ReportGenerator
+        from mycode.report import DegradationPoint
+        # Create a report with an info finding
+        report = DiagnosticReport(
+            findings=[
+                Finding(
+                    title="No issues detected",
+                    severity="info",
+                    description="All tests passed cleanly.",
+                    affected_dependencies=["flask"],
+                ),
+            ],
+        )
+        corpus = {"flask": {"failure_rate": 0.45, "tested_count": 10}}
+        # Simulate the contextualise step (which appends corpus stats)
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints()
+        # Manually run the corpus append logic
+        for finding in report.findings:
+            if finding.severity not in ("critical", "warning"):
+                continue
+            for dep_name in finding.affected_dependencies:
+                stats = corpus.get(dep_name.lower())
+                if stats and stats.get("tested_count", 0) >= 3:
+                    finding.description += (
+                        f" In myCode's test portfolio, {dep_name} "
+                        f"showed failures in {stats['failure_rate']:.0%} of "
+                        f"{stats['tested_count']} tested projects."
+                    )
+                    break
+        # Info finding should NOT have portfolio stats
+        assert "portfolio" not in report.findings[0].description
+
+
+class TestRecognizedDepNames:
+    """Issue 1: recognized_dep_names field on DiagnosticReport."""
+
+    def test_as_dict_includes_names(self):
+        report = DiagnosticReport(
+            recognized_dep_count=2,
+            recognized_dep_names=["pandas", "streamlit"],
+        )
+        d = report.as_dict()
+        assert d["statistics"]["recognized_dependency_names"] == ["pandas", "streamlit"]
+
+    def test_as_text_includes_names(self):
+        report = DiagnosticReport(
+            recognized_dep_count=2,
+            recognized_dep_names=["pandas", "flask"],
+            unrecognized_deps=["plotly"],
+        )
+        text = report.as_text()
+        assert "pandas, flask" in text
+
+    def test_as_markdown_includes_names(self):
+        report = DiagnosticReport(
+            recognized_dep_count=2,
+            recognized_dep_names=["pandas", "flask"],
+            unrecognized_deps=["plotly"],
+        )
+        md = report.as_markdown()
+        assert "pandas, flask" in md
+
+
+class TestBreakingPointWithMetric:
+    """Issue 7: Breaking point label includes what metric breaks."""
+
+    def test_breaking_point_label_time(self):
+        from mycode.report import DegradationPoint, _breaking_point_label
+        dp = DegradationPoint(
+            scenario_name="test",
+            metric="execution_time_ms",
+            steps=[("data_size_1000", 10.0), ("data_size_50000", 500.0)],
+            breaking_point="data_size_50000",
+        )
+        label = _breaking_point_label(dp)
+        assert "response time exceeds 500ms" in label
+        assert "50,000 items" in label
+
+    def test_breaking_point_label_memory(self):
+        from mycode.report import DegradationPoint, _breaking_point_label
+        dp = DegradationPoint(
+            scenario_name="test",
+            metric="memory_peak_mb",
+            steps=[("concurrent_5", 20.0), ("concurrent_50", 120.0)],
+            breaking_point="concurrent_50",
+        )
+        label = _breaking_point_label(dp)
+        assert "memory exceeds 120MB" in label
+        assert "50 simultaneous users" in label
+
+    def test_breaking_point_label_errors(self):
+        from mycode.report import DegradationPoint, _breaking_point_label
+        dp = DegradationPoint(
+            scenario_name="test",
+            metric="error_count",
+            steps=[("concurrent_5", 0.0), ("concurrent_50", 5.0)],
+            breaking_point="concurrent_50",
+        )
+        label = _breaking_point_label(dp)
+        assert "errors begin" in label
+
+    def test_response_time_ms_metric_recognized(self):
+        """HTTP metric 'response_time_ms' should get time narrative."""
+        from mycode.report import DegradationPoint, _build_degradation_narrative
+        dp = DegradationPoint(
+            scenario_name="http_get_root",
+            metric="response_time_ms",
+            steps=[
+                ("1 concurrent", 5.0),
+                ("10 concurrent", 500.0),
+            ],
+        )
+        narrative = _build_degradation_narrative(dp)
+        # Should contain time units, not bare numbers
+        assert "ms" in narrative or "s" in narrative

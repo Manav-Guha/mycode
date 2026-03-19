@@ -1053,3 +1053,68 @@ class TestHttpTestedCollapse:
         report = self._make_http_tested_report()
         pdf_bytes = render_fixes_pdf(report, edition=1)
         assert pdf_bytes[:5] == b"%PDF-"
+
+
+# ── Issue 1: Dependency stack names recognized deps ──
+
+
+class TestDepStackNames:
+    """Recognized dependencies should be named in the dependency stack."""
+
+    def test_markdown_names_recognized_deps(self):
+        report = DiagnosticReport(
+            recognized_dep_count=2,
+            recognized_dep_names=["pandas", "streamlit"],
+            unrecognized_deps=["plotly"],
+        )
+        md = render_understanding(report, 1)
+        assert "pandas, streamlit" in md
+        assert "targeted stress profiles: pandas, streamlit" in md
+
+    @pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+    def test_pdf_names_recognized_deps(self):
+        from mycode.documents import render_understanding_pdf
+        report = DiagnosticReport(
+            recognized_dep_count=2,
+            recognized_dep_names=["pandas", "streamlit"],
+            unrecognized_deps=["plotly"],
+        )
+        pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+
+# ── Issue 7: Breaking point includes metric context ──
+
+
+class TestBreakingPointLabel:
+    """Breaking point must state what metric breaks."""
+
+    def test_time_breaking_point(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="flask_scaling",
+                    metric="execution_time_ms",
+                    steps=[("data_size_1000", 10.0), ("data_size_50000", 500.0)],
+                    breaking_point="data_size_50000",
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "response time exceeds 500ms" in md
+        assert "50,000 items" in md
+
+    def test_memory_breaking_point(self):
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="pandas_memory",
+                    metric="memory_peak_mb",
+                    steps=[("data_size_100", 5.0), ("data_size_10000", 120.0)],
+                    breaking_point="data_size_10000",
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        assert "memory exceeds 120MB" in md
+        assert "10,000 items" in md

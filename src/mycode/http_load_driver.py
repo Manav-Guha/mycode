@@ -49,6 +49,12 @@ from mycode.session import SessionManager
 
 logger = logging.getLogger(__name__)
 
+
+def _conns(n: int) -> str:
+    """Format 'N concurrent connection(s)' with correct plural."""
+    return f"{n} concurrent connection{'s' if n != 1 else ''}"
+
+
 # ── Constants ──
 
 # Default progressive load levels
@@ -567,18 +573,18 @@ def _build_http_summary(ep_result: EndpointLoadResult) -> str:
 
     if ep_result.breaking_reason == "crash":
         return (
-            f"Server crashed at {ep_result.breaking_point} concurrent connections "
+            f"Server crashed at {_conns(ep_result.breaking_point)} "
             f"while testing {desc}."
         )
     if ep_result.breaking_reason == "error_rate":
         return (
-            f"Endpoint {desc} failed at {ep_result.breaking_point} concurrent "
-            f"connections (error rate exceeded 50%). Handled {max_ok} cleanly."
+            f"Endpoint {desc} failed at {_conns(ep_result.breaking_point)} "
+            f"(error rate exceeded 50%). Handled {max_ok} cleanly."
         )
     if ep_result.breaking_reason == "response_time":
         return (
-            f"Endpoint {desc} became unresponsive at {ep_result.breaking_point} "
-            f"concurrent connections (>10s response time). Handled {max_ok} cleanly."
+            f"Endpoint {desc} became unresponsive at {_conns(ep_result.breaking_point)} "
+            f"(>10s response time). Handled {max_ok} cleanly."
         )
     return f"Endpoint {desc} handled all tested load levels (up to {max_ok} concurrent)."
 
@@ -618,18 +624,31 @@ def http_results_to_degradation_points(
             description=_describe_response_curve(ep_result),
         ))
 
-        # Memory curve (if any measurements)
-        if any(lvl.memory_mb > 0 for lvl in ep_result.levels):
-            mem_steps = [
-                (f"{lvl.concurrency} concurrent", lvl.memory_mb)
-                for lvl in ep_result.levels
-            ]
-            points.append(DegradationPoint(
-                scenario_name=scenario_name,
-                metric="memory_peak_mb",
-                steps=mem_steps,
-                breaking_point=breaking,
-            ))
+        # Memory curve (if any measurements and not flat)
+        mem_values = [lvl.memory_mb for lvl in ep_result.levels if lvl.memory_mb > 0]
+        if mem_values:
+            mem_range = max(mem_values) - min(mem_values)
+            if mem_range >= 2.0:
+                # Real growth — show as degradation curve
+                mem_steps = [
+                    (f"{lvl.concurrency} concurrent", lvl.memory_mb)
+                    for lvl in ep_result.levels
+                ]
+                points.append(DegradationPoint(
+                    scenario_name=scenario_name,
+                    metric="memory_peak_mb",
+                    steps=mem_steps,
+                    breaking_point=breaking,
+                ))
+            else:
+                # Flat memory — note stability on the response-time point
+                avg_mb = sum(mem_values) / len(mem_values)
+                if points and points[-1].scenario_name == scenario_name:
+                    stable_note = f" Memory usage stable at {avg_mb:.0f}MB under load."
+                    if points[-1].description:
+                        points[-1].description += stable_note
+                    else:
+                        points[-1].description = stable_note.strip()
 
     return points
 
@@ -671,7 +690,7 @@ def http_results_to_findings(
     # Server crash during load
     if load_result.server_crash:
         crash_at = load_result.server_crash_concurrency
-        desc = f"Your application server crashed under load at {crash_at} concurrent connections."
+        desc = f"Your application server crashed under load at {_conns(crash_at)}."
         if user_scale:
             if crash_at < user_scale:
                 desc += (
@@ -773,9 +792,9 @@ def _endpoint_to_finding(
             else "fails with errors"
         )
         if path == "/":
-            desc = f"Your application {verb} at {bp} concurrent connections."
+            desc = f"Your application {verb} at {_conns(bp)}."
         else:
-            desc = f"Your {label} endpoint {verb} at {bp} concurrent connections."
+            desc = f"Your {label} endpoint {verb} at {_conns(bp)}."
         if user_scale:
             if bp <= user_scale:
                 desc += (
@@ -823,7 +842,7 @@ def _endpoint_to_finding(
                 degrade_at = _find_degradation_onset(ep_result.levels)
                 if degrade_at:
                     desc += (
-                        f" At {degrade_at} concurrent connections, response "
+                        f" At {_conns(degrade_at)}, response "
                         f"time begins degrading significantly."
                     )
                 if user_scale:

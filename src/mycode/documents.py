@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from mycode.report import (
     DiagnosticReport,
     Finding,
+    _breaking_point_label,
     _build_degradation_narrative,
     _describe_scenario,
     _describe_step,
@@ -276,8 +277,8 @@ def render_understanding(report: DiagnosticReport, edition: int) -> str:
                 lines.append(dp.description)
                 lines.append("")
             if dp.breaking_point:
-                bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
-                lines.append(f"Breaking point: **at {bp_desc}**")
+                bp_label = _breaking_point_label(dp)
+                lines.append(f"Breaking point: **{bp_label}**")
                 lines.append("")
 
     # Confidence note
@@ -309,8 +310,11 @@ def _render_dependency_stack(lines: list[str], report: DiagnosticReport) -> None
     lines.append("## Dependency Stack")
     lines.append("")
     if report.recognized_dep_count:
+        rec_names = ""
+        if report.recognized_dep_names:
+            rec_names = f": {', '.join(report.recognized_dep_names[:10])}"
         lines.append(
-            f"- {report.recognized_dep_count} dependencies with targeted stress profiles"
+            f"- {report.recognized_dep_count} dependencies with targeted stress profiles{rec_names}"
         )
     if report.unrecognized_deps:
         lines.append(
@@ -798,9 +802,12 @@ def render_understanding_pdf(
     if has_deps:
         pdf.section_heading("Dependency Stack")
         if report.recognized_dep_count:
+            rec_names = ""
+            if report.recognized_dep_names:
+                rec_names = f": {', '.join(report.recognized_dep_names[:10])}"
             pdf.bullet(
                 f"{report.recognized_dep_count} dependencies with "
-                f"targeted stress profiles"
+                f"targeted stress profiles{rec_names}"
             )
         if report.unrecognized_deps:
             names = ", ".join(report.unrecognized_deps[:10])
@@ -863,10 +870,10 @@ def render_understanding_pdf(
             elif dp.description:
                 pdf.body_text(dp.description)
             if dp.breaking_point:
-                bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
+                bp_label = _breaking_point_label(dp)
                 pdf.set_font("Helvetica", "B", 11)
                 pdf.set_text_color(*_BODY_GREY)
-                pdf.cell(0, 6, _safe_text(f"Breaking point: at {bp_desc}"))
+                pdf.cell(0, 6, _safe_text(f"Breaking point: {bp_label}"))
                 pdf.ln(4)
 
     # Confidence note

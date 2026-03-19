@@ -151,6 +151,7 @@ class DiagnosticReport:
     version_flags: list[str] = field(default_factory=list)
     unrecognized_deps: list[str] = field(default_factory=list)
     recognized_dep_count: int = 0
+    recognized_dep_names: list[str] = field(default_factory=list)
     scenarios_run: int = 0
     scenarios_passed: int = 0
     scenarios_failed: int = 0
@@ -234,9 +235,12 @@ class DiagnosticReport:
         # Dependency coverage
         total_deps = self.recognized_dep_count + len(self.unrecognized_deps)
         if total_deps > 0 and self.unrecognized_deps:
+            rec_names = ""
+            if self.recognized_dep_names:
+                rec_names = f": {', '.join(self.recognized_dep_names[:10])}"
             sections.append(
                 f"\nmyCode tested {self.recognized_dep_count} of "
-                f"{total_deps} dependencies with targeted scenarios. "
+                f"{total_deps} dependencies with targeted scenarios{rec_names}. "
                 f"{len(self.unrecognized_deps)} "
                 f"{'dependency was' if len(self.unrecognized_deps) == 1 else 'dependencies were'} "
                 f"tested with general usage-based analysis."
@@ -320,9 +324,9 @@ class DiagnosticReport:
                 elif dp.description:
                     sections.append(f"    {dp.description}")
                 if dp.breaking_point:
-                    bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
+                    bp_label = _breaking_point_label(dp)
                     sections.append(
-                        f"    >> Breaking point: at {bp_desc}"
+                        f"    >> Breaking point: {bp_label}"
                     )
                 if dp.grouped_points:
                     names = [
@@ -459,9 +463,12 @@ class DiagnosticReport:
         # Dependency coverage
         total_deps = self.recognized_dep_count + len(self.unrecognized_deps)
         if total_deps > 0 and self.unrecognized_deps:
+            rec_names = ""
+            if self.recognized_dep_names:
+                rec_names = f": {', '.join(self.recognized_dep_names[:10])}"
             lines.append(
                 f"myCode tested {self.recognized_dep_count} of "
-                f"{total_deps} dependencies with targeted scenarios. "
+                f"{total_deps} dependencies with targeted scenarios{rec_names}. "
                 f"{len(self.unrecognized_deps)} "
                 f"{'dependency was' if len(self.unrecognized_deps) == 1 else 'dependencies were'} "
                 f"tested with general usage-based analysis."
@@ -563,9 +570,9 @@ class DiagnosticReport:
                     lines.append(dp.description)
                     lines.append("")
                 if dp.breaking_point:
-                    bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
+                    bp_label = _breaking_point_label(dp)
                     lines.append(
-                        f"Breaking point: **at {bp_desc}**"
+                        f"Breaking point: **{bp_label}**"
                     )
                     lines.append("")
 
@@ -667,6 +674,7 @@ class DiagnosticReport:
                 "scenarios_incomplete": self.scenarios_incomplete,
                 "total_errors": self.total_errors,
                 "recognized_dependencies": self.recognized_dep_count,
+                "recognized_dependency_names": list(self.recognized_dep_names),
                 "unrecognized_dependencies": len(self.unrecognized_deps),
             },
             "findings": [_finding_dict(f) for f in self.findings],
@@ -1006,9 +1014,10 @@ class ReportGenerator:
         )
 
         # 0d. Track dependency coverage
-        report.recognized_dep_count = sum(
-            1 for pm in profile_matches if pm.profile is not None
-        )
+        report.recognized_dep_names = [
+            pm.dependency_name for pm in profile_matches if pm.profile is not None
+        ]
+        report.recognized_dep_count = len(report.recognized_dep_names)
 
         # 0e. Set constraint flag and store parsed constraint fields
         report.has_user_constraints = (
@@ -1796,9 +1805,11 @@ class ReportGenerator:
                     f"{finding.description}"
                 )
 
-        # Append corpus stats sentences when available
+        # Append corpus stats sentences when available (critical/warning only)
         if corpus_lookup:
             for finding in report.findings:
+                if finding.severity not in ("critical", "warning"):
+                    continue
                 for dep_name in finding.affected_dependencies:
                     stats = corpus_lookup.get(dep_name.lower())
                     if stats and stats.get("tested_count", 0) >= 3:
@@ -3373,6 +3384,14 @@ def _describe_scenario(scenario_name: str) -> str:
     """
     name = scenario_name.lower()
 
+    # HTTP endpoint scenarios
+    if name in ("http_get_root", "http_post_root"):
+        return "loading your application's main page"
+    if name.startswith("http_get_") or name.startswith("http_post_"):
+        path = name.split("_", 2)[2] if name.count("_") >= 2 else ""
+        if path and path != "root":
+            return f"loading the /{path.replace('_', '/')} endpoint"
+
     # Try progressively shorter prefixes to find the template portion.
     # e.g. "flask_concurrent_request_load" → split into parts, try
     # joining from index 1, 2, ... until a match is found.
@@ -3718,7 +3737,8 @@ def _describe_step(step_name: str) -> str:
     # HTTP load testing labels: "N concurrent"
     m = re.match(r"(\d+) concurrent", step_name)
     if m:
-        return f"{int(m.group(1)):,} concurrent connections"
+        n = int(m.group(1))
+        return f"{n:,} concurrent connection{'s' if n != 1 else ''}"
 
     # Generic fallback: strip underscores, add spaces, capitalise
     # Only apply if the name has a recognisable word_number pattern
@@ -3848,13 +3868,58 @@ def _memory_qualifier(mb: float) -> str:
 
 def _metric_label(metric: str) -> str:
     """Return a human-readable label for a degradation metric."""
-    if metric == "execution_time_ms":
+    if metric in ("execution_time_ms", "response_time_ms"):
         return "Response time under load"
     if metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb"):
         return "Memory usage under load"
     if metric == "error_count":
         return "Errors under load"
     return ""
+
+
+def _metric_unit(metric: str) -> str:
+    """Return the unit suffix for a metric value."""
+    if metric in ("execution_time_ms", "response_time_ms"):
+        return "ms"
+    if metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb"):
+        return "MB"
+    if metric == "error_count":
+        return " errors"
+    return ""
+
+
+def _breaking_point_label(dp: "DegradationPoint") -> str:
+    """Build a breaking point label that includes what metric breaks and where.
+
+    Returns e.g. "response time exceeds 500ms at 50,000 items of data"
+    or "memory exceeds 120MB at 50 simultaneous users".
+    """
+    if not dp.breaking_point:
+        return ""
+    bp_desc = _describe_step(dp.breaking_point) or dp.breaking_point
+
+    # Find the value at the breaking point step
+    bp_value = None
+    for label, value in dp.steps:
+        if label == dp.breaking_point:
+            bp_value = value
+            break
+
+    is_time = dp.metric in ("execution_time_ms", "response_time_ms")
+    is_memory = dp.metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")
+    is_errors = dp.metric == "error_count"
+
+    if bp_value is not None:
+        if is_time:
+            val_str = _format_ms(bp_value)
+            return f"response time exceeds {val_str} at {bp_desc}"
+        if is_memory:
+            val_str = f"{bp_value:.0f}MB" if bp_value >= 1 else f"{bp_value:.2f}MB"
+            return f"memory exceeds {val_str} at {bp_desc}"
+        if is_errors:
+            return f"errors begin at {bp_desc}"
+
+    return f"at {bp_desc}"
 
 
 def _is_significant_finding(f: "Finding") -> bool:
@@ -3915,9 +3980,19 @@ def _build_degradation_narrative(dp: "DegradationPoint") -> str:
     if not dp.steps:
         return dp.description or ""
 
-    is_time = dp.metric in ("execution_time_ms",)
+    is_time = dp.metric in ("execution_time_ms", "response_time_ms")
     is_memory = dp.metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")
     is_errors = dp.metric == "error_count"
+
+    # Flat memory defense-in-depth: if all values are within 10% of mean,
+    # report as stable rather than showing a misleading degradation curve.
+    if is_memory:
+        values = [v for _, v in dp.steps]
+        mean_val = sum(values) / len(values) if values else 0
+        if mean_val > 0:
+            max_dev = max(abs(v - mean_val) for v in values)
+            if max_dev / mean_val < 0.10:
+                return f"Memory usage stable at {mean_val:.0f}MB under load."
 
     # Select key points: baseline, threshold, peak
     key_points = _select_key_points(dp.steps, is_time, is_memory)
@@ -3953,7 +4028,8 @@ def _build_degradation_narrative(dp: "DegradationPoint") -> str:
                 f"With {step_desc}, {val_str} error{'s' if value != 1 else ''}"
             )
         else:
-            parts.append(f"With {step_desc}, {value:.2f}")
+            unit = _metric_unit(dp.metric)
+            parts.append(f"With {step_desc}, {value:.2f}{unit}")
 
     narrative = ". ".join(parts) + "."
 
