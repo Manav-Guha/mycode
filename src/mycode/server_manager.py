@@ -413,7 +413,7 @@ def build_startup_command(
 
     if fw == "streamlit":
         cmd = [
-            "streamlit", "run", detection.entry_file,
+            "python", "-m", "streamlit", "run", detection.entry_file,
             "--server.port", str(port),
             "--server.headless", "true",
             "--browser.gatherUsageStats", "false",
@@ -423,7 +423,7 @@ def build_startup_command(
     if fw == "fastapi":
         module_app = f"{detection.module_name}:{detection.app_variable}"
         cmd = [
-            "uvicorn", module_app,
+            "python", "-m", "uvicorn", module_app,
             "--port", str(port),
             "--host", "0.0.0.0",
         ]
@@ -431,7 +431,7 @@ def build_startup_command(
 
     if fw == "flask":
         cmd = [
-            "flask", "run",
+            "python", "-m", "flask", "run",
             "--port", str(port),
         ]
         env = {"FLASK_APP": detection.entry_file}
@@ -543,16 +543,11 @@ def start_server(
     env.pop("PYTHONHOME", None)
     env.update(extra_env)
 
-    # Resolve commands that need the venv
+    # Resolve commands that need the venv — Python frameworks use
+    # "python -m <package>" so only the "python" prefix needs resolving.
     resolved_cmd = list(cmd)
     if resolved_cmd[0] == "python":
         resolved_cmd[0] = str(session.venv_python)
-    elif resolved_cmd[0] in ("streamlit", "uvicorn", "flask"):
-        # These are installed in the venv's bin/Scripts
-        bin_dir = session.venv_python.parent
-        tool_path = bin_dir / resolved_cmd[0]
-        if tool_path.exists():
-            resolved_cmd[0] = str(tool_path)
 
     logger.info(
         "Starting %s server on port %d: %s",

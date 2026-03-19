@@ -81,7 +81,7 @@ class TestBuildStartupCommand:
         )
         cmd, env = build_startup_command(detection, 8501)
         assert cmd == [
-            "streamlit", "run", "app.py",
+            "python", "-m", "streamlit", "run", "app.py",
             "--server.port", "8501",
             "--server.headless", "true",
             "--browser.gatherUsageStats", "false",
@@ -97,7 +97,7 @@ class TestBuildStartupCommand:
         )
         cmd, env = build_startup_command(detection, 8000)
         assert cmd == [
-            "uvicorn", "app:app",
+            "python", "-m", "uvicorn", "app:app",
             "--port", "8000",
             "--host", "0.0.0.0",
         ]
@@ -111,7 +111,7 @@ class TestBuildStartupCommand:
             module_name="src.main",
         )
         cmd, env = build_startup_command(detection, 9000)
-        assert cmd[1] == "src.main:application"
+        assert cmd[3] == "src.main:application"
 
     def test_flask_command(self):
         detection = FrameworkDetection(
@@ -120,7 +120,7 @@ class TestBuildStartupCommand:
             app_variable="app",
         )
         cmd, env = build_startup_command(detection, 5000)
-        assert cmd == ["flask", "run", "--port", "5000"]
+        assert cmd == ["python", "-m", "flask", "run", "--port", "5000"]
         assert env == {"FLASK_APP": "server.py"}
 
     def test_express_command(self):
