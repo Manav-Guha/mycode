@@ -592,41 +592,57 @@ function perfRowLabel(d) {
     return name;
 }
 
+function dedupByLabel(degradations) {
+    // Group by label, keep worst-case (highest peak value) per label
+    const groups = {};
+    for (const d of degradations) {
+        const steps = d.steps || [];
+        if (steps.length === 0) continue;
+        const label = perfRowLabel(d);
+        const peak = steps[steps.length - 1][1] || 0;
+        if (!groups[label] || peak > (groups[label].steps[groups[label].steps.length - 1][1] || 0)) {
+            groups[label] = d;
+        }
+    }
+    return Object.values(groups);
+}
+
 function renderDegradations(degradations) {
+    const rows = dedupByLabel(degradations);
+    if (rows.length === 0) return "";
+
     let html = `<div class="degradation-section">`;
     html += `<div class="section-title">Performance under load</div>`;
     html += `<table class="perf-table" style="width:100%;border-collapse:collapse;font-size:0.88rem;margin-top:0.5rem">`;
     html += `<thead><tr style="text-align:left;border-bottom:2px solid var(--border)">`;
-    html += `<th style="padding:0.4rem 0.3rem">What we tested</th>`;
-    html += `<th style="padding:0.4rem 0.3rem">At low load</th>`;
-    html += `<th style="padding:0.4rem 0.3rem">At mid load</th>`;
-    html += `<th style="padding:0.4rem 0.3rem">At peak load</th>`;
-    html += `<th style="padding:0.4rem 0.3rem">Verdict</th>`;
+    html += `<th style="padding:0.4rem 0.5rem">What we tested</th>`;
+    html += `<th style="padding:0.4rem 0.5rem">At low load</th>`;
+    html += `<th style="padding:0.4rem 0.5rem">At mid load</th>`;
+    html += `<th style="padding:0.4rem 0.5rem">At peak load</th>`;
+    html += `<th style="padding:0.4rem 0.5rem">Verdict</th>`;
     html += `</tr></thead><tbody>`;
 
-    for (const d of degradations) {
+    for (const d of rows) {
         const steps = d.steps || [];
-        if (steps.length === 0) continue;
-
         const label = perfRowLabel(d);
         const low = fmtCell(steps[0][1], steps[0][0], d.metric);
-        let mid = "—";
+        let mid = "\u2014";
         if (steps.length >= 3) {
             const midIdx = Math.floor(steps.length / 2);
             mid = fmtCell(steps[midIdx][1], steps[midIdx][0], d.metric);
         }
-        let high = "—";
+        let high = "\u2014";
         if (steps.length >= 2) {
             high = fmtCell(steps[steps.length - 1][1], steps[steps.length - 1][0], d.metric);
         }
         const verdict = verdictForCurve(d);
 
         html += `<tr style="border-bottom:1px solid var(--border)">`;
-        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(label)}</td>`;
-        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(low)}</td>`;
-        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(mid)}</td>`;
-        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(high)}</td>`;
-        html += `<td style="padding:0.35rem 0.3rem">${escapeHtml(verdict)}</td>`;
+        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(label)}</td>`;
+        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(low)}</td>`;
+        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(mid)}</td>`;
+        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(high)}</td>`;
+        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(verdict)}</td>`;
         html += `</tr>`;
     }
 

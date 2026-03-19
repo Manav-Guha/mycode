@@ -1169,3 +1169,59 @@ class TestPerfSummaryTable:
         )
         pdf_bytes = render_understanding_pdf(report, edition=1)
         assert pdf_bytes[:5] == b"%PDF-"
+
+    def test_dedup_same_label_keeps_worst(self):
+        """Multiple curves with same label → one row with highest peak."""
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="coupling_compute_foo",
+                    metric="execution_time_ms",
+                    steps=[("compute_1000", 10.0), ("compute_10000", 50.0)],
+                ),
+                DegradationPoint(
+                    scenario_name="coupling_compute_bar",
+                    metric="execution_time_ms",
+                    steps=[("compute_1000", 15.0), ("compute_10000", 200.0)],
+                ),
+                DegradationPoint(
+                    scenario_name="coupling_compute_baz",
+                    metric="execution_time_ms",
+                    steps=[("compute_1000", 8.0), ("compute_10000", 30.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        # All three produce "Running calculations across components"
+        # Should appear as ONE row, not three
+        table_rows = [
+            l for l in md.split("\n")
+            if l.startswith("| ") and "calculations" in l.lower()
+        ]
+        assert len(table_rows) == 1
+        # Should show the worst peak (200ms from bar)
+        assert "200ms" in table_rows[0]
+
+    def test_dedup_different_labels_kept(self):
+        """Curves with different labels each get their own row."""
+        report = DiagnosticReport(
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="flask_data_volume_scaling",
+                    metric="execution_time_ms",
+                    steps=[("data_size_100", 5.0), ("data_size_10000", 100.0)],
+                ),
+                DegradationPoint(
+                    scenario_name="flask_data_volume_scaling",
+                    metric="memory_peak_mb",
+                    steps=[("data_size_100", 10.0), ("data_size_10000", 60.0)],
+                ),
+            ],
+        )
+        md = render_understanding(report, 1)
+        # Time and memory have different labels due to "Memory usage —" prefix
+        data_rows = [
+            l for l in md.split("\n")
+            if l.startswith("| ") and "---" not in l and "What we tested" not in l
+        ]
+        assert len(data_rows) == 2

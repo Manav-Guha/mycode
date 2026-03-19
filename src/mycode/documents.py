@@ -140,9 +140,62 @@ def _perf_row_label(dp: DegradationPoint) -> str:
     return name.capitalize() if name and name[0].islower() else name
 
 
+def _dedup_by_label(points: list[DegradationPoint]) -> list[DegradationPoint]:
+    """Group degradation points by label, keep worst-case representative.
+
+    When multiple curves produce the same "What we tested" label (e.g.,
+    six coupling scenarios all labelled "Running calculations across
+    components"), keep the one with the highest peak value.
+    """
+    if not points:
+        return []
+
+    groups: dict[str, DegradationPoint] = {}
+    for dp in points:
+        if not dp.steps:
+            continue
+        label = _perf_row_label(dp)
+        existing = groups.get(label)
+        if existing is None:
+            groups[label] = dp
+        else:
+            # Keep the one with the higher peak value (worse case)
+            existing_peak = existing.steps[-1][1] if existing.steps else 0
+            new_peak = dp.steps[-1][1]
+            if new_peak > existing_peak:
+                groups[label] = dp
+
+    return list(groups.values())
+
+
+def _row_cells(dp: DegradationPoint) -> tuple[str, str, str, str, str]:
+    """Extract (label, low, mid, high, verdict) for a table row."""
+    label = _perf_row_label(dp)
+    steps = dp.steps
+
+    low_label, low_val = steps[0]
+    low = _fmt_cell(low_val, low_label, dp.metric)
+
+    if len(steps) >= 3:
+        mid_idx = len(steps) // 2
+        mid_label, mid_val = steps[mid_idx]
+        mid = _fmt_cell(mid_val, mid_label, dp.metric)
+    else:
+        mid = "\u2014"
+
+    if len(steps) >= 2:
+        high_label, high_val = steps[-1]
+        high = _fmt_cell(high_val, high_label, dp.metric)
+    else:
+        high = "\u2014"
+
+    return label, low, mid, high, _verdict(dp)
+
+
 def _render_perf_table_md(lines: list[str], points: list[DegradationPoint]) -> None:
     """Render degradation points as a markdown performance summary table."""
-    if not points:
+    rows = _dedup_by_label(points)
+    if not rows:
         return
 
     lines.append("## Performance Under Load")
@@ -152,31 +205,8 @@ def _render_perf_table_md(lines: list[str], points: list[DegradationPoint]) -> N
     )
     lines.append("|---|---|---|---|---|")
 
-    for dp in points:
-        label = _perf_row_label(dp)
-        steps = dp.steps
-        if not steps:
-            continue
-
-        low_label, low_val = steps[0]
-        low = _fmt_cell(low_val, low_label, dp.metric)
-
-        if len(steps) >= 3:
-            mid_idx = len(steps) // 2
-            mid_label, mid_val = steps[mid_idx]
-            mid = _fmt_cell(mid_val, mid_label, dp.metric)
-        elif len(steps) == 2:
-            mid = "—"
-        else:
-            mid = "—"
-
-        if len(steps) >= 2:
-            high_label, high_val = steps[-1]
-            high = _fmt_cell(high_val, high_label, dp.metric)
-        else:
-            high = "—"
-
-        v = _verdict(dp)
+    for dp in rows:
+        label, low, mid, high, v = _row_cells(dp)
         lines.append(f"| {label} | {low} | {mid} | {high} | {v} |")
 
     lines.append("")
@@ -184,7 +214,8 @@ def _render_perf_table_md(lines: list[str], points: list[DegradationPoint]) -> N
 
 def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
     """Render degradation points as a PDF performance summary table."""
-    if not points:
+    rows = _dedup_by_label(points)
+    if not rows:
         return
 
     pdf.section_heading("Performance Under Load")
@@ -192,50 +223,26 @@ def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
     # Column widths (mm) — total ~160mm for A4 printable area
     col_w = [38, 29, 29, 29, 35]
     headers = ["What we tested", "At low load", "At mid load", "At peak load", "Verdict"]
-    row_h = 5.5
+    row_h = 6
+    pad = " "  # internal cell padding
 
     # Header row
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_text_color(*_DARK_BLUE)
     pdf.set_fill_color(240, 248, 255)
     for i, hdr in enumerate(headers):
-        pdf.cell(col_w[i], row_h, _safe_text(hdr), border=1, fill=True)
+        pdf.cell(col_w[i], row_h, f"{pad}{_safe_text(hdr)}{pad}", border=1, fill=True)
     pdf.ln(row_h)
 
     # Data rows
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*_BODY_GREY)
 
-    for dp in points:
-        steps = dp.steps
-        if not steps:
-            continue
-
-        label = _perf_row_label(dp)
-
-        low_label, low_val = steps[0]
-        low = _fmt_cell(low_val, low_label, dp.metric)
-
-        if len(steps) >= 3:
-            mid_idx = len(steps) // 2
-            mid_label, mid_val = steps[mid_idx]
-            mid = _fmt_cell(mid_val, mid_label, dp.metric)
-        elif len(steps) == 2:
-            mid = "—"
-        else:
-            mid = "—"
-
-        if len(steps) >= 2:
-            high_label, high_val = steps[-1]
-            high = _fmt_cell(high_val, high_label, dp.metric)
-        else:
-            high = "—"
-
-        v = _verdict(dp)
-
+    for dp in rows:
+        label, low, mid, high, v = _row_cells(dp)
         cells = [label, low, mid, high, v]
         for i, cell_text in enumerate(cells):
-            pdf.cell(col_w[i], row_h, _safe_text(cell_text), border=1)
+            pdf.cell(col_w[i], row_h, f"{pad}{_safe_text(cell_text)}{pad}", border=1)
         pdf.ln(row_h)
 
     pdf.ln(3)
