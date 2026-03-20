@@ -1093,20 +1093,22 @@ def _safe_text(text: str) -> str:
     """
     out = (
         text
-        .replace("\u2014", "-")   # em-dash
-        .replace("\u2013", "-")   # en-dash
-        .replace("\u2018", "'")   # left single quote
-        .replace("\u2019", "'")   # right single quote
-        .replace("\u201c", '"')   # left double quote
-        .replace("\u201d", '"')   # right double quote
-        .replace("\u2022", "-")   # bullet
-        .replace("\u00b7", "|")   # middle dot
-        .replace("\u2026", "...")  # ellipsis
+        .replace("\u2014", "--")  # em-dash —
+        .replace("\u2013", "-")   # en-dash –
+        .replace("\u2018", "'")   # left single quote '
+        .replace("\u2019", "'")   # right single quote '
+        .replace("\u201c", '"')   # left double quote "
+        .replace("\u201d", '"')   # right double quote "
+        .replace("\u2022", "*")   # bullet •
+        .replace("\u00b7", "*")   # middle dot ·
+        .replace("\u2026", "...")  # ellipsis …
         .replace("\u2192", "->")  # right arrow →
         .replace("\u2190", "<-")  # left arrow ←
         .replace("\u2264", "<=")  # less-than-or-equal ≤
         .replace("\u2265", ">=")  # greater-than-or-equal ≥
         .replace("\u00d7", "x")   # multiplication sign ×
+        .replace("\u00f7", "/")   # division sign ÷
+        .replace("\u00b1", "+/-") # plus-minus sign ±
     )
     # Strip any remaining non-Latin-1 characters
     return out.encode("latin-1", errors="ignore").decode("latin-1")

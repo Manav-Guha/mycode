@@ -826,6 +826,24 @@ class TestPdfRendering:
         assert _safe_text("\u2264 100") == "<= 100"
         assert _safe_text("\u2265 100") == ">= 100"
 
+    def test_safe_text_replaces_dashes_and_quotes(self):
+        """_safe_text replaces em-dash, en-dash, smart quotes."""
+        from mycode.documents import _safe_text
+        assert _safe_text("a \u2014 b") == "a -- b"       # em-dash → --
+        assert _safe_text("a \u2013 b") == "a - b"        # en-dash → -
+        assert _safe_text("\u201chello\u201d") == '"hello"'  # smart double quotes
+        assert _safe_text("\u2018hi\u2019") == "'hi'"        # smart single quotes
+
+    def test_safe_text_replaces_bullets_and_math(self):
+        """_safe_text replaces bullets, math symbols."""
+        from mycode.documents import _safe_text
+        assert _safe_text("\u2022 item") == "* item"       # bullet → *
+        assert _safe_text("\u00b7 dot") == "* dot"         # middle dot → *
+        assert _safe_text("3 \u00d7 4") == "3 x 4"        # × → x
+        assert _safe_text("6 \u00f7 2") == "6 / 2"        # ÷ → /
+        assert _safe_text("\u00b1 5") == "+/- 5"           # ± → +/-
+        assert _safe_text("\u2026") == "..."               # ellipsis
+
     def test_safe_text_strips_unknown_unicode(self):
         """_safe_text strips non-Latin-1 characters not in the replacement map."""
         from mycode.documents import _safe_text
