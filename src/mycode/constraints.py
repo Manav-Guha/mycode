@@ -70,7 +70,8 @@ class OperationalConstraints:
         if self.data_type:
             labels = {
                 "tabular": "tabular data (CSV/spreadsheets)",
-                "text": "text/documents",
+                "text": "text/strings/logs",
+                "documents": "documents/PDFs",
                 "images": "images/media/files",
                 "api_responses": "API responses/JSON",
                 "mixed": "mixed data types",
@@ -192,9 +193,10 @@ def parse_user_scale(text: str) -> Optional[int]:
 _DATA_TYPE_CHOICES: dict[str, str] = {
     "1": "tabular",
     "2": "text",
-    "3": "images",
-    "4": "api_responses",
-    "5": "mixed",
+    "3": "documents",
+    "4": "images",
+    "5": "api_responses",
+    "6": "mixed",
 }
 
 _DATA_TYPE_KEYWORDS: dict[str, list[str]] = {
@@ -204,7 +206,11 @@ _DATA_TYPE_KEYWORDS: dict[str, list[str]] = {
     ],
     "text": [
         "text", "document", "string", "log", "email",
-        "chat", "message", "markdown", "pdf", "txt",
+        "chat", "message", "markdown", "txt",
+    ],
+    "documents": [
+        "pdf", "pdfs", "word", "docx", "doc", "pptx",
+        "powerpoint", "odt",
     ],
     "images": [
         "image", "photo", "picture", "video", "media",

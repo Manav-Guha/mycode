@@ -62,6 +62,7 @@ ALL_CATEGORIES = PYTHON_CATEGORIES | JAVASCRIPT_CATEGORIES
 # "mixed" is intentionally absent — all categories stay at natural priority.
 _DATA_TYPE_BOOST: dict[str, frozenset[str]] = {
     "text": frozenset({"blocking_io", "edge_case_input", "data_volume_scaling"}),
+    "documents": frozenset({"memory_profiling", "blocking_io"}),
     "tabular": frozenset({"data_volume_scaling", "memory_profiling"}),
     "images": frozenset({"memory_profiling", "concurrent_execution"}),
     "api_responses": frozenset({"concurrent_execution", "blocking_io"}),
@@ -80,6 +81,10 @@ _DATA_TYPE_KEEP: dict[str, frozenset[str]] = {
     "text": frozenset({
         "blocking_io", "edge_case_input", "memory_profiling",
         "data_volume_scaling", "concurrent_execution",
+    }),
+    "documents": frozenset({
+        "memory_profiling", "blocking_io", "concurrent_execution",
+        "edge_case_input",
     }),
     "images": frozenset({
         "memory_profiling", "concurrent_execution", "blocking_io",

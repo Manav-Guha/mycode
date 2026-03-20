@@ -2700,3 +2700,32 @@ class TestConstraintWiringE1E2E3:
 
         assert get_capacity(r1) == 5
         assert get_capacity(r2) == 500
+
+    def test_documents_data_type_removes_data_volume_scaling(self):
+        """data_type='documents' removes data_volume_scaling scenarios."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(data_type="documents")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_vol = [s for s in result.scenarios if s.category == "data_volume_scaling"]
+        assert len(data_vol) == 0
+
+    def test_documents_data_type_keeps_memory_profiling(self):
+        """data_type='documents' keeps memory_profiling and concurrent_execution."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(data_type="documents")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        cats = {s.category for s in result.scenarios}
+        assert "memory_profiling" in cats
+        assert "concurrent_execution" in cats
+        # data_volume_scaling must be filtered out for documents
+        assert "data_volume_scaling" not in cats

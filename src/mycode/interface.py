@@ -413,8 +413,8 @@ class ConversationalInterface:
             "(e.g. 10, 100, 5k) or 'not sure'."
         ),
         "data_type": (
-            "I didn't catch that — please pick a number from 1-5 "
-            "or describe the data (e.g. CSV, images, JSON)."
+            "I didn't catch that — please pick a number from 1-6 "
+            "or describe the data (e.g. CSV, PDFs, images, JSON)."
         ),
         "usage_pattern": (
             "I didn't catch that — please pick a number from 1-4 "
@@ -649,26 +649,17 @@ class ConversationalInterface:
             # Try to infer what we already know so we don't re-ask
             combined = turn1_response or ""
             already_has_scale = parse_user_scale(combined) is not None
-            already_has_data = parse_data_type(combined) is not None
 
-            parts: list[str] = []
             if not already_has_scale:
-                parts.append(
+                question = (
                     "How many people will use this at the same time? "
                     "Over a typical day?"
                 )
-            if not already_has_data:
-                parts.append(
-                    "What will users upload or send to your app? "
-                    "PDFs, images, spreadsheets, text?"
-                )
-            if not parts:
-                parts.append(
+            else:
+                question = (
                     "What are you most worried about — speed, crashes, "
                     "data handling, or something else?"
                 )
-
-            question = "\n".join(parts)
         else:
             question = self._llm_generate_question_turn2(
                 summary, turn1_response, warnings,
@@ -748,10 +739,11 @@ class ConversationalInterface:
                 data_type = self._ask_validated(
                     "What kind of data does your project handle?\n"
                     "  1. Tabular data (CSV, spreadsheets, databases)\n"
-                    "  2. Text / documents\n"
-                    "  3. Images / media / files\n"
-                    "  4. API responses / JSON\n"
-                    "  5. Mixed / various\n"
+                    "  2. Text / strings / logs\n"
+                    "  3. Documents / PDFs\n"
+                    "  4. Images / media / files\n"
+                    "  5. API responses / JSON\n"
+                    "  6. Mixed / various\n"
                     "(enter a number or describe it)",
                     "data_type",
                     parse_data_type,
@@ -1110,26 +1102,17 @@ class ConversationalInterface:
         # Same inference as _run_turn_2: figure out what we already know
         combined = user_response or ""
         already_has_scale = parse_user_scale(combined) is not None
-        already_has_data = parse_data_type(combined) is not None
 
         if self._offline or self._backend is None:
-            parts: list[str] = []
             if not already_has_scale:
-                parts.append(
+                return (
                     "How many people will use this at the same time? "
                     "Over a typical day?"
                 )
-            if not already_has_data:
-                parts.append(
-                    "What will users upload or send to your app? "
-                    "PDFs, images, spreadsheets, text?"
-                )
-            if not parts:
-                parts.append(
-                    "What are you most worried about — speed, crashes, "
-                    "data handling, or something else?"
-                )
-            return "\n".join(parts)
+            return (
+                "What are you most worried about — speed, crashes, "
+                "data handling, or something else?"
+            )
 
         # LLM path
         warnings: list[str] = []
@@ -1222,10 +1205,11 @@ class ConversationalInterface:
         "data_type": (
             "What kind of data does your project handle?\n"
             "  1. Tabular data (CSV, spreadsheets, databases)\n"
-            "  2. Text / documents\n"
-            "  3. Images / media / files\n"
-            "  4. API responses / JSON\n"
-            "  5. Mixed / various\n"
+            "  2. Text / strings / logs\n"
+            "  3. Documents / PDFs\n"
+            "  4. Images / media / files\n"
+            "  5. API responses / JSON\n"
+            "  6. Mixed / various\n"
             "(enter a number or describe it)"
         ),
         "usage_pattern": (

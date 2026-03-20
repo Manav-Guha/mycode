@@ -827,7 +827,7 @@ class TestConstraintExtraction:
             "A data processing app",
             "I want to test scaling",
             "5000",     # user_scale
-            "3",        # images
+            "4",        # images (was choice 3 before documents added)
             # usage_pattern skipped — inferred "growing" from "scaling"
             "3",        # large payload
             "",          # project name
@@ -1193,3 +1193,81 @@ class TestTimeoutParser:
         assert parse_timeout_per_scenario("not sure") is None
         assert parse_timeout_per_scenario("skip") is None
         assert parse_timeout_per_scenario("") is None
+
+
+class TestDocumentsDataType:
+    """Tests for the 'documents' data_type category (Issue 3)."""
+
+    def test_pdf_maps_to_documents(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("PDF") == "documents"
+
+    def test_pdfs_maps_to_documents(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("PDFs") == "documents"
+
+    def test_word_maps_to_documents(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("Word files") == "documents"
+
+    def test_docx_maps_to_documents(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("docx") == "documents"
+
+    def test_plain_text_still_maps_to_text(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("text files") == "text"
+
+    def test_logs_still_maps_to_text(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("log files and emails") == "text"
+
+    def test_choice_3_maps_to_documents(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("3") == "documents"
+
+    def test_choice_6_maps_to_mixed(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("6") == "mixed"
+
+    def test_pdf_and_csv_maps_to_mixed(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("PDFs and CSV files") == "mixed"
+
+    def test_images_choice_now_4(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("4") == "images"
+
+    def test_api_responses_choice_now_5(self):
+        from mycode.constraints import parse_data_type
+        assert parse_data_type("5") == "api_responses"
+
+
+class TestTurn2QuestionNoDataType:
+    """Tests for Issue 1: Turn 2 question should not ask about data type."""
+
+    def test_turn2_cli_no_data_type_question(self, simple_ingestion):
+        """CLI Turn 2 question does not ask about uploads/data type."""
+        io = MockIO(responses=[
+            "A web app",
+            "10 users",  # answer to Turn 2 (user_scale question)
+            "3",         # data_type (documents)
+            "1",         # usage_pattern
+            "1",         # max_payload
+            "1",         # timeout
+            "",          # project name
+        ])
+        interface = ConversationalInterface(offline=True, io=io)
+        interface.run(simple_ingestion)
+
+        # Turn 2 question is the second prompt (index 1)
+        turn2_q = io.prompts[1]
+        assert "upload" not in turn2_q.lower()
+        assert "PDFs, images" not in turn2_q
+
+    def test_turn2_web_no_data_type_question(self, simple_ingestion):
+        """Web path process_turn_1 does not ask about uploads/data type."""
+        interface = ConversationalInterface(offline=True)
+        question = interface.process_turn_1("A web app", simple_ingestion)
+        assert "upload" not in question.lower()
+        assert "PDFs, images" not in question
