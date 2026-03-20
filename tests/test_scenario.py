@@ -2345,6 +2345,64 @@ class TestConstraintWiringE1E2E3:
             assert params["iterations"] == 150  # max of session_counts
             assert s.test_config["user_stated_capacity"] == 50
 
+    def test_user_scale_large_caps_memory_iterations(self):
+        """user_scale=500 → memory iterations capped at [50, 100, 200], not [500, 1000, 1500]."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=500)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        mem_scenarios = [
+            s for s in result.scenarios if s.category == "memory_profiling"
+        ]
+        assert len(mem_scenarios) > 0
+
+        for s in mem_scenarios:
+            params = s.test_config.get("parameters", {})
+            assert params["session_counts"] == [50, 100, 200]
+            assert params["iterations"] == 200  # capped, not 1500
+            assert s.test_config["user_stated_capacity"] == 500
+            # Description should still reference the user's stated scale
+            assert "500" in s.description
+
+    def test_user_scale_1000_caps_memory_at_200(self):
+        """user_scale=1000 → memory iterations capped at 200."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=1000)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        mem_scenarios = [
+            s for s in result.scenarios if s.category == "memory_profiling"
+        ]
+        for s in mem_scenarios:
+            params = s.test_config.get("parameters", {})
+            assert params["iterations"] <= 200
+
+    def test_user_scale_150_caps_memory_at_150(self):
+        """user_scale=150 → memory sessions [50, 100, 150] since 150 < 200."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=150)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        mem_scenarios = [
+            s for s in result.scenarios if s.category == "memory_profiling"
+        ]
+        for s in mem_scenarios:
+            params = s.test_config.get("parameters", {})
+            assert params["session_counts"] == [50, 100, 150]
+            assert params["iterations"] == 150
+
     def test_user_scale_fallback_data_volume_when_no_payload(self):
         """user_scale=100, max_payload=None → data_sizes derived from 100*10=1000 base."""
         from mycode.constraints import OperationalConstraints

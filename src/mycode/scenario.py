@@ -1355,8 +1355,15 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                     )
 
             # ── E1b. Scale boundaries for memory profiling ──
+            # Memory leak detection needs 50-100 iterations, not hundreds.
+            # Cap iterations at a practical max; user_scale influences the
+            # report text but not the iteration count beyond what's needed
+            # to detect the leak pattern.
             if user_scale is not None and scenario.category == "memory_profiling":
-                sessions = _scale_levels(user_scale)
+                if user_scale <= 100:
+                    sessions = _scale_levels(user_scale)
+                else:
+                    sessions = [50, 100, min(user_scale, 200)]
                 params["session_counts"] = sessions
                 params["iterations"] = max(sessions)
                 scenario.test_config["user_stated_capacity"] = user_scale
