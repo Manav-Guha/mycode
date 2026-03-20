@@ -3036,6 +3036,47 @@ class TestCorpusAwareFindingLanguage:
         f = report.findings[0]
         assert "test portfolio" not in f.description
 
+    def test_critical_finding_no_portfolio_stats(self):
+        """CRITICAL findings should NOT get portfolio stats — they have enough urgency."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.library.loader import DependencyProfile
+
+        profile = MagicMock(spec=DependencyProfile)
+        profile.corpus_stats = {
+            "tested_count": 10,
+            "failure_rate": 0.70,
+            "common_failure_category": "memory_profiling",
+            "last_updated": "2026-02-27",
+        }
+        matches = [
+            ProfileMatch(
+                dependency_name="pandas",
+                profile=profile,
+                installed_version="2.2.0",
+                version_match=True,
+            ),
+        ]
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Crash: pandas memory exhaustion",
+                    severity="critical",
+                    category="memory_profiling",
+                    description="Out of memory at 500 rows.",
+                    affected_dependencies=["pandas"],
+                ),
+            ],
+        )
+        constraints = OperationalConstraints()
+
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints, matches)
+
+        f = report.findings[0]
+        assert "test portfolio" not in f.description
+        assert "tested projects" not in f.description
+
 
 # ── Session 14: Harness Failure Transparency Tests ──
 

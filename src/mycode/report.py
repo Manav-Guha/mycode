@@ -1808,10 +1808,11 @@ class ReportGenerator:
                     f"{finding.description}"
                 )
 
-        # Append corpus stats sentences when available (critical/warning only)
+        # Append corpus stats sentences when available (warning only —
+        # critical findings already carry enough urgency)
         if corpus_lookup:
             for finding in report.findings:
-                if finding.severity not in ("critical", "warning"):
+                if finding.severity != "warning":
                     continue
                 for dep_name in finding.affected_dependencies:
                     stats = corpus_lookup.get(dep_name.lower())
