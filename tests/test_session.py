@@ -1165,3 +1165,88 @@ class TestIntegrationSetupTeardown:
         # Workspace should be cleaned up after failed setup
         assert sm.workspace_dir is None
         assert sm._setup_complete is False
+
+
+@pytest.mark.slow
+class TestPythonPathInSession:
+    """Tests for PYTHONPATH injection in run_in_session."""
+
+    def test_pythonpath_includes_project_root(self, sample_project, tmp_path):
+        """PYTHONPATH always contains the project copy directory."""
+        with SessionManager(
+            sample_project, temp_base=tmp_path / "sessions"
+        ) as session:
+            result = session.run_in_session(
+                ["python", "-c", "import os; print(os.environ.get('PYTHONPATH', ''))"]
+            )
+            assert result.returncode == 0
+            assert str(session.project_copy_dir) in result.stdout
+
+    def test_pythonpath_includes_dep_subdir(self, tmp_path):
+        """When dep files are in a subdirectory, PYTHONPATH includes it."""
+        # Create project with code in a subdirectory
+        project = tmp_path / "subdir_project"
+        project.mkdir()
+        (project / "README.md").write_text("top level\n")
+        subdir = project / "myapp"
+        subdir.mkdir()
+        (subdir / "requirements.txt").write_text("# empty\n")
+        (subdir / "helper.py").write_text("def greet():\n    return 'hi'\n")
+
+        with SessionManager(
+            project, temp_base=tmp_path / "sessions"
+        ) as session:
+            result = session.run_in_session(
+                ["python", "-c", "import os; print(os.environ.get('PYTHONPATH', ''))"]
+            )
+            assert result.returncode == 0
+            pypath = result.stdout.strip()
+            # Both root and subdirectory should be on PYTHONPATH
+            assert str(session.project_copy_dir) in pypath
+            # The subdirectory name should appear
+            assert "myapp" in pypath
+
+    def test_pythonpath_no_duplicate_when_deps_at_root(self, sample_project, tmp_path):
+        """When dep files are at root, PYTHONPATH has root only once."""
+        with SessionManager(
+            sample_project, temp_base=tmp_path / "sessions"
+        ) as session:
+            result = session.run_in_session(
+                ["python", "-c", "import os; print(os.environ.get('PYTHONPATH', ''))"]
+            )
+            assert result.returncode == 0
+            pypath = result.stdout.strip()
+            root = str(session.project_copy_dir)
+            # Root should appear exactly once
+            assert pypath.count(root) == 1
+
+    def test_import_from_subdirectory(self, tmp_path):
+        """Code in a dep-file subdirectory can be imported by the harness."""
+        project = tmp_path / "subdir_import_project"
+        project.mkdir()
+        (project / "README.md").write_text("top level\n")
+        subdir = project / "src"
+        subdir.mkdir()
+        (subdir / "requirements.txt").write_text("# empty\n")
+        (subdir / "mymod.py").write_text("VALUE = 42\n")
+
+        with SessionManager(
+            project, temp_base=tmp_path / "sessions"
+        ) as session:
+            result = session.run_in_session(
+                ["python", "-c", "from mymod import VALUE; print(VALUE)"]
+            )
+            assert result.returncode == 0
+            assert "42" in result.stdout
+
+    def test_env_vars_can_override_pythonpath(self, sample_project, tmp_path):
+        """Caller-provided env_vars can override PYTHONPATH."""
+        with SessionManager(
+            sample_project, temp_base=tmp_path / "sessions"
+        ) as session:
+            result = session.run_in_session(
+                ["python", "-c", "import os; print(os.environ.get('PYTHONPATH', ''))"],
+                env_vars={"PYTHONPATH": "/custom/path"},
+            )
+            assert result.returncode == 0
+            assert "/custom/path" in result.stdout

@@ -698,6 +698,19 @@ class SessionManager:
             str(self.venv_python.parent) + os.pathsep + env.get("PATH", "")
         )
         env.pop("PYTHONHOME", None)  # interferes with venv
+
+        # Add dep-file subdirectory to PYTHONPATH so imports work
+        # when code lives in a subdirectory (e.g. "My Projects/")
+        dep_dir = str(self.find_dep_file_dir())
+        project_root = str(self.project_copy_dir)
+        pythonpath_parts = [project_root]
+        if dep_dir != project_root:
+            pythonpath_parts.append(dep_dir)
+        existing_pypath = env.get("PYTHONPATH", "")
+        if existing_pypath:
+            pythonpath_parts.append(existing_pypath)
+        env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+
         if env_vars:
             env.update(env_vars)
 
