@@ -67,6 +67,30 @@ _DATA_TYPE_BOOST: dict[str, frozenset[str]] = {
     "api_responses": frozenset({"concurrent_execution", "blocking_io"}),
 }
 
+# ── File-type → category KEEP mapping (E2: template selection) ──
+# Categories not in the keep set are removed (unless they are failure-mode
+# or version-discrepancy scenarios).  "mixed" is intentionally absent —
+# all categories are kept.
+_DATA_TYPE_KEEP: dict[str, frozenset[str]] = {
+    "tabular": frozenset({
+        "data_volume_scaling", "memory_profiling",
+        "concurrent_execution", "gil_contention",
+        "edge_case_input",
+    }),
+    "text": frozenset({
+        "blocking_io", "edge_case_input", "memory_profiling",
+        "data_volume_scaling", "concurrent_execution",
+    }),
+    "images": frozenset({
+        "memory_profiling", "concurrent_execution", "blocking_io",
+        "edge_case_input",
+    }),
+    "api_responses": frozenset({
+        "concurrent_execution", "blocking_io", "async_failures",
+        "edge_case_input",
+    }),
+}
+
 
 class CouplingBehaviorType(str, Enum):
     """Classification of coupling point functions by behavior."""
@@ -1266,22 +1290,39 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
     ) -> list[StressTestScenario]:
         """Apply constraint-driven parameterisation to scenarios.
 
-        Three adjustments per spec §5:
+        Five adjustments:
 
-        1. **Scale boundaries**: If ``user_scale`` is set, concurrent
-           test levels become ``[1x, 1.5x, 2x, 3x]`` of stated capacity
-           (not arbitrary ranges like 1, 10, 100, 1000).
+        1. **Scale boundaries** (E1): ``user_scale`` drives concurrent
+           test levels (``[1x, 1.5x, 2x, 3x]``), memory-profiling
+           session counts, and data-volume item counts (fallback when
+           ``max_payload_mb`` is not set).
 
-        2. **Template filtering**: ``data_type``, ``usage_pattern``, and
-           ``deployment_context`` filter which categories are relevant.
-           Irrelevant scenarios are deprioritised (not removed — the user
-           explicitly approved them).
+        2. **Data size boundaries**: ``max_payload_mb`` scales
+           ``data_sizes`` around the stated value.
 
-        3. **Data size boundaries**: If ``max_payload_mb`` is set,
-           ``data_sizes`` are bounded around that value.
+        3. **Template filtering** (E2): ``data_type`` removes
+           irrelevant scenario categories.  Failure-mode and
+           version-discrepancy scenarios survive filtering.
+
+        4. **Deployment filtering**: ``deployment_context`` demotes
+           network scenarios for local-only projects.
+
+        5. **Priority boost** (existing): ``_DATA_TYPE_BOOST``
+           promotes/demotes surviving scenarios.
         """
         user_scale = constraints.user_scale
         max_payload = constraints.max_payload_mb
+
+        # ── E2: Template selection — filter before parameterisation ──
+        if constraints.data_type and constraints.data_type != "mixed":
+            keep = _DATA_TYPE_KEEP.get(constraints.data_type)
+            if keep is not None:
+                scenarios = [
+                    s for s in scenarios
+                    if s.category in keep
+                    or s.name.endswith("_check")        # failure mode
+                    or s.name.endswith("_discrepancy")  # version discrepancy
+                ]
 
         for scenario in scenarios:
             # Ensure params dict exists in test_config so mutations persist
@@ -1289,7 +1330,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 scenario.test_config["parameters"] = {}
             params = scenario.test_config["parameters"]
 
-            # ── 1. Scale boundaries for concurrent tests ──
+            # ── E1a. Scale boundaries for concurrent tests ──
             if user_scale is not None and scenario.category in (
                 "concurrent_execution", "gil_contention",
                 "async_failures",
@@ -1308,19 +1349,37 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                         f"provide additional insight on this hardware."
                     )
 
-            # ── 2. Data size boundaries ──
-            if max_payload is not None and scenario.category in (
-                "data_volume_scaling", "blocking_io",
-            ):
-                # Scale around max_payload: 0.5x, 1x, 1.5x, 2x, 3x
-                base = int(max_payload * 1000)  # convert MB to abstract items
-                params["data_sizes"] = _data_scale_levels(base)
-                scenario.test_config["constraint_max_payload_mb"] = max_payload
+            # ── E1b. Scale boundaries for memory profiling ──
+            if user_scale is not None and scenario.category == "memory_profiling":
+                sessions = _scale_levels(user_scale)
+                params["session_counts"] = sessions
+                params["iterations"] = max(sessions)
+                scenario.test_config["user_stated_capacity"] = user_scale
+                scenario.description += (
+                    f" Testing from {sessions[0]:,} to "
+                    f"{sessions[-1]:,} sessions based on your "
+                    f"stated {user_scale:,} users."
+                )
 
-            # ── 3. Template relevance filtering ──
-            # Deprioritise scenarios that don't match user context
+            # ── E1c/2. Data size boundaries ──
+            if scenario.category in ("data_volume_scaling", "blocking_io"):
+                if max_payload is not None:
+                    # max_payload takes precedence
+                    base = int(max_payload * 1000)
+                    params["data_sizes"] = _data_scale_levels(base)
+                    scenario.test_config["constraint_max_payload_mb"] = max_payload
+                elif user_scale is not None:
+                    # Fallback: derive item counts from user_scale
+                    base_items = user_scale * 10
+                    params["data_sizes"] = _data_scale_levels(base_items)
+                    scenario.test_config["user_stated_capacity"] = user_scale
+                    scenario.description += (
+                        f" Data volume scaled from your stated "
+                        f"{user_scale:,} users (~{base_items:,} items)."
+                    )
+
+            # ── Deployment filtering ──
             if constraints.deployment_context == "local_only":
-                # Local-only projects: network/API tests are less relevant
                 if scenario.category in ("blocking_io",) and any(
                     kw in scenario.name.lower()
                     for kw in ("api", "request", "network", "timeout")
@@ -1331,12 +1390,9 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                         scenario.priority = "low"
 
             if constraints.data_type and scenario.category == "data_volume_scaling":
-                # If data type is specified, add it to test_config for harness use
                 scenario.test_config["constraint_data_type"] = constraints.data_type
 
-            # ── 4. File-type priority adjustment ──
-            # Boost categories most relevant to the user's stated data type.
-            # "mixed" leaves all priorities untouched (all categories apply).
+            # ── Priority boost ──
             if constraints.data_type and constraints.data_type != "mixed":
                 _boost = _DATA_TYPE_BOOST.get(constraints.data_type)
                 if _boost is not None:
@@ -1344,7 +1400,6 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                         if scenario.priority == "medium":
                             scenario.priority = "high"
                     else:
-                        # Categories outside the boost set are less relevant
                         if scenario.priority == "high":
                             scenario.priority = "medium"
 

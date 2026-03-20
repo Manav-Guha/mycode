@@ -2298,3 +2298,405 @@ class TestUserFractionFormatting:
 
         result = _format_user_fraction(20, 0)
         assert result == ""
+
+
+class TestConstraintWiringE1E2E3:
+    """Tests for E1–E3 constraint extraction wiring into scenario generator."""
+
+    def _make_basic_setup(self):
+        """Return (ingestion, matches) for a Flask+pandas project with unrecognized dep."""
+        flask_profile = _make_profile("flask", "web_framework")
+        pandas_profile = _make_profile("pandas", "data_processing")
+        matches = [
+            ProfileMatch(dependency_name="flask", profile=flask_profile),
+            ProfileMatch(dependency_name="pandas", profile=pandas_profile),
+            ProfileMatch(dependency_name="customlib", profile=None),
+        ]
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=3,
+            total_lines=200,
+            file_analyses=[],
+        )
+        return ingestion, matches
+
+    # ── E1: Scale Boundaries ──
+
+    def test_user_scale_sets_memory_profiling_sessions(self):
+        """user_scale=50 → memory_profiling gets session_counts from _scale_levels(50)."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=50)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        mem_scenarios = [
+            s for s in result.scenarios if s.category == "memory_profiling"
+        ]
+        assert len(mem_scenarios) > 0
+
+        for s in mem_scenarios:
+            params = s.test_config.get("parameters", {})
+            assert "session_counts" in params
+            assert params["session_counts"][0] == 50  # starts at user_scale
+            assert params["session_counts"][-1] == 150  # ends at 3x
+            assert params["iterations"] == 150  # max of session_counts
+            assert s.test_config["user_stated_capacity"] == 50
+
+    def test_user_scale_fallback_data_volume_when_no_payload(self):
+        """user_scale=100, max_payload=None → data_sizes derived from 100*10=1000 base."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.scenario import _data_scale_levels
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=100)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_scenarios = [
+            s for s in result.scenarios if s.category == "data_volume_scaling"
+        ]
+        assert len(data_scenarios) > 0
+
+        expected = _data_scale_levels(1000)
+        for s in data_scenarios:
+            params = s.test_config.get("parameters", {})
+            if "data_sizes" in params:
+                assert params["data_sizes"] == expected
+                assert s.test_config["user_stated_capacity"] == 100
+
+    def test_user_scale_and_payload_both_set_payload_wins(self):
+        """When both user_scale and max_payload are set, max_payload drives data_sizes."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.scenario import _data_scale_levels
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=100, max_payload_mb=50.0)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_scenarios = [
+            s for s in result.scenarios if s.category == "data_volume_scaling"
+        ]
+        assert len(data_scenarios) > 0
+
+        expected_from_payload = _data_scale_levels(int(50.0 * 1000))
+        expected_from_scale = _data_scale_levels(100 * 10)
+        for s in data_scenarios:
+            params = s.test_config.get("parameters", {})
+            if "data_sizes" in params:
+                assert params["data_sizes"] == expected_from_payload
+                assert params["data_sizes"] != expected_from_scale
+
+    def test_user_scale_none_no_change_to_memory_profiling(self):
+        """user_scale=None → memory_profiling keeps template defaults."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+
+        gen = ScenarioGenerator(offline=True)
+        result_none = gen.generate(ingestion, matches, "An app", "python")
+        result_empty = gen.generate(
+            ingestion, matches, "An app", "python",
+            constraints=OperationalConstraints(),
+        )
+
+        for r in (result_none, result_empty):
+            mem_scenarios = [
+                s for s in r.scenarios if s.category == "memory_profiling"
+            ]
+            for s in mem_scenarios:
+                assert "user_stated_capacity" not in s.test_config
+                params = s.test_config.get("parameters", {})
+                assert "session_counts" not in params
+
+    def test_user_scale_none_no_change_to_data_volume(self):
+        """user_scale=None, max_payload=None → data_volume keeps template defaults."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints()
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_scenarios = [
+            s for s in result.scenarios if s.category == "data_volume_scaling"
+        ]
+        for s in data_scenarios:
+            assert "user_stated_capacity" not in s.test_config
+
+    # ── E2: Template Selection ──
+
+    def test_tabular_data_type_removes_blocking_io(self):
+        """data_type='tabular' removes blocking_io scenarios."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(data_type="tabular")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        blocking_io = [s for s in result.scenarios if s.category == "blocking_io"]
+        assert len(blocking_io) == 0
+
+    def test_api_responses_removes_data_volume_scaling(self):
+        """data_type='api_responses' removes data_volume_scaling scenarios."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(data_type="api_responses")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_vol = [s for s in result.scenarios if s.category == "data_volume_scaling"]
+        assert len(data_vol) == 0
+
+    def test_images_removes_data_volume_scaling(self):
+        """data_type='images' removes data_volume_scaling scenarios."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(data_type="images")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_vol = [s for s in result.scenarios if s.category == "data_volume_scaling"]
+        assert len(data_vol) == 0
+
+    def test_mixed_data_type_keeps_all(self):
+        """data_type='mixed' does not filter any categories."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+
+        gen = ScenarioGenerator(offline=True)
+        result_mixed = gen.generate(
+            ingestion, matches, "An app", "python",
+            constraints=OperationalConstraints(data_type="mixed"),
+        )
+        result_none = gen.generate(ingestion, matches, "An app", "python")
+
+        cats_mixed = {s.category for s in result_mixed.scenarios}
+        cats_none = {s.category for s in result_none.scenarios}
+        assert cats_mixed == cats_none
+
+    def test_none_data_type_keeps_all(self):
+        """data_type=None does not filter any categories."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(
+            ingestion, matches, "An app", "python",
+            constraints=OperationalConstraints(data_type=None),
+        )
+        result_no_constraints = gen.generate(ingestion, matches, "An app", "python")
+
+        cats = {s.category for s in result.scenarios}
+        cats_nc = {s.category for s in result_no_constraints.scenarios}
+        assert cats == cats_nc
+
+    def test_failure_mode_scenarios_survive_filtering(self):
+        """Failure-mode _check scenarios survive data_type filtering."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.scenario import ScenarioGenerator, StressTestScenario
+
+        # Create a scenario list with a failure-mode scenario in a filtered category
+        scenarios = [
+            StressTestScenario(
+                name="pandas_data_volume_test",
+                category="data_volume_scaling",
+                description="Normal test",
+                priority="high",
+            ),
+            StressTestScenario(
+                name="pandas_memory_leak_check",
+                category="data_volume_scaling",
+                description="Failure mode check",
+                priority="high",
+            ),
+            StressTestScenario(
+                name="flask_concurrent_test",
+                category="concurrent_execution",
+                description="Concurrent test",
+                priority="high",
+            ),
+        ]
+
+        constraints = OperationalConstraints(data_type="api_responses")
+        result = ScenarioGenerator._apply_constraints(scenarios, constraints)
+
+        names = [s.name for s in result]
+        # Normal data_volume_scaling removed, failure mode survives
+        assert "pandas_data_volume_test" not in names
+        assert "pandas_memory_leak_check" in names
+        assert "flask_concurrent_test" in names
+
+    # ── E3: Termination Conditions ──
+
+    def test_user_stated_capacity_written_to_concurrent(self):
+        """user_scale=20 → user_stated_capacity=20 in concurrent test_configs."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        concurrent = [
+            s for s in result.scenarios
+            if s.category in ("concurrent_execution", "gil_contention")
+            and "constraint_scale" in s.test_config
+        ]
+        for s in concurrent:
+            assert s.test_config["user_stated_capacity"] == 20
+
+    def test_user_stated_capacity_written_to_memory_profiling(self):
+        """user_scale=20 → user_stated_capacity=20 in memory_profiling."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=20)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        mem = [s for s in result.scenarios if s.category == "memory_profiling"]
+        for s in mem:
+            assert s.test_config["user_stated_capacity"] == 20
+
+    def test_user_stated_capacity_written_to_data_volume(self):
+        """user_scale=100 (no payload) → user_stated_capacity in data_volume."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=100)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data = [s for s in result.scenarios if s.category == "data_volume_scaling"]
+        for s in data:
+            assert s.test_config["user_stated_capacity"] == 100
+
+    def test_no_user_stated_capacity_without_user_scale(self):
+        """user_scale=None → no user_stated_capacity anywhere."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints()
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        for s in result.scenarios:
+            assert "user_stated_capacity" not in s.test_config
+
+    def test_memory_description_includes_capacity_context(self):
+        """Memory scenarios mention user_scale range in description."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=50)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        mem = [s for s in result.scenarios if s.category == "memory_profiling"]
+        assert len(mem) > 0
+        for s in mem:
+            assert "50" in s.description
+            assert "sessions" in s.description.lower()
+
+    def test_data_volume_description_includes_capacity_context(self):
+        """Data volume scenarios mention user_scale-derived range when no payload."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=100)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data = [s for s in result.scenarios if s.category == "data_volume_scaling"]
+        assert len(data) > 0
+        for s in data:
+            assert "100" in s.description
+            assert "users" in s.description.lower() or "items" in s.description.lower()
+
+    # ── E4: Two-Run Validation ──
+
+    def test_different_inputs_produce_different_scenarios(self):
+        """Two runs with different constraints yield different scenario lists."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+
+        c1 = OperationalConstraints(
+            user_scale=5, data_type="text", usage_pattern="sustained",
+        )
+        c2 = OperationalConstraints(
+            user_scale=500, data_type="api_responses", usage_pattern="burst",
+        )
+
+        gen = ScenarioGenerator(offline=True)
+        r1 = gen.generate(ingestion, matches, "An app", "python", c1)
+        r2 = gen.generate(ingestion, matches, "An app", "python", c2)
+
+        # Scenario names should differ (filtering removes different categories)
+        names1 = {s.name for s in r1.scenarios}
+        names2 = {s.name for s in r2.scenarios}
+        assert names1 != names2, "Scenario names should differ between runs"
+
+        # Concurrent tiers should differ
+        def get_concurrent_levels(result):
+            for s in result.scenarios:
+                if "constraint_scale" in s.test_config:
+                    return s.test_config["constraint_scale"]
+            return None
+
+        levels1 = get_concurrent_levels(r1)
+        levels2 = get_concurrent_levels(r2)
+        assert levels1 is not None
+        assert levels2 is not None
+        assert levels1 != levels2
+        assert max(levels1) == 15   # 3x of 5
+        assert max(levels2) == 1500  # 3x of 500
+
+        # Run 1 (text) should have data_volume_scaling; Run 2 (api_responses) should not
+        cats1 = {s.category for s in r1.scenarios}
+        cats2 = {s.category for s in r2.scenarios}
+        assert "data_volume_scaling" in cats1
+        assert "data_volume_scaling" not in cats2
+
+    def test_different_inputs_produce_different_severity_context(self):
+        """Severity context thresholds differ between different user_scale values."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_basic_setup()
+
+        c1 = OperationalConstraints(user_scale=5)
+        c2 = OperationalConstraints(user_scale=500)
+
+        gen = ScenarioGenerator(offline=True)
+        r1 = gen.generate(ingestion, matches, "An app", "python", c1)
+        r2 = gen.generate(ingestion, matches, "An app", "python", c2)
+
+        def get_capacity(result):
+            for s in result.scenarios:
+                if "user_stated_capacity" in s.test_config:
+                    return s.test_config["user_stated_capacity"]
+            return None
+
+        assert get_capacity(r1) == 5
+        assert get_capacity(r2) == 500
