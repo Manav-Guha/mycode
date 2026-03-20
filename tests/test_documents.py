@@ -1060,7 +1060,7 @@ class TestBreakingPointInTable:
         )
         md = render_understanding(report, 1)
         # Memory >50MB verdict
-        assert "Heavy" in md
+        assert "Monitor under load" in md
         # Cell data
         assert "120MB" in md
         assert "10,000 items" in md
@@ -1440,6 +1440,85 @@ class TestVerdictFindingCrossRef:
         table_text = "\n".join(lines)
         assert "Warning" in table_text
         assert "No issues" not in table_text
+
+    def test_http_finding_matches_http_curve(self):
+        """HTTP finding matches http_ prefixed scenario even with different title."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="http_get_root",
+            metric="response_time_ms",
+            steps=[("concurrent_1", 3.0), ("concurrent_50", 29.0)],
+        )
+        findings = [
+            Finding(
+                title="Response time degradation on your application",
+                severity="warning",
+                category="http_load_testing",
+                description="9x degradation detected.",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert "Warning" in result
+        assert "see above" in result
+
+    def test_memory_finding_matches_memory_curve(self):
+        """Memory finding matches any curve with a memory metric."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="streamlit_session_growth",
+            metric="memory_peak_mb",
+            steps=[("batch_10", 50.0), ("batch_100", 300.0)],
+        )
+        findings = [
+            Finding(
+                title="Memory exhaustion under load",
+                severity="critical",
+                category="memory_profiling",
+                description="Out of memory.",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert "Critical" in result
+
+    def test_dependency_overlap_matches(self):
+        """Finding with matching dependency matches the curve."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="pandas_large_dataframe_scaling",
+            metric="execution_time_ms",
+            steps=[("data_100", 10.0), ("data_10000", 500.0)],
+        )
+        findings = [
+            Finding(
+                title="Data processing failure",
+                severity="warning",
+                category="data_volume_scaling",
+                description="Slowed down.",
+                affected_dependencies=["pandas"],
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert "Warning" in result
+
+    def test_no_match_when_category_and_deps_differ(self):
+        """No match when category, metric, and deps all differ."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="http_get_root",
+            metric="response_time_ms",
+            steps=[("concurrent_1", 3.0), ("concurrent_50", 29.0)],
+        )
+        findings = [
+            Finding(
+                title="Memory crash",
+                severity="critical",
+                category="memory_profiling",
+                description="Out of memory.",
+                affected_dependencies=["numpy"],
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert result == "No issues"
 
     def test_verdict_color_for_finding_verdicts(self):
         from mycode.documents import _verdict_color, _RED, _AMBER_TEXT

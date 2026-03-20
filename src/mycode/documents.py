@@ -175,7 +175,7 @@ def _verdict(
         if last_val < 50:
             return "Fine at your scale"
         if last_val < 200:
-            return "Heavy -- limits concurrent users"
+            return "Monitor under load"
         return "Very heavy -- risk of crashes"
 
     if dp.metric == "error_count":
@@ -195,25 +195,83 @@ def _finding_severity_for_dp(
 ) -> str | None:
     """Return the highest severity finding that matches a degradation point.
 
-    Match criteria: the degradation point's scenario_name (underscores
-    replaced with spaces, lowercased) appears in the finding's title
-    (also lowercased).  Returns ``"critical"``, ``"warning"``, or
-    ``None``.
+    Match by category + metric overlap, not title substring (titles are
+    humanised and don't reliably contain the raw scenario name).
+
+    Rules:
+    - HTTP findings (category ``http_load_testing``) match curves whose
+      ``scenario_name`` starts with ``http_``.
+    - Memory findings (category ``memory_profiling``) match curves whose
+      ``metric`` is a memory metric.
+    - Time/concurrency findings match curves whose ``metric`` is a time
+      metric AND the finding category matches the curve's scenario
+      category prefix (e.g. ``concurrent_execution`` matches
+      ``flask_concurrent_*``).
+    - Dependency overlap: if the finding's ``affected_dependencies``
+      and the curve's ``scenario_name`` share a dependency token,
+      that strengthens a category match.
+
+    Returns ``"critical"``, ``"warning"``, or ``None``.
     """
-    # Normalise scenario name for substring matching against finding titles
-    dp_key = dp.scenario_name.replace("_", " ").lower()
-    # Also try the human-readable description form
-    dp_desc = (_describe_scenario(dp.scenario_name) or "").lower()
+    is_memory_metric = dp.metric in (
+        "memory_peak_mb", "memory_mb", "memory_growth_mb",
+    )
+    is_time_metric = dp.metric in ("execution_time_ms", "response_time_ms")
+    dp_name_lower = dp.scenario_name.lower()
+
+    # Category prefixes extractable from scenario_name (e.g.
+    # "flask_concurrent_request_load" → tokens include "concurrent")
+    _CATEGORY_TOKENS: dict[str, list[str]] = {
+        "concurrent_execution": ["concurrent", "gil_contention"],
+        "data_volume_scaling": ["data", "volume", "scaling"],
+        "memory_profiling": ["memory"],
+        "blocking_io": ["blocking", "io"],
+        "edge_case_input": ["edge_case"],
+        "http_load_testing": ["http"],
+    }
 
     best: str | None = None
     for f in findings:
         if f.severity not in ("critical", "warning"):
             continue
-        title_lower = f.title.lower()
-        if dp_key in title_lower or (dp_desc and dp_desc in title_lower):
+
+        matched = False
+
+        # Rule 1: HTTP category ↔ http_ scenario prefix
+        if f.category == "http_load_testing" and dp_name_lower.startswith("http_"):
+            matched = True
+
+        # Rule 2: Memory category ↔ memory metric
+        elif f.category == "memory_profiling" and is_memory_metric:
+            matched = True
+
+        # Rule 3: Category token appears in scenario name
+        elif not matched:
+            tokens = _CATEGORY_TOKENS.get(f.category, [])
+            if any(t in dp_name_lower for t in tokens):
+                # Extra confidence: metric type should be compatible
+                if is_time_metric and f.category in (
+                    "concurrent_execution", "blocking_io",
+                    "data_volume_scaling",
+                ):
+                    matched = True
+                elif is_memory_metric and f.category == "memory_profiling":
+                    matched = True
+                elif f.category in ("edge_case_input", "http_load_testing"):
+                    matched = True
+
+        # Rule 4: Dependency overlap as tiebreaker
+        if not matched and f.affected_dependencies:
+            for dep in f.affected_dependencies:
+                if dep.lower().replace("-", "_") in dp_name_lower:
+                    matched = True
+                    break
+
+        if matched:
             if f.severity == "critical":
-                return "critical"  # can't do worse
+                return "critical"
             best = "warning"
+
     return best
 
 
