@@ -1261,6 +1261,52 @@ class TestPerfSummaryTable:
         assert len(data_rows) == 2
 
 
+class TestPerfRowLabelNoTruncation:
+    """Tests for _perf_row_label — labels should never be truncated."""
+
+    def test_long_label_not_truncated(self):
+        from mycode.documents import _perf_row_label
+        dp = DegradationPoint(
+            scenario_name="coupling_compute_very_long_function_name_with_details",
+            metric="execution_time_ms",
+            steps=[("compute_1000", 100.0)],
+        )
+        label = _perf_row_label(dp)
+        assert "..." not in label
+
+    def test_pdf_renders_long_label_without_truncation(self):
+        """PDF performance table renders long labels with wrapping, not ellipsis."""
+        from mycode.documents import render_understanding_pdf
+        report = DiagnosticReport(
+            scenarios_run=1,
+            degradation_points=[
+                DegradationPoint(
+                    scenario_name="coupling_compute_streamlit_markdown_render_with_extra_detail",
+                    metric="execution_time_ms",
+                    steps=[
+                        ("compute_1000", 50.0),
+                        ("compute_5000", 200.0),
+                        ("compute_10000", 800.0),
+                    ],
+                    breaking_point="compute_10000",
+                ),
+            ],
+        )
+        pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+    def test_memory_label_preserved(self):
+        from mycode.documents import _perf_row_label
+        dp = DegradationPoint(
+            scenario_name="pandas_large_dataframe_memory_growth_under_concurrent_load",
+            metric="memory_peak_mb",
+            steps=[("batch_100", 50.0)],
+        )
+        label = _perf_row_label(dp)
+        assert label.startswith("Memory")
+        assert "..." not in label
+
+
 class TestConsequenceForUser:
     """Tests for _consequence_for_user consequence text generation."""
 

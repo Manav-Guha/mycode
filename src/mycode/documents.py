@@ -170,19 +170,14 @@ def _verdict(dp: DegradationPoint) -> str:
     return ""
 
 
-def _perf_row_label(dp: DegradationPoint, max_len: int = 0) -> str:
-    """Human label for the 'What we tested' column.
-
-    If max_len > 0, truncate with ellipsis.
-    """
+def _perf_row_label(dp: DegradationPoint) -> str:
+    """Human label for the 'What we tested' column."""
     name = _describe_scenario(dp.scenario_name) or dp.scenario_name
     is_memory = dp.metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")
     if is_memory:
         label = f"Memory — {name}"
     else:
         label = name.capitalize() if name and name[0].islower() else name
-    if max_len and len(label) > max_len:
-        label = label[: max_len - 3] + "..."
     return label
 
 
@@ -219,7 +214,7 @@ def _row_cells(dp: DegradationPoint, short: bool = False) -> tuple[str, str, str
 
     If short=True, use abbreviated step labels for tight PDF cells.
     """
-    label = _perf_row_label(dp, max_len=30 if short else 0)
+    label = _perf_row_label(dp)
     steps = dp.steps
     fmt = _fmt_cell_short if short else _fmt_cell
 
@@ -286,7 +281,8 @@ def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
     # Column widths (mm) — total 161mm for A4 with 20mm margins
     col_w = [50, 27, 27, 27, 30]
     headers = ["What we tested", "At low load", "At mid load", "At peak load", "Verdict"]
-    row_h = 6
+    base_row_h = 6
+    line_h = 3.5  # line height for multi_cell wrapping
 
     # Header row — dark blue background, white text
     pdf.set_font("Helvetica", "B", 8)
@@ -295,39 +291,60 @@ def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
     pdf.set_draw_color(*_RULE)
     pdf.set_line_width(0.18)
     for i, hdr in enumerate(headers):
-        pdf.cell(col_w[i], row_h, f"  {_safe_text(hdr)}", border=1, fill=True)
-    pdf.ln(row_h)
+        pdf.cell(col_w[i], base_row_h, f"  {_safe_text(hdr)}", border=1, fill=True)
+    pdf.ln(base_row_h)
 
-    # Data rows — alternating white/grey
+    # Data rows — alternating white/grey, first column wraps
     for row_idx, dp in enumerate(rows):
         label, low, mid, high, v = _row_cells(dp, short=True)
         is_alt = row_idx % 2 == 1
+        fill_color = _TABLE_ALT if is_alt else _WHITE
 
-        if is_alt:
-            pdf.set_fill_color(*_TABLE_ALT)
-        else:
-            pdf.set_fill_color(*_WHITE)
+        # Calculate row height based on label text wrapping
+        safe_label = _safe_text(label)
+        # Estimate chars per line in 50mm col at 8pt Helvetica (~2.1mm/char)
+        chars_per_line = max(1, int((col_w[0] - 2) / 2.1))
+        wrapped_lines = max(1, -(-len(safe_label) // chars_per_line))  # ceil div
+        row_h = max(base_row_h, wrapped_lines * line_h + 1)
+
+        row_y = pdf.get_y()
+        row_x = pdf.get_x()
 
         pdf.set_draw_color(*_RULE)
         pdf.set_line_width(0.18)
 
-        cells = [label, low, mid, high]
+        # Draw background rectangles for all cells first
+        pdf.set_fill_color(*fill_color)
+        x_offset = row_x
+        for w in col_w:
+            pdf.rect(x_offset, row_y, w, row_h, style="FD")
+            x_offset += w
+
+        # First column: label with wrapping via multi_cell
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(*_BODY)
-        for i, cell_text in enumerate(cells):
-            pdf.cell(
-                col_w[i], row_h, f"  {_safe_text(cell_text)}",
-                border=1, fill=True,
-            )
+        pdf.set_xy(row_x + 1, row_y + 0.5)
+        pdf.multi_cell(col_w[0] - 2, line_h, safe_label)
 
-        # Verdict column — bold, coloured
+        # Remaining data columns: single-line cells (vertically centred)
+        data_cells = [low, mid, high]
+        x_pos = row_x + col_w[0]
+        for i, cell_text in enumerate(data_cells):
+            cell_y = row_y + (row_h - base_row_h) / 2
+            pdf.set_xy(x_pos, cell_y)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.set_text_color(*_BODY)
+            pdf.cell(col_w[i + 1], base_row_h, f"  {_safe_text(cell_text)}")
+            x_pos += col_w[i + 1]
+
+        # Verdict column — bold, coloured, vertically centred
+        cell_y = row_y + (row_h - base_row_h) / 2
+        pdf.set_xy(x_pos, cell_y)
         pdf.set_font("Helvetica", "B", 8)
         pdf.set_text_color(*_verdict_color(v))
-        pdf.cell(
-            col_w[4], row_h, f"  {_safe_text(v)}",
-            border=1, fill=True,
-        )
-        pdf.ln(row_h)
+        pdf.cell(col_w[4], base_row_h, f"  {_safe_text(v)}")
+
+        pdf.set_xy(row_x, row_y + row_h)
 
     # Reset
     pdf.set_text_color(*_BODY)
