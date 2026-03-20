@@ -798,6 +798,40 @@ class TestPdfRendering:
         pdf_bytes = render_understanding_pdf(report, edition=1)
         assert pdf_bytes[:5] == b"%PDF-"
 
+    def test_pdf_with_arrow_and_math_unicode(self):
+        """PDF handles → ← ≤ ≥ × and other non-Latin-1 characters."""
+        from mycode.documents import render_understanding_pdf
+        report = DiagnosticReport(
+            scenarios_run=1,
+            findings=[
+                Finding(
+                    title="Scale test \u2192 failure",
+                    severity="critical",
+                    description=(
+                        "Testing from 50 \u2192 150 sessions. "
+                        "Threshold \u2264 100 users. "
+                        "Rate \u2265 3\u00d7 baseline."
+                    ),
+                ),
+            ],
+        )
+        pdf_bytes = render_understanding_pdf(report, edition=1)
+        assert pdf_bytes[:5] == b"%PDF-"
+
+    def test_safe_text_replaces_arrows(self):
+        """_safe_text replaces → and ← with ASCII equivalents."""
+        from mycode.documents import _safe_text
+        assert _safe_text("a \u2192 b") == "a -> b"
+        assert _safe_text("a \u2190 b") == "a <- b"
+        assert _safe_text("\u2264 100") == "<= 100"
+        assert _safe_text("\u2265 100") == ">= 100"
+
+    def test_safe_text_strips_unknown_unicode(self):
+        """_safe_text strips non-Latin-1 characters not in the replacement map."""
+        from mycode.documents import _safe_text
+        # Snowman U+2603 is not in Latin-1 or the replacement map
+        assert _safe_text("hello \u2603 world") == "hello  world"
+
 
 # ── Issue 1: Degradation humanisation in documents ──
 

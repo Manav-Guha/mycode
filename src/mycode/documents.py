@@ -970,8 +970,13 @@ _SEVERITY_BORDER: dict[str, tuple] = {
 
 
 def _safe_text(text: str) -> str:
-    """Replace Unicode characters unsupported by built-in Helvetica."""
-    return (
+    """Replace Unicode characters unsupported by built-in Helvetica.
+
+    Helvetica in fpdf2 only supports Latin-1 (ISO 8859-1).  Known
+    replacements are applied first; any remaining non-Latin-1 characters
+    are stripped so the renderer never crashes.
+    """
+    out = (
         text
         .replace("\u2014", "-")   # em-dash
         .replace("\u2013", "-")   # en-dash
@@ -982,7 +987,14 @@ def _safe_text(text: str) -> str:
         .replace("\u2022", "-")   # bullet
         .replace("\u00b7", "|")   # middle dot
         .replace("\u2026", "...")  # ellipsis
+        .replace("\u2192", "->")  # right arrow →
+        .replace("\u2190", "<-")  # left arrow ←
+        .replace("\u2264", "<=")  # less-than-or-equal ≤
+        .replace("\u2265", ">=")  # greater-than-or-equal ≥
+        .replace("\u00d7", "x")   # multiplication sign ×
     )
+    # Strip any remaining non-Latin-1 characters
+    return out.encode("latin-1", errors="ignore").decode("latin-1")
 
 
 def _make_pdf_class():
