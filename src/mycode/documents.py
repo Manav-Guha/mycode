@@ -134,8 +134,27 @@ def _fmt_cell_short(value: float, label: str, metric: str) -> str:
     return f"{val} ({ctx})"
 
 
-def _verdict(dp: DegradationPoint) -> str:
-    """One-phrase verdict for a degradation curve."""
+def _verdict(
+    dp: DegradationPoint,
+    findings: list[Finding] | None = None,
+) -> str:
+    """One-phrase verdict for a degradation curve.
+
+    When *findings* is provided, checks whether any finding covers the
+    same scenario.  A finding-based verdict takes precedence over the
+    threshold-based default — a 3ms → 29ms curve might look fine by
+    absolute thresholds but the report may contain a WARNING for 9x
+    degradation.
+    """
+    # ── Finding-based verdict (takes precedence) ──
+    if findings:
+        severity = _finding_severity_for_dp(dp, findings)
+        if severity == "critical":
+            return "Critical -- see above"
+        if severity == "warning":
+            return "Warning -- see above"
+
+    # ── Threshold-based verdict ──
     if not dp.steps:
         return ""
     last_val = dp.steps[-1][1]
@@ -156,8 +175,8 @@ def _verdict(dp: DegradationPoint) -> str:
         if last_val < 50:
             return "Fine at your scale"
         if last_val < 200:
-            return "Heavy — limits concurrent users"
-        return "Very heavy — risk of crashes"
+            return "Heavy -- limits concurrent users"
+        return "Very heavy -- risk of crashes"
 
     if dp.metric == "error_count":
         if last_val <= 0:
@@ -168,6 +187,34 @@ def _verdict(dp: DegradationPoint) -> str:
         return "Stable"
 
     return ""
+
+
+def _finding_severity_for_dp(
+    dp: DegradationPoint,
+    findings: list[Finding],
+) -> str | None:
+    """Return the highest severity finding that matches a degradation point.
+
+    Match criteria: the degradation point's scenario_name (underscores
+    replaced with spaces, lowercased) appears in the finding's title
+    (also lowercased).  Returns ``"critical"``, ``"warning"``, or
+    ``None``.
+    """
+    # Normalise scenario name for substring matching against finding titles
+    dp_key = dp.scenario_name.replace("_", " ").lower()
+    # Also try the human-readable description form
+    dp_desc = (_describe_scenario(dp.scenario_name) or "").lower()
+
+    best: str | None = None
+    for f in findings:
+        if f.severity not in ("critical", "warning"):
+            continue
+        title_lower = f.title.lower()
+        if dp_key in title_lower or (dp_desc and dp_desc in title_lower):
+            if f.severity == "critical":
+                return "critical"  # can't do worse
+            best = "warning"
+    return best
 
 
 def _perf_row_label(dp: DegradationPoint) -> str:
@@ -209,7 +256,11 @@ def _dedup_by_label(points: list[DegradationPoint]) -> list[DegradationPoint]:
     return list(groups.values())
 
 
-def _row_cells(dp: DegradationPoint, short: bool = False) -> tuple[str, str, str, str, str]:
+def _row_cells(
+    dp: DegradationPoint,
+    short: bool = False,
+    findings: list[Finding] | None = None,
+) -> tuple[str, str, str, str, str]:
     """Extract (label, low, mid, high, verdict) for a table row.
 
     If short=True, use abbreviated step labels for tight PDF cells.
@@ -234,10 +285,14 @@ def _row_cells(dp: DegradationPoint, short: bool = False) -> tuple[str, str, str
     else:
         high = "\u2014"
 
-    return label, low, mid, high, _verdict(dp)
+    return label, low, mid, high, _verdict(dp, findings)
 
 
-def _render_perf_table_md(lines: list[str], points: list[DegradationPoint]) -> None:
+def _render_perf_table_md(
+    lines: list[str],
+    points: list[DegradationPoint],
+    findings: list[Finding] | None = None,
+) -> None:
     """Render degradation points as a markdown performance summary table."""
     rows = _dedup_by_label(points)
     if not rows:
@@ -251,7 +306,7 @@ def _render_perf_table_md(lines: list[str], points: list[DegradationPoint]) -> N
     lines.append("|---|---|---|---|---|")
 
     for dp in rows:
-        label, low, mid, high, v = _row_cells(dp)
+        label, low, mid, high, v = _row_cells(dp, findings=findings)
         lines.append(f"| {label} | {low} | {mid} | {high} | {v} |")
 
     lines.append("")
@@ -260,6 +315,10 @@ def _render_perf_table_md(lines: list[str], points: list[DegradationPoint]) -> N
 def _verdict_color(verdict: str) -> tuple:
     """Return text colour for a verdict string."""
     vl = verdict.lower()
+    if "critical" in vl:
+        return _RED
+    if "warning" in vl:
+        return _AMBER_TEXT
     if "no issues" in vl or "fine" in vl or "no errors" in vl or "stable" in vl:
         return _GREEN
     if "noticeable" in vl:
@@ -269,7 +328,11 @@ def _verdict_color(verdict: str) -> tuple:
     return _BODY
 
 
-def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
+def _render_perf_table_pdf(
+    pdf,
+    points: list[DegradationPoint],
+    findings: list[Finding] | None = None,
+) -> None:
     """Render degradation points as a styled PDF performance summary table."""
     rows = _dedup_by_label(points)
     if not rows:
@@ -296,7 +359,7 @@ def _render_perf_table_pdf(pdf, points: list[DegradationPoint]) -> None:
 
     # Data rows — alternating white/grey, first column wraps
     for row_idx, dp in enumerate(rows):
-        label, low, mid, high, v = _row_cells(dp, short=True)
+        label, low, mid, high, v = _row_cells(dp, short=True, findings=findings)
         is_alt = row_idx % 2 == 1
         fill_color = _TABLE_ALT if is_alt else _WHITE
 
@@ -541,7 +604,7 @@ def render_understanding(report: DiagnosticReport, edition: int) -> str:
         lines.append("")
 
     # Performance summary table
-    _render_perf_table_md(lines, report.degradation_points)
+    _render_perf_table_md(lines, report.degradation_points, report.findings)
 
     # Confidence note
     if report.confidence_note:
@@ -1390,7 +1453,7 @@ def render_understanding_pdf(
         pdf.add_page()
 
     if rows:
-        _render_perf_table_pdf(pdf, report.degradation_points)
+        _render_perf_table_pdf(pdf, report.degradation_points, report.findings)
 
     # Confidence note
     if report.confidence_note:

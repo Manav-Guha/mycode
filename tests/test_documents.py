@@ -1325,6 +1325,128 @@ class TestPerfRowLabelNoTruncation:
         assert "..." not in label
 
 
+class TestVerdictFindingCrossRef:
+    """Tests for _verdict cross-referencing findings."""
+
+    def test_warning_finding_overrides_no_issues(self):
+        """A WARNING finding for the same scenario overrides 'No issues' verdict."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="flask_concurrent_request_load",
+            metric="execution_time_ms",
+            steps=[("concurrent_10", 3.0), ("concurrent_50", 29.0)],
+        )
+        findings = [
+            Finding(
+                title="Flask concurrent request load",
+                severity="warning",
+                category="concurrent_execution",
+                description="9x degradation detected.",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert "Warning" in result
+        assert "see above" in result
+
+    def test_critical_finding_overrides_threshold(self):
+        """A CRITICAL finding takes precedence over threshold verdict."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="pandas_data_scaling",
+            metric="execution_time_ms",
+            steps=[("data_100", 10.0), ("data_10000", 50.0)],
+        )
+        findings = [
+            Finding(
+                title="Pandas data scaling",
+                severity="critical",
+                category="data_volume_scaling",
+                description="Crashed at 10k rows.",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert "Critical" in result
+
+    def test_no_matching_finding_uses_threshold(self):
+        """When no finding matches, threshold-based verdict applies."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="flask_concurrent_request_load",
+            metric="execution_time_ms",
+            steps=[("concurrent_10", 3.0), ("concurrent_50", 29.0)],
+        )
+        findings = [
+            Finding(
+                title="Unrelated scenario",
+                severity="critical",
+                category="memory_profiling",
+                description="Something else.",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert result == "No issues"
+
+    def test_info_finding_does_not_override(self):
+        """INFO findings should not override the threshold verdict."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="flask_concurrent_request_load",
+            metric="execution_time_ms",
+            steps=[("concurrent_10", 3.0), ("concurrent_50", 29.0)],
+        )
+        findings = [
+            Finding(
+                title="Flask concurrent request load",
+                severity="info",
+                category="concurrent_execution",
+                description="Informational.",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert result == "No issues"
+
+    def test_no_findings_uses_threshold(self):
+        """When findings=None, threshold-based verdict applies."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="flask_test",
+            metric="execution_time_ms",
+            steps=[("concurrent_10", 3000.0)],
+        )
+        assert _verdict(dp) == "Unresponsive at peak load"
+        assert _verdict(dp, None) == "Unresponsive at peak load"
+        assert _verdict(dp, []) == "Unresponsive at peak load"
+
+    def test_md_table_includes_finding_verdict(self):
+        """Markdown perf table shows finding-based verdict."""
+        from mycode.documents import _render_perf_table_md
+        points = [
+            DegradationPoint(
+                scenario_name="flask_concurrent_request_load",
+                metric="execution_time_ms",
+                steps=[("concurrent_10", 3.0), ("concurrent_50", 29.0)],
+            ),
+        ]
+        findings = [
+            Finding(
+                title="Flask concurrent request load",
+                severity="warning",
+                category="concurrent_execution",
+                description="9x degradation.",
+            ),
+        ]
+        lines: list[str] = []
+        _render_perf_table_md(lines, points, findings)
+        table_text = "\n".join(lines)
+        assert "Warning" in table_text
+        assert "No issues" not in table_text
+
+    def test_verdict_color_for_finding_verdicts(self):
+        from mycode.documents import _verdict_color, _RED, _AMBER_TEXT
+        assert _verdict_color("Critical -- see above") == _RED
+        assert _verdict_color("Warning -- see above") == _AMBER_TEXT
+
+
 class TestConsequenceForUser:
     """Tests for _consequence_for_user consequence text generation."""
 
