@@ -1259,3 +1259,140 @@ class TestPerfSummaryTable:
             if l.startswith("| ") and "---" not in l and "What we tested" not in l
         ]
         assert len(data_rows) == 2
+
+
+class TestConsequenceForUser:
+    """Tests for _consequence_for_user consequence text generation."""
+
+    def test_data_volume_scaling_with_load_level(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="Data volume crash",
+            severity="critical",
+            category="data_volume_scaling",
+            description="myCode tested data scaling.",
+        )
+        f._load_level = 5000
+        result = _consequence_for_user(f)
+        assert "5,000 items" in result
+        assert "crashes or slowdowns" in result
+
+    def test_memory_with_user_scale(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="Memory exhaustion",
+            severity="critical",
+            category="memory_profiling",
+            description="You said 500 users. Memory keeps growing.",
+        )
+        f._peak_memory_mb = 200.0
+        result = _consequence_for_user(f)
+        assert "500" in result
+        assert "GB of RAM" in result
+
+    def test_memory_without_user_scale(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="Memory exhaustion",
+            severity="critical",
+            category="memory_profiling",
+            description="Memory keeps growing.",
+        )
+        f._peak_memory_mb = 200.0
+        result = _consequence_for_user(f)
+        assert "200 MB" in result
+        assert "exhaust server memory" in result
+
+    def test_concurrent_with_response_time(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="Slow under load",
+            severity="warning",
+            category="concurrent_execution",
+            description="You said 100 users. Slowing down.",
+        )
+        f._execution_time_ms = 3500.0
+        f._load_level = 100
+        result = _consequence_for_user(f)
+        assert "100" in result
+        assert "3,500 ms" in result
+        assert "slow" in result.lower()
+
+    def test_http_load_testing(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="HTTP response degradation",
+            severity="warning",
+            category="http_load_testing",
+            description="Response times increased.",
+        )
+        f._execution_time_ms = 6000.0
+        f._load_level = 50
+        result = _consequence_for_user(f)
+        assert "50" in result
+        assert "6,000 ms" in result
+        assert "unresponsive" in result
+
+    def test_within_capacity_framing(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="Crash under load",
+            severity="critical",
+            category="concurrent_execution",
+            description="You said 100 users. This breaks at 80.",
+        )
+        f._load_level = 80
+        result = _consequence_for_user(f)
+        assert "at the scale you described" in result
+
+    def test_beyond_capacity_framing(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="Break at high load",
+            severity="info",
+            category="concurrent_execution",
+            description="You said 20 users. Breaks at 250.",
+        )
+        f._load_level = 250
+        result = _consequence_for_user(f)
+        assert "grows beyond" in result
+        assert "20" in result
+
+    def test_fallback_error_count(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="Errors",
+            severity="warning",
+            category="edge_case_input",
+            description="Errors occurred.",
+        )
+        f._error_count = 12
+        result = _consequence_for_user(f)
+        assert "12 errors" in result
+        assert "real traffic" in result
+
+    def test_response_time_qualifiers(self):
+        from mycode.documents import _response_time_qualifier
+        assert _response_time_qualifier(200) == "noticeable but acceptable"
+        assert _response_time_qualifier(1000) == "noticeably slow"
+        assert _response_time_qualifier(3000) == "slow"
+        assert _response_time_qualifier(8000) == "unresponsive"
+
+    def test_no_metrics_returns_empty(self):
+        from mycode.documents import _consequence_for_user
+        f = Finding(
+            title="Something",
+            severity="warning",
+            category="edge_case_input",
+            description="A test ran.",
+        )
+        result = _consequence_for_user(f)
+        assert result == ""
+
+    def test_extract_user_scale_from_desc(self):
+        from mycode.documents import _extract_user_scale_from_desc
+        assert _extract_user_scale_from_desc("You said 500 users. Breaks.") == 500
+        assert _extract_user_scale_from_desc(
+            "You said 10,000 users. Breaks."
+        ) == 10000
+        assert _extract_user_scale_from_desc("No user info here.") is None

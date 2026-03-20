@@ -651,45 +651,143 @@ def _render_understanding_finding(lines: list[str], f: Finding) -> None:
 
 
 def _consequence_for_user(f: Finding) -> str:
-    """Generate a consequence line from the finding's data.
+    """Generate a plain-language consequence from the finding's data.
 
-    Uses existing description which already contains constraint-aware
-    language from the contextualise step.
+    Produces text that explains what the finding means for real users,
+    not just what happened during testing.  Uses the finding's category,
+    metrics, load level, and description context to build a specific,
+    actionable consequence.
     """
-    desc = f.description or ""
+    desc = (f.description or "").lower()
+    parts: list[str] = []
 
-    # The contextualise step already prepends constraint framing like
-    # "This is below your expected 20 concurrent users" — if present,
-    # the description IS the consequence.  Extract the consequence
-    # portion for findings that have it.
-    consequence_markers = (
-        "this means", "in practice,", "your users will",
-        "your app will", "this is below your expected",
-        "this is at or below", "this is well below",
-        "memory usage grows", "could exhaust",
-    )
-    for sentence in desc.split(". "):
-        if any(m in sentence.lower() for m in consequence_markers):
-            return sentence.strip().rstrip(".") + "."
+    # ── Extract user_scale from contextualised description ──
+    user_scale = _extract_user_scale_from_desc(f.description or "")
 
-    # Fallback: derive from metrics
-    if f._peak_memory_mb and f._peak_memory_mb > 100:
-        return (
-            f"Memory usage of {f._peak_memory_mb:.0f}MB under load could "
-            f"exhaust server memory, causing crashes or forced restarts."
-        )
-    if f._execution_time_ms and f._execution_time_ms > 2000:
-        return (
-            f"Response times of {f._execution_time_ms:.0f}ms mean your "
-            f"users will experience significant delays."
-        )
-    if f._error_count and f._error_count > 5:
-        return (
+    # ── Capacity-relative framing ──
+    if user_scale and f._load_level:
+        if f._load_level <= user_scale:
+            parts.append(
+                "This affects your users at the scale you described."
+            )
+        elif f._load_level > user_scale * 3:
+            parts.append(
+                f"This only becomes a problem if your usage grows "
+                f"beyond {user_scale:,} users."
+            )
+
+    # ── Category-specific consequences ──
+    if f.category == "data_volume_scaling":
+        if f._load_level:
+            parts.append(
+                f"Users working with datasets larger than "
+                f"{f._load_level:,} items will experience "
+                f"crashes or slowdowns."
+            )
+        elif f._error_count and f._error_count > 0:
+            parts.append(
+                "Users with larger datasets will hit errors "
+                "or slowdowns as data volume increases."
+            )
+
+    elif f.category == "memory_profiling":
+        if f._peak_memory_mb and f._peak_memory_mb > 50:
+            if user_scale:
+                # Estimate total RAM: peak per session * user count
+                estimated_gb = (f._peak_memory_mb * user_scale) / 1024
+                if estimated_gb >= 1.0:
+                    parts.append(
+                        f"At your expected {user_scale:,} concurrent users, "
+                        f"the server's memory will be exhausted. You'll need "
+                        f"approximately {estimated_gb:.1f} GB of RAM, or "
+                        f"reduce memory usage per session."
+                    )
+                else:
+                    parts.append(
+                        f"Memory usage of {f._peak_memory_mb:.0f} MB per "
+                        f"session adds up across {user_scale:,} users. "
+                        f"Monitor memory under real traffic."
+                    )
+            else:
+                parts.append(
+                    f"Memory usage of {f._peak_memory_mb:.0f} MB under load "
+                    f"could exhaust server memory, causing crashes or "
+                    f"forced restarts."
+                )
+
+    elif f.category in ("concurrent_execution", "gil_contention",
+                         "async_failures", "blocking_io"):
+        if f._execution_time_ms and f._execution_time_ms > 0:
+            ms = f._execution_time_ms
+            if f._load_level and f._load_level > 0:
+                qualifier = _response_time_qualifier(ms)
+                parts.append(
+                    f"At {f._load_level:,} concurrent users, page loads "
+                    f"will take {ms:,.0f} ms — {qualifier}."
+                )
+            elif ms > 2000:
+                qualifier = _response_time_qualifier(ms)
+                parts.append(
+                    f"Response times of {ms:,.0f} ms mean your users "
+                    f"will experience {qualifier} performance."
+                )
+
+    elif f.category == "http_load_testing":
+        if f._execution_time_ms and f._load_level:
+            ms = f._execution_time_ms
+            qualifier = _response_time_qualifier(ms)
+            parts.append(
+                f"At {f._load_level:,} concurrent users, page loads "
+                f"will take {ms:,.0f} ms — {qualifier}."
+            )
+
+    # ── Fallback: error count ──
+    if not parts and f._error_count and f._error_count > 5:
+        parts.append(
             f"{f._error_count} errors occurred during testing — under "
             f"real traffic, some users will see failures."
         )
 
-    return ""
+    # ── Fallback: high memory without category match ──
+    if not parts and f._peak_memory_mb and f._peak_memory_mb > 100:
+        parts.append(
+            f"Memory usage of {f._peak_memory_mb:.0f} MB under load could "
+            f"exhaust server memory, causing crashes or forced restarts."
+        )
+
+    # ── Fallback: slow response without category match ──
+    if not parts and f._execution_time_ms and f._execution_time_ms > 2000:
+        qualifier = _response_time_qualifier(f._execution_time_ms)
+        parts.append(
+            f"Response times of {f._execution_time_ms:,.0f} ms mean your "
+            f"users will experience {qualifier} performance."
+        )
+
+    return " ".join(parts)
+
+
+def _response_time_qualifier(ms: float) -> str:
+    """Return a human qualifier for a response time in milliseconds."""
+    if ms < 500:
+        return "noticeable but acceptable"
+    if ms < 2000:
+        return "noticeably slow"
+    if ms < 5000:
+        return "slow"
+    return "unresponsive"
+
+
+def _extract_user_scale_from_desc(desc: str) -> int | None:
+    """Extract user_scale from contextualised description text.
+
+    The contextualise step prepends "You said N users." or
+    "You said N,NNN users." — extract N.
+    """
+    import re
+    m = re.search(r"You said ([\d,]+) users", desc)
+    if m:
+        return int(m.group(1).replace(",", ""))
+    return None
 
 
 def generate_finding_prompt(f: Finding) -> str:
