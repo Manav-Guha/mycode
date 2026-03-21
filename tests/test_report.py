@@ -3960,6 +3960,79 @@ class TestUserTimeoutInReport:
         assert report.scenarios_failed == 0
 
 
+class TestBudgetExceededInReport:
+    """Tests for budget_exceeded scenarios in report generation."""
+
+    def test_budget_exceeded_creates_info_finding(self):
+        """budget_exceeded scenario gets 'Time budget reached' finding."""
+        sr = ScenarioResult(
+            scenario_name="coupling_compute_main",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="budget_exceeded",
+            steps=[
+                StepResult(step_name="tier_1", execution_time_ms=100),
+                StepResult(step_name="tier_2", execution_time_ms=200),
+            ],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+        )
+        budget_findings = [
+            f for f in report.incomplete_tests
+            if f._failure_reason == "budget_exceeded"
+        ]
+        assert len(budget_findings) == 1
+        assert "time budget" in budget_findings[0].title.lower()
+        assert "2 steps" in budget_findings[0].description
+
+    def test_budget_exceeded_excluded_from_pass_fail(self):
+        """budget_exceeded scenarios are not counted as passed or failed."""
+        sr = ScenarioResult(
+            scenario_name="test_scenario",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="budget_exceeded",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+        )
+        assert report.scenarios_passed == 0
+        assert report.scenarios_failed == 0
+
+    def test_budget_exceeded_suggests_deep_when_not_deep(self):
+        """When analysis_depth != 'deep', suggest upgrading."""
+        from mycode.constraints import OperationalConstraints
+        sr = ScenarioResult(
+            scenario_name="coupling_compute_main",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="budget_exceeded",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        constraints = OperationalConstraints(analysis_depth="standard")
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+            constraints=constraints,
+        )
+        desc = report.incomplete_tests[0].description
+        assert "deep analysis" in desc.lower()
+
+
 class TestTimeoutInReportContext:
     """Tests for timeout_per_scenario appearing in the report summary."""
 

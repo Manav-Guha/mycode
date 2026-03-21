@@ -4224,3 +4224,88 @@ class TestCouplingDedup:
         names = [s.name for s in result]
         assert "pandas_memory" in names
         assert "coupling_render_hello" not in names
+
+
+# ── Per-scenario time budgets ──
+
+
+class TestScenarioBudgets:
+    """Verify per-scenario budget calculation and enforcement."""
+
+    def test_budget_weighted_by_priority(self):
+        """High-priority scenarios get larger budgets than low-priority."""
+        from mycode.engine import (
+            _CATEGORY_TIMEOUT_CAPS,
+            _MIN_SCENARIO_BUDGET,
+            _SCENARIO_TIMEOUT_CAP,
+        )
+
+        high = _make_scenario(name="profiled_high", priority="high")
+        medium = _make_scenario(name="coupling_mid", priority="medium")
+        low = _make_scenario(name="coupling_low", priority="low")
+
+        total_budget = 300
+        scenarios = [high, medium, low]
+        _BUDGET_WEIGHT = {"high": 2.0, "medium": 1.0, "low": 0.5}
+        total_weight = sum(_BUDGET_WEIGHT.get(s.priority, 1.0) for s in scenarios)
+        base_per = total_budget / total_weight
+
+        budgets = []
+        for s in scenarios:
+            w = _BUDGET_WEIGHT.get(s.priority, 1.0)
+            cat_cap = _CATEGORY_TIMEOUT_CAPS.get(s.category, _SCENARIO_TIMEOUT_CAP)
+            budget = max(_MIN_SCENARIO_BUDGET, min(int(base_per * w), cat_cap))
+            budgets.append(budget)
+
+        # High should get more than medium, medium more than low
+        assert budgets[0] > budgets[1]
+        assert budgets[1] > budgets[2]
+        # All should be at least the minimum
+        assert all(b >= _MIN_SCENARIO_BUDGET for b in budgets)
+
+    def test_budget_does_not_exceed_category_cap(self):
+        """Per-scenario budget capped by _CATEGORY_TIMEOUT_CAPS."""
+        from mycode.engine import (
+            _CATEGORY_TIMEOUT_CAPS,
+            _MIN_SCENARIO_BUDGET,
+            _SCENARIO_TIMEOUT_CAP,
+        )
+
+        # Single scenario with huge total budget
+        s = _make_scenario(name="test", category="gil_contention", priority="high")
+        total_budget = 9999
+        w = 2.0
+        total_weight = w
+        base_per = total_budget / total_weight
+        cat_cap = _CATEGORY_TIMEOUT_CAPS.get(s.category, _SCENARIO_TIMEOUT_CAP)
+        budget = max(_MIN_SCENARIO_BUDGET, min(int(base_per * w), cat_cap))
+
+        assert budget == cat_cap  # 120 for gil_contention
+
+    def test_budget_exceeded_marks_scenario(self, tmp_path):
+        """Scenario hitting per-scenario budget gets 'budget_exceeded'."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+        engine = ExecutionEngine(session, ingestion)
+        engine._timeout_override = 300  # user cap: 300s
+
+        scenario = _make_scenario(name="slow_test")
+
+        # Mock session.run_in_session to simulate a timeout
+        def fake_run(cmd, timeout=None, **kw):
+            from mycode.session import SessionResult
+            return SessionResult(
+                returncode=-1,
+                stdout="",
+                stderr="Timeout after test",
+                timed_out=True,
+            )
+
+        session.run_in_session = fake_run
+
+        # Call with budget_seconds=15 (< user_cap 300)
+        # The scenario timeout starts at min(60, 600)=60, then
+        # user_cap 300 doesn't fire (60<300), but budget 15 does (60>15).
+        result = engine._execute_scenario(scenario, budget_seconds=15)
+        assert result.failure_reason == "budget_exceeded"
+        assert "step" in result.summary

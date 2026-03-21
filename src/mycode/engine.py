@@ -51,6 +51,9 @@ _CATEGORY_TIMEOUT_CAPS: dict[str, int] = {
     "gil_contention": 120,
 }
 
+# Minimum per-scenario budget (seconds) — enough for 1-2 data tiers
+_MIN_SCENARIO_BUDGET = 15
+
 # Default parallel workers for scenario execution
 _DEFAULT_MAX_WORKERS = 4
 
@@ -783,6 +786,24 @@ class ExecutionEngine:
         )
         sys.stderr.flush()
 
+        # ── Per-scenario time budgets ──
+        # Distribute the total timeout across scenarios, weighted by priority.
+        # High-priority profiled scenarios get more time; low-priority coupling
+        # scenarios get less.  The total timeout is a hard wall-clock ceiling.
+        total_budget = self._timeout_override or _SCENARIO_TIMEOUT_CAP
+        deadline = time.monotonic() + total_budget
+
+        _BUDGET_WEIGHT = {"high": 2.0, "medium": 1.0, "low": 0.5}
+        total_weight = sum(_BUDGET_WEIGHT.get(s.priority, 1.0) for s in scenarios)
+        base_per = total_budget / total_weight if total_weight > 0 else total_budget
+
+        scenario_budgets: list[int] = []
+        for s in scenarios:
+            w = _BUDGET_WEIGHT.get(s.priority, 1.0)
+            cat_cap = _CATEGORY_TIMEOUT_CAPS.get(s.category, _SCENARIO_TIMEOUT_CAP)
+            budget = max(_MIN_SCENARIO_BUDGET, min(int(base_per * w), cat_cap))
+            scenario_budgets.append(budget)
+
         # Thread-safe collection for results (ordered by completion)
         lock = threading.Lock()
         completed_count = 0
@@ -790,14 +811,37 @@ class ExecutionEngine:
         ordered_results: list[Optional[ScenarioResult]] = [None] * total
         warnings: list[str] = []
         start = time.perf_counter()
+        deadline_hit = False
 
-        def _run_one(idx: int, scenario: StressTestScenario) -> None:
-            nonlocal completed_count
+        def _run_one(
+            idx: int, scenario: StressTestScenario, budget: int,
+        ) -> None:
+            nonlocal completed_count, deadline_hit
+
+            # Check hard ceiling before starting
+            if time.monotonic() > deadline:
+                result = ScenarioResult(
+                    scenario_name=scenario.name,
+                    scenario_category=scenario.category,
+                    status="partial",
+                    summary="Skipped — total time budget exceeded.",
+                    failure_reason="budget_exceeded",
+                )
+                with lock:
+                    deadline_hit = True
+                    ordered_results[idx] = result
+                    completed_count += 1
+                    if on_progress:
+                        on_progress(completed_count, total, scenario.name)
+                return
+
             self._io.display(
                 f"[{idx + 1}/{total}] Running scenario: {scenario.name}..."
             )
             try:
-                result = self._execute_scenario(scenario)
+                result = self._execute_scenario(
+                    scenario, budget_seconds=budget,
+                )
             except Exception as e:
                 logger.error(
                     "Scenario '%s' engine error: %s", scenario.name, e,
@@ -822,12 +866,28 @@ class ExecutionEngine:
 
         with ThreadPoolExecutor(max_workers=min(max_workers, total)) as pool:
             futures = {
-                pool.submit(_run_one, idx, scenario): idx
+                pool.submit(_run_one, idx, scenario, scenario_budgets[idx]): idx
                 for idx, scenario in enumerate(scenarios)
             }
-            # Wait for all to complete; exceptions handled inside _run_one
             for future in as_completed(futures):
                 future.result()  # re-raises if _run_one itself crashed
+                # Check hard ceiling — cancel unstarted futures
+                if time.monotonic() > deadline:
+                    for f in futures:
+                        f.cancel()
+                    break
+
+        # Record budget-exceeded for any scenarios that never ran
+        for idx, r in enumerate(ordered_results):
+            if r is None:
+                s = scenarios[idx]
+                ordered_results[idx] = ScenarioResult(
+                    scenario_name=s.name,
+                    scenario_category=s.category,
+                    status="partial",
+                    summary="Skipped — total time budget exceeded.",
+                    failure_reason="budget_exceeded",
+                )
 
         results = [r for r in ordered_results if r is not None]
         # Append HTTP-deferred scenario results so the report can reference them
@@ -838,6 +898,13 @@ class ExecutionEngine:
         failed = sum(1 for r in results if r.status in ("failed", "partial"))
         skipped = sum(1 for r in results if r.status == "skipped")
 
+        if deadline_hit:
+            logger.info(
+                "Total time budget (%.0fs) exceeded — %d scenarios skipped",
+                total_budget,
+                sum(1 for r in results if r.failure_reason == "budget_exceeded"),
+            )
+
         return ExecutionEngineResult(
             scenario_results=results,
             total_execution_time_ms=round(total_ms, 2),
@@ -847,8 +914,19 @@ class ExecutionEngine:
             warnings=warnings,
         )
 
-    def _execute_scenario(self, scenario: StressTestScenario) -> ScenarioResult:
-        """Execute a single stress test scenario."""
+    def _execute_scenario(
+        self,
+        scenario: StressTestScenario,
+        budget_seconds: Optional[int] = None,
+    ) -> ScenarioResult:
+        """Execute a single stress test scenario.
+
+        Args:
+            scenario: The scenario to execute.
+            budget_seconds: Optional per-scenario time budget from the
+                execute() budget allocator.  When provided, the subprocess
+                timeout is capped to this value.
+        """
         config = scenario.test_config
         resource_limits = config.get("resource_limits", {})
         timeout = resource_limits.get(
@@ -865,10 +943,18 @@ class ExecutionEngine:
             timeout = user_cap
             hit_user_cap = True
 
+        # Per-scenario budget from execute() budget allocator
+        hit_budget = False
+        if budget_seconds is not None and timeout > budget_seconds:
+            timeout = budget_seconds
+            hit_budget = True
+
+        _cap_label = " [user cap]" if hit_user_cap else (
+            " [budget]" if hit_budget else ""
+        )
         logger.info(
             "Executing scenario: %s [%s] (timeout=%ds%s)",
-            scenario.name, scenario.category, timeout,
-            " [user cap]" if hit_user_cap else "",
+            scenario.name, scenario.category, timeout, _cap_label,
         )
         sys.stderr.flush()
 
@@ -944,6 +1030,14 @@ class ExecutionEngine:
                 )
                 if hit_user_cap and callable_result.failure_reason == "timeout":
                     callable_result.hit_user_timeout = True
+                if (hit_budget and not hit_user_cap
+                        and callable_result.failure_reason == "timeout"):
+                    callable_result.failure_reason = "budget_exceeded"
+                    n = len(callable_result.steps)
+                    callable_result.summary = (
+                        f"Completed {n} step{'s' if n != 1 else ''} "
+                        f"within its time allocation."
+                    )
                 logger.info(
                     "Scenario '%s' %s (callable): %d steps, %d errors, %.0f ms",
                     scenario.name, callable_result.status,
@@ -1051,6 +1145,17 @@ class ExecutionEngine:
         # Mark when scenario was capped by the user's timeout
         if hit_user_cap and result.failure_reason == "timeout":
             result.hit_user_timeout = True
+
+        # Mark when scenario was capped by the per-scenario budget
+        # (not the user's explicit timeout — the time-distribution mechanism)
+        if (hit_budget and not hit_user_cap
+                and result.failure_reason == "timeout"):
+            result.failure_reason = "budget_exceeded"
+            n_steps = len(result.steps)
+            result.summary = (
+                f"Completed {n_steps} step{'s' if n_steps != 1 else ''} "
+                f"within its time allocation."
+            )
 
         logger.info(
             "Scenario '%s' %s: %d steps, %d errors, %.0f ms",

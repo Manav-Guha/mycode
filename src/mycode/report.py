@@ -1247,6 +1247,29 @@ class ReportGenerator:
                 incomplete += 1
                 continue
 
+            # ── Budget exceeded → INFO finding ──
+            if sr.failure_reason == "budget_exceeded":
+                n_steps = len(sr.steps)
+                depth_hint = (
+                    " Choose 'deep analysis' for more thorough testing."
+                    if report._analysis_depth != "deep" else ""
+                )
+                f = Finding(
+                    title=f"Time budget reached: {_humanize_title_name(sr.scenario_name)}",
+                    severity="info",
+                    category=sr.scenario_category,
+                    description=(
+                        f"This scenario completed {n_steps} "
+                        f"step{'s' if n_steps != 1 else ''} within its "
+                        f"time allocation.{depth_hint}"
+                    ),
+                    affected_dependencies=self._deps_from_name(sr.scenario_name),
+                )
+                f._failure_reason = "budget_exceeded"
+                report.incomplete_tests.append(_tag_source(f))
+                incomplete += 1
+                continue
+
             # ── Harness failures → incomplete tests (myCode limitation) ──
             if sr.failure_reason:
                 if sr.failure_reason == "runtime_context_required":
@@ -1420,7 +1443,7 @@ class ReportGenerator:
 
             # ── Count scenario outcome based on what was actually produced ──
             # Runtime context, HTTP-deferred, and user-timeout are excluded from counts
-            if sr.failure_reason in ("runtime_context_required", "http_tested") or sr.hit_user_timeout:
+            if sr.failure_reason in ("runtime_context_required", "http_tested", "budget_exceeded") or sr.hit_user_timeout:
                 incomplete += 1
             elif len(report.findings) > _findings_before:
                 # Scenario produced at least one finding → failed
