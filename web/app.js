@@ -530,9 +530,54 @@ function humanizeMetricLabel(metric) {
     return "";
 }
 
+// Template descriptions — mirrors _TEMPLATE_DESCRIPTIONS in report.py
+const _TEMPLATE_DESCRIPTIONS = {
+    "concurrent_request_load": "Handling multiple users at once",
+    "concurrent_session_load": "Handling multiple users at once",
+    "large_payload_response": "Returning large results",
+    "file_upload_scaling": "Handling file uploads",
+    "file_upload_memory_stress": "Handling file uploads",
+    "blocking_io_under_load": "Handling requests while waiting for data",
+    "repeated_request_memory_profile": "Handling many requests over time",
+    "script_rerun_cost": "Re-running with larger data",
+    "cache_memory_growth": "Caching data over time",
+    "repeated_interaction_memory_profile": "Extended user sessions",
+    "large_download_memory": "Downloading large responses",
+    "timeout_behavior": "Calling external APIs that respond slowly",
+    "error_handling_resilience": "Dealing with unexpected API responses",
+    "session_vs_individual_performance": "Making many API calls",
+    "data_volume_scaling": "Processing larger amounts of data",
+    "merge_memory_stress": "Combining large datasets",
+    "iterrows_vs_vectorized": "Processing rows of data",
+    "memory_profiling_over_time": "Repeated data operations over time",
+    "edge_case_dtypes": "Handling unusual data formats",
+    "concurrent_dataframe_access": "Accessing data from multiple places at once",
+    "session_write_concurrency": "Multiple users writing at the same time",
+    "array_size_scaling": "Working with larger arrays",
+    "matrix_operation_scaling": "Heavy number crunching",
+    "concurrent_array_access": "Accessing data from multiple threads",
+    "edge_case_inputs": "Handling unusual or extreme inputs",
+    "repeated_allocation_memory": "Allocating memory repeatedly",
+    "async_concurrent_load": "Handling many requests at once",
+    "sync_handler_thread_exhaustion": "Running synchronous code under load",
+    "pydantic_validation_stress": "Validating request data at scale",
+    "websocket_connection_scaling": "Handling many open connections",
+    "large_response_streaming": "Streaming large responses",
+    "middleware_chain_overhead": "Processing middleware layers",
+    "async_error_handling": "Handling errors in async operations",
+    "memory_under_load": "Managing memory under heavy traffic",
+    "large_payload_handling": "Processing large request payloads",
+};
+
+function _humanizeIdentifier(raw) {
+    return raw.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function humanizeScenarioName(name) {
     if (!name) return name;
     const lower = name.toLowerCase();
+
+    // HTTP endpoint scenarios
     if (lower === "http_get_root" || lower === "http_post_root") {
         return "Loading your application's main page";
     }
@@ -542,6 +587,60 @@ function humanizeScenarioName(name) {
             const path = parts.slice(2).join("/");
             if (path && path !== "root") return "Loading the /" + path + " endpoint";
         }
+    }
+
+    // Template matching — try progressively shorter suffixes
+    const parts = lower.split("_");
+    for (let start = 1; start < parts.length; start++) {
+        const key = parts.slice(start).join("_");
+        if (_TEMPLATE_DESCRIPTIONS[key]) return _TEMPLATE_DESCRIPTIONS[key];
+    }
+
+    // Coupling scenario patterns
+    if (lower.startsWith("coupling_compute_")) {
+        const label = _humanizeIdentifier(name.slice("coupling_compute_".length));
+        return "Running calculations (" + label + ")";
+    }
+    if (lower.startsWith("coupling_api_")) {
+        const label = _humanizeIdentifier(name.slice("coupling_api_".length));
+        return "Connecting to external services (" + label + ")";
+    }
+    if (lower.startsWith("coupling_render_")) {
+        const label = _humanizeIdentifier(name.slice("coupling_render_".length));
+        return "Rendering output (" + label + ")";
+    }
+    if (lower.startsWith("coupling_state_") || lower.startsWith("coupling_stateset")) {
+        return "Updating shared state";
+    }
+    if (lower.startsWith("coupling_errorhandler_")) {
+        return "Handling errors between components";
+    }
+
+    // Keyword fallbacks
+    if (lower.includes("memory") || lower.includes("leak")) return "Managing memory over time";
+    if (lower.includes("concurrent")) return "Handling simultaneous operations";
+    if (lower.includes("scaling") || lower.includes("volume")) return "Processing larger amounts of data";
+
+    // Check scenarios
+    if (lower.endsWith("_check")) {
+        const remainder = lower.replace(/_check$/, "").split("_").slice(1).join("_");
+        if (remainder) return _humanizeIdentifier(remainder) + " behavior";
+    }
+
+    // Version discrepancy
+    if (lower.endsWith("_version_discrepancy")) {
+        const dep = lower.replace(/_version_discrepancy$/, "");
+        return _humanizeIdentifier(dep) + " version compatibility";
+    }
+
+    // Generic stress
+    if (lower.includes("generic_stress")) {
+        return "General usage patterns";
+    }
+
+    // Last resort: strip dep prefix and humanize
+    if (parts.length > 1) {
+        return _humanizeIdentifier(parts.slice(1).join("_"));
     }
     const s = name.replace(/_/g, " ");
     return s.charAt(0).toUpperCase() + s.slice(1);
