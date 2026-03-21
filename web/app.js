@@ -468,6 +468,33 @@ function renderReport(report, summary, understandingMd, fixesMd, edition, hasPdf
     content.dataset.report = JSON.stringify(report);
 }
 
+function _integrateDetails(description, details) {
+    // Mirrors _integrate_details() in documents.py — merges short detail
+    // fragments into the description text so they read as sentences.
+    // Returns [mergedDescription, remainingDetails] where remainingDetails
+    // is shown in the grey box (empty if fully integrated).
+    if (!details) return [description, ""];
+    if (!description) return [details, ""];
+    // If details already appear in description, skip
+    if (description.toLowerCase().includes(details.toLowerCase().slice(0, 20))) {
+        return [description, ""];
+    }
+    const detailClean = details.replace(/[. ]+$/, "");
+    if (detailClean.toLowerCase().startsWith("at ")) {
+        // "at first iteration" → "This issue begins at first iteration."
+        let desc = description.trimEnd();
+        if (!desc.endsWith(".")) desc += ".";
+        return [desc + " This issue begins " + detailClean + ".", ""];
+    }
+    // Short single-line details: integrate as sentence (matches PDF path)
+    if (!details.includes("\n") && details.length < 100) {
+        const desc = description.replace(/[. ]+$/, "");
+        return [desc + ". " + detailClean + ".", ""];
+    }
+    // Multi-line or long technical details: keep in grey box
+    return [description, details];
+}
+
 function renderFinding(f) {
     const severity = f.severity || "info";
     let html = `<div class="finding-card ${severity}">`;
@@ -476,11 +503,14 @@ function renderFinding(f) {
     html += `<span class="finding-title">${escapeHtml(f.title || "")}</span>`;
     html += `</div>`;
 
-    if (f.description) {
-        html += `<div class="finding-description">${highlightConsequence(f.description, severity)}</div>`;
+    const [mergedDesc, remainingDetails] = _integrateDetails(
+        f.description || "", f.details || "",
+    );
+    if (mergedDesc) {
+        html += `<div class="finding-description">${highlightConsequence(mergedDesc, severity)}</div>`;
     }
-    if (f.details) {
-        html += `<div class="finding-details">${escapeHtml(f.details)}</div>`;
+    if (remainingDetails) {
+        html += `<div class="finding-details">${escapeHtml(remainingDetails)}</div>`;
     }
     if (f.affected_dependencies && f.affected_dependencies.length) {
         html += `<div class="finding-deps">Dependencies: ${f.affected_dependencies.map(escapeHtml).join(", ")}</div>`;
@@ -529,6 +559,36 @@ function humanizeStepLabel(label) {
     // HTTP load testing labels: "N concurrent"
     if ((m = s.match(/^(\d+) concurrent$/))) { n = Number(m[1]); return n.toLocaleString() + " concurrent " + _pl(n, "connection"); }
     return s.replace(/_/g, " ");
+}
+
+function shortStepLabel(label) {
+    // Extract just the number for compact chart x-axis labels.
+    const s = String(label);
+    const m = s.match(/(\d[\d,]*)/);
+    if (m) {
+        const n = Number(m[1].replace(/,/g, ""));
+        return n >= 1000 ? (n / 1000) + "k" : String(n);
+    }
+    return s.length > 6 ? s.slice(0, 5) + "\u2026" : s;
+}
+
+function chartAxisTitle(labels) {
+    // Derive a short axis title from the step label pattern.
+    const first = String(labels[0] || "");
+    if (first.match(/^concurrent_/)) return "connections";
+    if (first.match(/^\d+ concurrent$/)) return "connections";
+    if (first.match(/^api_concurrency_/)) return "API calls";
+    if (first.match(/^wsgi_concurrent_/)) return "requests";
+    if (first.match(/^data_size_/)) return "items";
+    if (first.match(/^compute_/)) return "items";
+    if (first.match(/^rerun_rows_/)) return "rows";
+    if (first.match(/^batch_/)) return "iteration";
+    if (first.match(/^io_size_/)) return "data size";
+    if (first.match(/^gil_threads_/)) return "threads";
+    if (first.match(/^async_load_/)) return "promises";
+    if (first.match(/^state_cycles_/)) return "cycles";
+    if (first.match(/^sqlite_writers_/)) return "writers";
+    return "";
 }
 
 function humanizeMetricLabel(metric) {
@@ -877,15 +937,19 @@ function renderCurveChart(d, verdict) {
         }
     }
 
-    // X-axis labels: first, middle (if ≥5 steps), last
+    // X-axis labels: first, middle (if ≥5 steps), last — compact numbers
     const xLabels = [0];
     if (steps.length >= 5) xLabels.push(Math.floor(steps.length / 2));
     xLabels.push(steps.length - 1);
     for (const i of xLabels) {
-        const lbl = humanizeStepLabel(labels[i]);
-        // Truncate long labels
-        const short = lbl.length > 15 ? lbl.slice(0, 14) + "\u2026" : lbl;
+        const short = shortStepLabel(labels[i]);
         svg += `<text x="${x(i).toFixed(1)}" y="${H - 5}" text-anchor="middle" fill="${textColour}" font-size="9">${escapeHtml(short)}</text>`;
+    }
+
+    // X-axis title (e.g. "connections", "items")
+    const axisTitle = chartAxisTitle(labels);
+    if (axisTitle) {
+        svg += `<text x="${W - PAD.right}" y="${H - 5}" text-anchor="end" fill="${textColour}" font-size="8" font-style="italic">${escapeHtml(axisTitle)}</text>`;
     }
 
     svg += `</svg>`;
