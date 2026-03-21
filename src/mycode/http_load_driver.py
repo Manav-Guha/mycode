@@ -625,10 +625,13 @@ def http_results_to_degradation_points(
         ))
 
         # Memory curve (if any measurements and not flat)
+        # Use 2% of baseline as threshold — relative to app size so a 65MB
+        # app with 1.3MB growth produces a curve, while 0.5MB noise doesn't.
         mem_values = [lvl.memory_mb for lvl in ep_result.levels if lvl.memory_mb > 0]
         if mem_values:
             mem_range = max(mem_values) - min(mem_values)
-            if mem_range >= 2.0:
+            mem_baseline = mem_values[0] if mem_values[0] > 0 else 1.0
+            if mem_range >= mem_baseline * 0.02:
                 # Real growth — show as degradation curve
                 mem_steps = [
                     (f"{lvl.concurrency} concurrent", lvl.memory_mb)

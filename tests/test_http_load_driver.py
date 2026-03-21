@@ -409,6 +409,60 @@ class TestHttpResultsToDegradationPoints:
         points = http_results_to_degradation_points(load_result)
         assert points[0].breaking_point == "5 concurrent"
 
+    def test_memory_curve_65mb_app_with_2pct_growth(self):
+        """A 65MB app with ~2% growth (1.5MB) should produce a memory curve."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, memory_mb=65.0),
+                _make_load_level(concurrency=50, memory_mb=66.5),
+            ],
+        )
+        load_result = HttpLoadResult(framework="streamlit", endpoint_results=[ep])
+        points = http_results_to_degradation_points(load_result)
+        mem_points = [p for p in points if p.metric == "memory_peak_mb"]
+        assert len(mem_points) == 1
+
+    def test_memory_curve_10mb_app_with_3pct_growth(self):
+        """A 10MB app with 0.3MB range (3%) should produce a memory curve."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, memory_mb=10.0),
+                _make_load_level(concurrency=50, memory_mb=10.3),
+            ],
+        )
+        load_result = HttpLoadResult(framework="flask", endpoint_results=[ep])
+        points = http_results_to_degradation_points(load_result)
+        mem_points = [p for p in points if p.metric == "memory_peak_mb"]
+        assert len(mem_points) == 1
+
+    def test_no_memory_curve_65mb_app_with_0_5mb_noise(self):
+        """A 65MB app with 0.5MB range (0.8%) should NOT produce a curve."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, memory_mb=65.0),
+                _make_load_level(concurrency=50, memory_mb=65.5),
+            ],
+        )
+        load_result = HttpLoadResult(framework="streamlit", endpoint_results=[ep])
+        points = http_results_to_degradation_points(load_result)
+        mem_points = [p for p in points if p.metric == "memory_peak_mb"]
+        assert len(mem_points) == 0
+
+    def test_memory_curve_large_app_old_threshold_would_miss(self):
+        """A 100MB app with 1.8MB range — old 2.0MB absolute threshold would
+        miss this, but 2% relative (2.0MB) catches it at the boundary."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, memory_mb=100.0),
+                _make_load_level(concurrency=50, memory_mb=101.5),
+                _make_load_level(concurrency=100, memory_mb=102.0),
+            ],
+        )
+        load_result = HttpLoadResult(framework="flask", endpoint_results=[ep])
+        points = http_results_to_degradation_points(load_result)
+        mem_points = [p for p in points if p.metric == "memory_peak_mb"]
+        assert len(mem_points) == 1
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Finding Generation
