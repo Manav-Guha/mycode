@@ -690,7 +690,7 @@ class TestConstraintExtraction:
             "1",        # data_type → tabular
             "2",        # usage_pattern → burst
             "2",        # max_payload → medium (50 MB)
-            "1",        # timeout_per_scenario → 90s
+            "2",        # analysis_depth → standard
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -702,6 +702,8 @@ class TestConstraintExtraction:
         assert c.usage_pattern == "burst"
         assert c.max_payload_mb == 50.0
         assert c.availability_requirement == "business_hours"  # derived from burst
+        assert c.analysis_depth == "standard"
+        assert c.timeout_per_scenario == 300  # derived from standard
 
     def test_constraints_inferred_from_turn_text(self, simple_ingestion):
         """Context-only fields extracted from turn 1 text."""
@@ -711,7 +713,7 @@ class TestConstraintExtraction:
             # user_scale, data_type, usage_pattern inferred from turn text
             # max_payload always asked explicitly
             "3",        # max_payload (large = 100 MB)
-            "1",        # timeout_per_scenario → 90s
+            "1",        # analysis_depth → quick
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -725,6 +727,8 @@ class TestConstraintExtraction:
         assert c.usage_pattern == "sustained"  # "steady" + "all day"
         assert c.max_payload_mb == 100.0  # choice 3 = large
         assert c.availability_requirement == "always_on"  # derived from sustained
+        assert c.analysis_depth == "quick"
+        assert c.timeout_per_scenario == 120  # derived from quick
 
     def test_constraints_none_when_skipped(self, simple_ingestion):
         """Skipping all constraint questions leaves parameters as None."""
@@ -757,7 +761,7 @@ class TestConstraintExtraction:
             "1",
             "3",
             "1",
-            "1",        # timeout_per_scenario → 90s
+            "1",        # analysis_depth → quick
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -922,7 +926,7 @@ class TestInputValidation:
             "1",            # data_type — valid (tabular)
             "2",            # usage_pattern — valid (burst)
             "1",            # max_payload — valid (small)
-            "1",            # timeout_per_scenario — valid (90s)
+            "1",            # analysis_depth — valid (quick)
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
@@ -931,6 +935,7 @@ class TestInputValidation:
         assert result.constraints.data_type == "tabular"
         assert result.constraints.usage_pattern == "burst"
         assert result.constraints.max_payload_mb == 1.0
+        assert result.constraints.analysis_depth == "quick"
         # No re-ask prompts — exactly 7 prompts total
         assert len(io.prompts) == 7
 
@@ -944,7 +949,7 @@ class TestInputValidation:
             "1",            # data_type
             "1",            # usage_pattern
             "2",            # max_payload
-            "1",            # timeout_per_scenario
+            "1",            # analysis_depth → quick
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
@@ -982,13 +987,14 @@ class TestInputValidation:
             "1",            # data_type
             "1",            # usage_pattern
             "not sure",     # max_payload — explicit skip
-            "not sure",     # timeout_per_scenario — explicit skip
+            "not sure",     # analysis_depth — explicit skip
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
         assert result.constraints.user_scale is None
         assert result.constraints.max_payload_mb is None
+        assert result.constraints.analysis_depth is None
         # No re-asks — exactly 7 prompts
         assert len(io.prompts) == 7
 
@@ -1112,50 +1118,44 @@ class TestWebFollowupValidation:
         assert ok is True
         assert constraints.max_payload_mb == 50.0
 
-    def test_timeout_per_scenario_valid(self):
+    def test_analysis_depth_valid(self):
         from mycode.constraints import OperationalConstraints
         constraints = OperationalConstraints()
         constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "timeout_per_scenario", "2",
+            constraints, "analysis_depth", "2",
         )
         assert ok is True
-        assert constraints.timeout_per_scenario == 180  # choice 2 = 3 min
-
-    def test_timeout_per_scenario_duration_string(self):
-        from mycode.constraints import OperationalConstraints
-        constraints = OperationalConstraints()
-        constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "timeout_per_scenario", "5 min",
-        )
-        assert ok is True
+        assert constraints.analysis_depth == "standard"
         assert constraints.timeout_per_scenario == 300
 
-    def test_timeout_per_scenario_floor(self):
+    def test_analysis_depth_keyword(self):
         from mycode.constraints import OperationalConstraints
         constraints = OperationalConstraints()
         constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "timeout_per_scenario", "10",
+            constraints, "analysis_depth", "deep",
         )
         assert ok is True
-        assert constraints.timeout_per_scenario == 60  # floor
+        assert constraints.analysis_depth == "deep"
+        assert constraints.timeout_per_scenario == 600
 
-    def test_timeout_per_scenario_skip(self):
+    def test_analysis_depth_skip(self):
         from mycode.constraints import OperationalConstraints
         constraints = OperationalConstraints()
         constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "timeout_per_scenario", "not sure",
+            constraints, "analysis_depth", "not sure",
         )
         assert ok is True
-        assert constraints.timeout_per_scenario is None
+        assert constraints.analysis_depth is None
 
-    def test_timeout_per_scenario_defaults_to_90(self):
+    def test_analysis_depth_defaults_to_standard(self):
         from mycode.constraints import OperationalConstraints
         constraints = OperationalConstraints()
         constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "timeout_per_scenario", "banana", is_retry=True,
+            constraints, "analysis_depth", "banana", is_retry=True,
         )
         assert ok is True
-        assert constraints.timeout_per_scenario == 90
+        assert constraints.analysis_depth == "standard"
+        assert constraints.timeout_per_scenario == 300
 
 
 # ── Timeout Parser Unit Tests ──
@@ -1193,6 +1193,58 @@ class TestTimeoutParser:
         assert parse_timeout_per_scenario("not sure") is None
         assert parse_timeout_per_scenario("skip") is None
         assert parse_timeout_per_scenario("") is None
+
+
+class TestAnalysisDepthParser:
+    """Tests for parse_analysis_depth."""
+
+    def test_numbered_choices(self):
+        from mycode.constraints import parse_analysis_depth
+        assert parse_analysis_depth("1") == "quick"
+        assert parse_analysis_depth("2") == "standard"
+        assert parse_analysis_depth("3") == "deep"
+
+    def test_keyword_matching(self):
+        from mycode.constraints import parse_analysis_depth
+        assert parse_analysis_depth("quick") == "quick"
+        assert parse_analysis_depth("fast") == "quick"
+        assert parse_analysis_depth("standard") == "standard"
+        assert parse_analysis_depth("normal") == "standard"
+        assert parse_analysis_depth("deep") == "deep"
+        assert parse_analysis_depth("thorough") == "deep"
+        assert parse_analysis_depth("comprehensive") == "deep"
+        assert parse_analysis_depth("full") == "deep"
+
+    def test_skip_words(self):
+        from mycode.constraints import parse_analysis_depth
+        assert parse_analysis_depth("not sure") is None
+        assert parse_analysis_depth("skip") is None
+
+    def test_garbage_returns_none(self):
+        from mycode.constraints import parse_analysis_depth
+        assert parse_analysis_depth("banana") is None
+        assert parse_analysis_depth("42") is None
+
+    def test_case_insensitive(self):
+        from mycode.constraints import parse_analysis_depth
+        assert parse_analysis_depth("QUICK") == "quick"
+        assert parse_analysis_depth("Deep Analysis") == "deep"
+
+
+class TestDepthMappings:
+    """Tests for depth_to_timeout and depth_to_coupling_cap."""
+
+    def test_depth_to_timeout(self):
+        from mycode.constraints import depth_to_timeout
+        assert depth_to_timeout("quick") == 120
+        assert depth_to_timeout("standard") == 300
+        assert depth_to_timeout("deep") == 600
+
+    def test_depth_to_coupling_cap(self):
+        from mycode.constraints import depth_to_coupling_cap
+        assert depth_to_coupling_cap("quick") == 5
+        assert depth_to_coupling_cap("standard") == 10
+        assert depth_to_coupling_cap("deep") is None
 
 
 class TestDocumentsDataType:
@@ -1254,7 +1306,7 @@ class TestTurn2QuestionNoDataType:
             "3",         # data_type (documents)
             "1",         # usage_pattern
             "1",         # max_payload
-            "1",         # timeout
+            "1",         # analysis_depth → quick
             "",          # project name
         ])
         interface = ConversationalInterface(offline=True, io=io)

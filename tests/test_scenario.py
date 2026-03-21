@@ -2916,3 +2916,48 @@ class TestCouplingScenarioCap:
             or any("pandas" in t.lower() for t in s.test_config.get("coupling_targets", []))
         ]
         assert len(pandas_coupling) >= 3
+
+    def test_quick_depth_uses_smaller_cap(self):
+        """analysis_depth='quick' caps coupling at 5."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_setup_with_many_couplings(20)
+        constraints = OperationalConstraints(
+            data_type="documents", analysis_depth="quick",
+        )
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        coupling = [s for s in result.scenarios if s.test_config.get("behavior")]
+        assert len(coupling) <= 5
+
+    def test_deep_depth_no_coupling_cap(self):
+        """analysis_depth='deep' removes the coupling cap."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_setup_with_many_couplings(20)
+        constraints = OperationalConstraints(
+            data_type="documents", analysis_depth="deep",
+        )
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        coupling = [s for s in result.scenarios if s.test_config.get("behavior")]
+        assert len(coupling) > 10
+
+    def test_quick_depth_drops_low_priority(self):
+        """analysis_depth='quick' drops low-priority scenarios."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_setup_with_many_couplings(5)
+        constraints = OperationalConstraints(
+            data_type="documents", analysis_depth="quick",
+        )
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        low = [s for s in result.scenarios if s.priority == "low"]
+        assert len(low) == 0

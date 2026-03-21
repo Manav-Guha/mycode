@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-from mycode.constraints import OperationalConstraints
+from mycode.constraints import OperationalConstraints, depth_to_coupling_cap
 from mycode.ingester import CouplingPoint, FunctionFlow, IngestionResult
 from mycode.library.loader import DependencyProfile, ProfileMatch
 
@@ -1344,20 +1344,26 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             # ── Coupling scenario cap ──
             # When a data_type filter is active, cap coupling scenarios so
             # profiled scenarios (data_volume_scaling, memory_profiling) get
-            # enough of the time budget.
-            coupling = [s for s in scenarios if s.test_config.get("behavior")]
-            if len(coupling) > _MAX_COUPLING_SCENARIOS_FILTERED:
-                profiled_deps = {
-                    dep
-                    for s in scenarios
-                    for dep in s.target_dependencies
-                }
-                coupling.sort(
-                    key=lambda s: _coupling_relevance(s, profiled_deps),
-                    reverse=True,
-                )
-                drop = set(id(s) for s in coupling[_MAX_COUPLING_SCENARIOS_FILTERED:])
-                scenarios = [s for s in scenarios if id(s) not in drop]
+            # enough of the time budget.  Cap varies by analysis_depth.
+            cap = (
+                depth_to_coupling_cap(constraints.analysis_depth)
+                if constraints.analysis_depth
+                else _MAX_COUPLING_SCENARIOS_FILTERED
+            )
+            if cap is not None:
+                coupling = [s for s in scenarios if s.test_config.get("behavior")]
+                if len(coupling) > cap:
+                    profiled_deps = {
+                        dep
+                        for s in scenarios
+                        for dep in s.target_dependencies
+                    }
+                    coupling.sort(
+                        key=lambda s: _coupling_relevance(s, profiled_deps),
+                        reverse=True,
+                    )
+                    drop = set(id(s) for s in coupling[cap:])
+                    scenarios = [s for s in scenarios if id(s) not in drop]
 
         for scenario in scenarios:
             # Ensure params dict exists in test_config so mutations persist
@@ -1452,6 +1458,16 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                         else:
                             if scenario.priority == "high":
                                 scenario.priority = "medium"
+
+        # ── Quick mode: skip low-priority scenarios ──
+        # Runs after priority boost so _DATA_TYPE_LOW demotions are applied.
+        if constraints.analysis_depth == "quick":
+            scenarios = [
+                s for s in scenarios
+                if s.priority != "low"
+                or s.name.endswith("_check")
+                or s.name.endswith("_discrepancy")
+            ]
 
         return scenarios
 

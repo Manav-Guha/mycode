@@ -4009,6 +4009,33 @@ class TestTimeoutInReportContext:
         text = report.as_text()
         assert "per test" not in text
 
+    def test_analysis_depth_in_summary(self):
+        """analysis_depth appears in report context instead of raw timeout."""
+        from mycode.constraints import OperationalConstraints
+        sr = ScenarioResult(
+            scenario_name="test_scenario",
+            scenario_category="data_volume_scaling",
+            status="completed",
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_completed=1,
+        )
+        constraints = OperationalConstraints(
+            user_scale=100,
+            analysis_depth="standard",
+            timeout_per_scenario=300,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+            constraints=constraints,
+        )
+        text = report.as_text()
+        assert "standard analysis" in text
+        # Should show depth label, not raw timeout
+        assert "300s per test" not in text
+
 
 # ── Dep→File Mapping & source_file Fallback ──
 

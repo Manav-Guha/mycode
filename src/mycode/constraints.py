@@ -56,6 +56,7 @@ class OperationalConstraints:
     data_sensitivity: Optional[str] = None
     growth_expectation: Optional[str] = None
     timeout_per_scenario: Optional[int] = None
+    analysis_depth: Optional[str] = None  # "quick", "standard", "deep"
     raw_answers: list[str] = field(default_factory=list)
 
     def as_summary(self) -> str:
@@ -99,7 +100,17 @@ class OperationalConstraints:
             parts.append(f"Data sensitivity: {self.data_sensitivity}")
         if self.growth_expectation:
             parts.append(f"Growth: {self.growth_expectation}")
-        if self.timeout_per_scenario is not None:
+        if self.analysis_depth:
+            _depth_labels = {
+                "quick": "quick scan (~2 minutes)",
+                "standard": "standard analysis (~5 minutes)",
+                "deep": "deep analysis (~10 minutes)",
+            }
+            parts.append(
+                f"Analysis depth: "
+                f"{_depth_labels.get(self.analysis_depth, self.analysis_depth)}"
+            )
+        elif self.timeout_per_scenario is not None:
             parts.append(f"Time limit per test: {self.timeout_per_scenario}s")
         return ". ".join(parts) if parts else "No specific constraints provided"
 
@@ -502,6 +513,62 @@ def parse_timeout_per_scenario(text: str) -> Optional[int]:
             return max(value, _TIMEOUT_FLOOR)
 
     return None
+
+
+# ── Analysis Depth ──
+
+_DEPTH_CHOICES: dict[str, str] = {
+    "1": "quick",
+    "2": "standard",
+    "3": "deep",
+}
+
+_DEPTH_KEYWORDS: dict[str, str] = {
+    "quick": "quick",
+    "fast": "quick",
+    "quick scan": "quick",
+    "standard": "standard",
+    "normal": "standard",
+    "default": "standard",
+    "deep": "deep",
+    "thorough": "deep",
+    "comprehensive": "deep",
+    "full": "deep",
+}
+
+
+def parse_analysis_depth(text: str) -> Optional[str]:
+    """Extract analysis depth from user input.
+
+    Returns ``"quick"``, ``"standard"``, ``"deep"``, or ``None``.
+    """
+    text_lower = text.lower().strip()
+
+    if _is_skip(text_lower):
+        return None
+
+    stripped = text_lower.rstrip(".").strip()
+    if stripped in _DEPTH_CHOICES:
+        return _DEPTH_CHOICES[stripped]
+
+    for keyword, depth in _DEPTH_KEYWORDS.items():
+        if keyword in text_lower:
+            return depth
+
+    return None
+
+
+def depth_to_timeout(depth: str) -> int:
+    """Map analysis depth to per-scenario timeout in seconds."""
+    return {"quick": 120, "standard": 300, "deep": 600}.get(depth, 300)
+
+
+def depth_to_coupling_cap(depth: str) -> Optional[int]:
+    """Map analysis depth to coupling scenario cap.
+
+    Returns ``None`` for deep (no cap).
+    """
+    return {"quick": 5, "standard": 10, "deep": None}.get(depth, 10)
 
 
 # ── Context-Only Parsers ──

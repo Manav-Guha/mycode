@@ -27,12 +27,13 @@ from mycode.constraints import (
     _is_skip,
     extract_data_type_keywords,
     infer_availability,
+    parse_analysis_depth,
     parse_data_sensitivity,
     parse_data_type,
     parse_deployment_context,
     parse_growth_expectation,
     parse_max_payload,
-    parse_timeout_per_scenario,
+    depth_to_timeout,
     parse_usage_pattern,
     parse_user_scale,
 )
@@ -424,9 +425,9 @@ class ConversationalInterface:
             "I didn't catch that — please pick a number from 1-3 "
             "or enter a size (e.g. 10 MB, 2 GB)."
         ),
-        "timeout_per_scenario": (
+        "analysis_depth": (
             "I didn't catch that — please pick a number from 1-3 "
-            "or enter a duration (e.g. 90s, 2 min, 5 minutes)."
+            "or say 'quick', 'standard', or 'deep'."
         ),
     }
 
@@ -435,7 +436,7 @@ class ConversationalInterface:
         "data_type": ("mixed", "mixed data types"),
         "usage_pattern": ("sustained", "steady, continuous use"),
         "max_payload_mb": (50.0, "medium-sized inputs (up to 50 MB)"),
-        "timeout_per_scenario": (90, "90 seconds per test"),
+        "analysis_depth": ("standard", "standard analysis (~5 minutes)"),
     }
 
     def _ask_validated(
@@ -774,14 +775,15 @@ class ConversationalInterface:
                     parse_max_payload,
                 )
 
-            timeout_per_scenario = self._ask_validated(
-                "How long should each test run before timing out?\n"
-                "  1. 90 seconds (default)\n"
-                "  2. 3 minutes\n"
-                "  3. 5 minutes\n"
-                "(enter a number, a duration like '2 min', or 'not sure')",
-                "timeout_per_scenario",
-                parse_timeout_per_scenario,
+            analysis_depth = self._ask_validated(
+                "How thorough should the analysis be?\n"
+                "  1. Quick scan (~2 minutes) — tests your most critical areas\n"
+                "  2. Standard analysis (~5 minutes) — covers all major risk areas\n"
+                "  3. Deep analysis (~10 minutes) — comprehensive testing "
+                "across all scenarios\n"
+                "(enter a number or describe it)",
+                "analysis_depth",
+                parse_analysis_depth,
             )
 
         # ── Derive availability from usage pattern ──
@@ -794,6 +796,11 @@ class ConversationalInterface:
             if kws:
                 data_type_detail = _format_data_type_detail(kws)
 
+        # Derive timeout from analysis depth (unless already set by CLI)
+        timeout_per_scenario = None
+        if self._offline and analysis_depth:
+            timeout_per_scenario = depth_to_timeout(analysis_depth)
+
         return OperationalConstraints(
             user_scale=user_scale,
             usage_pattern=usage_pattern,
@@ -804,7 +811,8 @@ class ConversationalInterface:
             availability_requirement=availability_requirement,
             data_sensitivity=data_sensitivity,
             growth_expectation=growth_expectation,
-            timeout_per_scenario=timeout_per_scenario if self._offline else None,
+            timeout_per_scenario=timeout_per_scenario,
+            analysis_depth=analysis_depth if self._offline else None,
             raw_answers=raw_answers,
         )
 
@@ -1195,7 +1203,7 @@ class ConversationalInterface:
     # as a request/response cycle the route handler can drive turn-by-turn.
 
     # The questions mirror _extract_constraints lines 662-704 exactly.
-    _FOLLOWUP_FIELDS = ("user_scale", "data_type", "usage_pattern", "max_payload_mb", "timeout_per_scenario")
+    _FOLLOWUP_FIELDS = ("user_scale", "data_type", "usage_pattern", "max_payload_mb", "analysis_depth")
 
     _FOLLOWUP_QUESTIONS: dict[str, str] = {
         "user_scale": (
@@ -1227,12 +1235,13 @@ class ConversationalInterface:
             "  3. Large (over 50 MB)\n"
             "(enter a number, a size like '50 MB', or 'not sure')"
         ),
-        "timeout_per_scenario": (
-            "How long should each test run before timing out?\n"
-            "  1. 90 seconds (default)\n"
-            "  2. 3 minutes\n"
-            "  3. 5 minutes\n"
-            "(enter a number, a duration like '2 min', or 'not sure')"
+        "analysis_depth": (
+            "How thorough should the analysis be?\n"
+            "  1. Quick scan (~2 minutes) — tests your most critical areas\n"
+            "  2. Standard analysis (~5 minutes) — covers all major risk areas\n"
+            "  3. Deep analysis (~10 minutes) — comprehensive testing "
+            "across all scenarios\n"
+            "(enter a number or describe it)"
         ),
     }
 
@@ -1241,7 +1250,7 @@ class ConversationalInterface:
         "data_type": parse_data_type,
         "usage_pattern": parse_usage_pattern,
         "max_payload_mb": parse_max_payload,
-        "timeout_per_scenario": parse_timeout_per_scenario,
+        "analysis_depth": parse_analysis_depth,
     }
 
     @staticmethod
@@ -1323,6 +1332,13 @@ class ConversationalInterface:
             kws = extract_data_type_keywords(answer)
             if kws:
                 constraints.data_type_detail = _format_data_type_detail(kws)
+
+        # Derive timeout from analysis depth
+        if field_name == "analysis_depth" and constraints.analysis_depth:
+            if constraints.timeout_per_scenario is None:
+                constraints.timeout_per_scenario = depth_to_timeout(
+                    constraints.analysis_depth,
+                )
 
         return constraints, parsed_ok, message
 
