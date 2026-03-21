@@ -68,6 +68,12 @@ _DATA_TYPE_BOOST: dict[str, frozenset[str]] = {
     "api_responses": frozenset({"concurrent_execution", "blocking_io"}),
 }
 
+# Categories forced to low priority for a given data type.  These survive
+# the KEEP filter but run last — only if the time budget allows.
+_DATA_TYPE_LOW: dict[str, frozenset[str]] = {
+    "documents": frozenset({"data_volume_scaling"}),
+}
+
 # ── File-type → category KEEP mapping (E2: template selection) ──
 # Categories not in the keep set are removed (unless they are failure-mode
 # or version-discrepancy scenarios).  "mixed" is intentionally absent —
@@ -84,7 +90,7 @@ _DATA_TYPE_KEEP: dict[str, frozenset[str]] = {
     }),
     "documents": frozenset({
         "memory_profiling", "blocking_io", "concurrent_execution",
-        "edge_case_input",
+        "edge_case_input", "data_volume_scaling",
     }),
     "images": frozenset({
         "memory_profiling", "concurrent_execution", "blocking_io",
@@ -1404,16 +1410,20 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
             if constraints.data_type and scenario.category == "data_volume_scaling":
                 scenario.test_config["constraint_data_type"] = constraints.data_type
 
-            # ── Priority boost ──
+            # ── Priority boost / deprioritise ──
             if constraints.data_type and constraints.data_type != "mixed":
-                _boost = _DATA_TYPE_BOOST.get(constraints.data_type)
-                if _boost is not None:
-                    if scenario.category in _boost:
-                        if scenario.priority == "medium":
-                            scenario.priority = "high"
-                    else:
-                        if scenario.priority == "high":
-                            scenario.priority = "medium"
+                _low = _DATA_TYPE_LOW.get(constraints.data_type)
+                if _low and scenario.category in _low:
+                    scenario.priority = "low"
+                else:
+                    _boost = _DATA_TYPE_BOOST.get(constraints.data_type)
+                    if _boost is not None:
+                        if scenario.category in _boost:
+                            if scenario.priority == "medium":
+                                scenario.priority = "high"
+                        else:
+                            if scenario.priority == "high":
+                                scenario.priority = "medium"
 
         return scenarios
 
