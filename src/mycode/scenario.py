@@ -1387,8 +1387,12 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                     params["data_sizes"] = _data_scale_levels(base)
                     scenario.test_config["constraint_max_payload_mb"] = max_payload
                 elif user_scale is not None:
-                    # Fallback: derive item counts from user_scale
-                    base_items = user_scale * 10
+                    # Fallback: derive item counts from user_scale.
+                    # Cap base at 1000 to prevent timeout on hosted
+                    # environments — the tiers [500..3000] are enough
+                    # to detect scaling issues.  user_scale still
+                    # influences report severity, not tier size.
+                    base_items = min(user_scale * 10, 1000)
                     params["data_sizes"] = _data_scale_levels(base_items)
                     scenario.test_config["user_stated_capacity"] = user_scale
                     scenario.description += (

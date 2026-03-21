@@ -2450,6 +2450,31 @@ class TestConstraintWiringE1E2E3:
                 assert params["data_sizes"] == expected_from_payload
                 assert params["data_sizes"] != expected_from_scale
 
+    def test_high_user_scale_caps_data_volume_base_at_1000(self):
+        """user_scale=500, max_payload=None → base capped at 1000, not 5000."""
+        from mycode.constraints import OperationalConstraints
+        from mycode.scenario import _data_scale_levels
+
+        ingestion, matches = self._make_basic_setup()
+        constraints = OperationalConstraints(user_scale=500)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        data_scenarios = [
+            s for s in result.scenarios if s.category == "data_volume_scaling"
+        ]
+        assert len(data_scenarios) > 0
+
+        # Base should be capped at 1000, not 500*10=5000
+        expected = _data_scale_levels(1000)
+        uncapped = _data_scale_levels(5000)
+        for s in data_scenarios:
+            params = s.test_config.get("parameters", {})
+            if "data_sizes" in params:
+                assert params["data_sizes"] == expected
+                assert params["data_sizes"] != uncapped
+
     def test_user_scale_none_no_change_to_memory_profiling(self):
         """user_scale=None → memory_profiling keeps template defaults."""
         from mycode.constraints import OperationalConstraints
