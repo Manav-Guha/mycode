@@ -3861,6 +3861,82 @@ class TestUserTimeoutInReport:
         assert len(user_timeout) == 1
         assert "time limit" in user_timeout[0].title.lower()
         assert "re-run" in user_timeout[0].description.lower()
+        # Should mention what the test checks
+        assert "data processing" in user_timeout[0].description.lower() or \
+               "scales" in user_timeout[0].description.lower()
+
+    def test_user_timeout_with_step_timing_shows_avg_ms(self):
+        """When steps completed, description includes avg execution time."""
+        sr = ScenarioResult(
+            scenario_name="pandas_data_volume_scaling",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="timeout",
+            hit_user_timeout=True,
+            source_functions=["process_data"],
+            steps=[
+                StepResult(step_name="tier_1", execution_time_ms=150.0),
+                StepResult(step_name="tier_2", execution_time_ms=200.0),
+            ],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+        )
+        desc = report.incomplete_tests[0].description
+        assert "process_data" in desc
+        assert "175ms" in desc  # avg of 150 and 200
+        assert "re-run" in desc.lower()
+
+    def test_user_timeout_with_current_timeout_shows_value(self):
+        """Description includes the current timeout value."""
+        from mycode.constraints import OperationalConstraints
+        sr = ScenarioResult(
+            scenario_name="pandas_data_volume_scaling",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="timeout",
+            hit_user_timeout=True,
+            steps=[
+                StepResult(step_name="tier_1", execution_time_ms=100.0),
+            ],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        constraints = OperationalConstraints(timeout_per_scenario=120)
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+            constraints=constraints,
+        )
+        desc = report.incomplete_tests[0].description
+        assert "120s" in desc
+
+    def test_user_timeout_memory_profiling_description(self):
+        """Memory profiling timeout describes memory leak checking."""
+        sr = ScenarioResult(
+            scenario_name="pandas_memory_profiling",
+            scenario_category="memory_profiling",
+            status="partial",
+            failure_reason="timeout",
+            hit_user_timeout=True,
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+        )
+        desc = report.incomplete_tests[0].description
+        assert "memory" in desc.lower()
 
     def test_user_timeout_excluded_from_pass_fail(self):
         """User-timeout scenarios are not counted as passed or failed."""

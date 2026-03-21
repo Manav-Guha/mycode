@@ -1227,16 +1227,17 @@ class ReportGenerator:
 
             # ── User timeout → INFO finding with re-run suggestion ──
             if sr.hit_user_timeout:
+                deps = self._deps_from_name(sr.scenario_name)
+                desc = _build_timeout_description(
+                    sr, execution.scenario_results, deps,
+                    report._timeout_per_scenario,
+                )
                 f = Finding(
                     title=f"Reached time limit: {_humanize_title_name(sr.scenario_name)}",
                     severity="info",
                     category=sr.scenario_category,
-                    description=(
-                        "This test reached your time limit before "
-                        "completing. Re-run with a longer limit for "
-                        "deeper testing."
-                    ),
-                    affected_dependencies=self._deps_from_name(sr.scenario_name),
+                    description=desc,
+                    affected_dependencies=deps,
                 )
                 f._failure_reason = "user_timeout"
                 report.incomplete_tests.append(_tag_source(f))
@@ -3490,6 +3491,107 @@ _CURATED_TITLE_MAP: dict[str, str] = {
     "empty_dataframe_operations": "Empty Data Edge Cases",
     "memory_error_on_allocation": "Memory Crash on Array Allocation",
 }
+
+
+def _build_timeout_description(
+    sr: "ScenarioResult",
+    all_results: list["ScenarioResult"],
+    deps: list[str],
+    current_timeout: int | None,
+) -> str:
+    """Build a detailed timeout description explaining why, what, and how.
+
+    Uses timing data from the timed-out scenario's completed steps and
+    from sibling scenarios that tested the same functions to estimate
+    how long the full test would take.
+    """
+    import math
+
+    parts: list[str] = []
+
+    # ── 1. Why: extract avg execution time from completed steps ──
+    completed_steps = [s for s in sr.steps if s.execution_time_ms > 0]
+    avg_ms = 0.0
+    func_name = ""
+    if completed_steps:
+        avg_ms = sum(s.execution_time_ms for s in completed_steps) / len(completed_steps)
+        # Try to extract function name from step names or scenario name
+        func_name = sr.source_functions[0] if sr.source_functions else ""
+    else:
+        # Fall back: look at sibling scenarios (coupling) that completed
+        # and tested similar functions
+        for other in all_results:
+            if other is sr or not other.steps:
+                continue
+            if other.scenario_category != sr.scenario_category:
+                continue
+            other_steps = [s for s in other.steps if s.execution_time_ms > 0]
+            if other_steps:
+                avg_ms = (
+                    sum(s.execution_time_ms for s in other_steps)
+                    / len(other_steps)
+                )
+                func_name = other.source_functions[0] if other.source_functions else ""
+                break
+
+    if avg_ms > 0 and func_name:
+        parts.append(
+            f"Your application's {func_name} takes approximately "
+            f"{avg_ms:.0f}ms per call."
+        )
+    elif avg_ms > 0:
+        parts.append(
+            f"Your application takes approximately {avg_ms:.0f}ms per "
+            f"call at the tested scale."
+        )
+
+    # ── 2. What they're missing ──
+    dep_str = deps[0] if deps else "application"
+    cat = sr.scenario_category
+    if cat == "data_volume_scaling":
+        parts.append(
+            f"This test checks whether your {dep_str} data processing "
+            f"scales safely under increasing load."
+        )
+    elif cat == "memory_profiling":
+        parts.append(
+            f"This test checks whether your {dep_str} usage leaks "
+            f"memory under sustained operation."
+        )
+    else:
+        parts.append(
+            f"This test checks how your {dep_str} behaves under "
+            f"increasing stress."
+        )
+
+    # ── 3. What to do: recommend a timeout ──
+    timeout_s = current_timeout or 90
+    if avg_ms > 0 and completed_steps:
+        # Estimate: typical data_volume_scaling has 5 tiers × N functions.
+        # Use completed step count to estimate remaining work.
+        total_steps_estimate = max(len(completed_steps) + 2, 5)
+        estimated_total_s = (avg_ms * total_steps_estimate) / 1000
+        recommended = max(
+            timeout_s,
+            math.ceil(estimated_total_s / 60) * 60,
+        )
+        if recommended > timeout_s:
+            parts.append(
+                f"Re-run with a {recommended}s limit (currently "
+                f"{timeout_s}s) to complete this test."
+            )
+        else:
+            parts.append(
+                f"Re-run with a longer limit (currently {timeout_s}s) "
+                f"to complete this test."
+            )
+    else:
+        parts.append(
+            f"Re-run with a longer limit (currently {timeout_s}s) "
+            f"to complete this test."
+        )
+
+    return " ".join(parts)
 
 
 def _humanize_title_name(scenario_name: str) -> str:
