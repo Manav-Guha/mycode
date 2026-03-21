@@ -392,6 +392,10 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             ))
             logger.info("Session created: %s", session.workspace_dir)
 
+            # Surface dependency install warnings
+            if session.dep_install_warnings:
+                result.warnings.extend(session.dep_install_warnings)
+
             # ── Stage 3: Project Ingestion ──
             ingestion = _run_ingestion(
                 session, language, config.skip_version_check, result,

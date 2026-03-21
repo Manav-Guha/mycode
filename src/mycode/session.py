@@ -51,6 +51,11 @@ COPY_EXCLUDE_PREFIXES = ("pytest-of-",)
 COPY_EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
 
 # Dependency file names to search for (in project root and one level of subdirs)
+# Overall time budget for pip dependency installation (seconds).
+# Generous for normal installs (10-30s) but catches native compilation
+# hangs (llama-cpp-python, grpcio from source, etc.).
+_DEP_INSTALL_TIMEOUT = 120
+
 _DEP_FILENAMES = (
     "requirements.txt", "requirement.txt",
     "requirements-dev.txt", "requirements_dev.txt",
@@ -155,6 +160,9 @@ class SessionManager:
         # JS dependency install tracking
         self.js_deps_installed: Optional[bool] = None  # None=not JS, True=success, False=failed
         self.js_deps_error: str = ""  # Error message if install failed
+
+        # Dependency install warnings (surfaced to pipeline)
+        self.dep_install_warnings: list[str] = []
 
     # ── Context Manager ──
 
@@ -418,15 +426,35 @@ class SessionManager:
         return root
 
     def _install_dependencies(self):
-        """Install the user's dependencies into the venv from the project copy."""
+        """Install the user's dependencies into the venv from the project copy.
+
+        Enforces an overall time budget of ``_DEP_INSTALL_TIMEOUT`` seconds.
+        If the budget is exceeded, installation stops and a warning is
+        recorded — the pipeline continues with whatever deps are available.
+        """
         logger.debug("[PY-DEPS] _install_dependencies called, project_copy_dir=%s", self.project_copy_dir)
         if not self.project_copy_dir:
             logger.debug("[PY-DEPS] No project_copy_dir, skipping")
             return
 
+        deadline = time.monotonic() + _DEP_INSTALL_TIMEOUT
+
         # Find the directory containing dep files (root or one subdir down)
         dep_dir = self.find_dep_file_dir()
         installed_any = False
+
+        def _budget_exceeded() -> bool:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    "[PY-DEPS] Dependency install time budget (%ds) exceeded",
+                    _DEP_INSTALL_TIMEOUT,
+                )
+                self.dep_install_warnings.append(
+                    "Some dependencies could not be installed within the "
+                    "time limit. Test results may be limited."
+                )
+                return True
+            return False
 
         # Try requirements*.txt files (most common for vibe-coded projects)
         for req_file in [
@@ -435,18 +463,22 @@ class SessionManager:
             "requirements-dev.txt",
             "requirements_dev.txt",
         ]:
+            if _budget_exceeded():
+                break
             req_path = dep_dir / req_file
             logger.debug("[PY-DEPS] Checking %s — exists=%s", req_file, req_path.is_file())
             if req_path.is_file():
                 try:
                     logger.debug("[PY-DEPS] Installing from %s", req_file)
-                    self._pip_install(["-r", str(req_path)])
+                    self._pip_install(["-r", str(req_path)], deadline=deadline)
                     installed_any = True
                     logger.debug("[PY-DEPS] Successfully installed from %s", req_file)
                 except DependencyInstallError as e:
                     logger.warning("[PY-DEPS] Failed to install from %s: %s", req_file, e)
+                    if _budget_exceeded():
+                        break
                     logger.debug("[PY-DEPS] Falling back to individual package install for %s", req_file)
-                    count = self._pip_install_individually(req_path)
+                    count = self._pip_install_individually(req_path, deadline=deadline)
                     if count > 0:
                         installed_any = True
                     logger.debug("[PY-DEPS] Individual install from %s: %d packages succeeded", req_file, count)
@@ -454,10 +486,10 @@ class SessionManager:
         # Try pyproject.toml (install from dep dir so originals are untouched)
         pyproject = dep_dir / "pyproject.toml"
         logger.debug("[PY-DEPS] Checking pyproject.toml — exists=%s", pyproject.is_file())
-        if pyproject.is_file() and not installed_any:
+        if pyproject.is_file() and not installed_any and not _budget_exceeded():
             try:
                 logger.debug("[PY-DEPS] Installing from pyproject.toml")
-                self._pip_install([str(dep_dir)])
+                self._pip_install([str(dep_dir)], deadline=deadline)
                 installed_any = True
                 logger.debug("[PY-DEPS] Successfully installed from pyproject.toml")
             except DependencyInstallError as e:
@@ -468,10 +500,10 @@ class SessionManager:
         # Try setup.py
         setup_py = dep_dir / "setup.py"
         logger.debug("[PY-DEPS] Checking setup.py — exists=%s", setup_py.is_file())
-        if setup_py.is_file() and not installed_any:
+        if setup_py.is_file() and not installed_any and not _budget_exceeded():
             try:
                 logger.debug("[PY-DEPS] Installing from setup.py")
-                self._pip_install([str(dep_dir)])
+                self._pip_install([str(dep_dir)], deadline=deadline)
                 installed_any = True
                 logger.debug("[PY-DEPS] Successfully installed from setup.py")
             except DependencyInstallError as e:
@@ -482,18 +514,34 @@ class SessionManager:
         # Fallback: install from detected environment package list
         if (
             not installed_any
+            and not _budget_exceeded()
             and self.environment_info
             and self.environment_info.installed_packages
         ):
             logger.info(
                 "[PY-DEPS] No dependency files found, installing from detected environment"
             )
-            self._install_from_package_list(self.environment_info.installed_packages)
+            self._install_from_package_list(
+                self.environment_info.installed_packages, deadline=deadline,
+            )
 
         logger.debug("[PY-DEPS] Installation complete: installed_any=%s", installed_any)
 
-    def _pip_install(self, args: list[str]):
-        """Run pip install with given arguments inside the venv."""
+    def _pip_install(self, args: list[str], deadline: float | None = None):
+        """Run pip install with given arguments inside the venv.
+
+        When *deadline* is provided, the per-call timeout is reduced to
+        fit within the remaining budget.
+        """
+        per_call_timeout = 60
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DependencyInstallError(
+                    "Dependency install time budget exceeded"
+                )
+            per_call_timeout = min(per_call_timeout, max(5, int(remaining)))
+
         cmd = [str(self.venv_python), "-m", "pip", "install", "--quiet"] + args
         logger.info("[PY-DEPS] pip install: %s", " ".join(args)[:200])
         try:
@@ -501,7 +549,7 @@ class SessionManager:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=per_call_timeout,
             )
             logger.debug("[PY-DEPS] Exit code: %d", result.returncode)
             logger.debug("[PY-DEPS] stdout:\n%s", result.stdout[:2000])
@@ -515,7 +563,9 @@ class SessionManager:
             logger.debug("[PY-DEPS] pip install timed out: %s", e)
             raise DependencyInstallError(f"pip install timed out: {e}") from e
 
-    def _pip_install_individually(self, req_path: Path) -> int:
+    def _pip_install_individually(
+        self, req_path: Path, deadline: float | None = None,
+    ) -> int:
         """Parse a requirements file and install packages one at a time.
 
         Returns the number of successfully installed packages.
@@ -532,15 +582,20 @@ class SessionManager:
             # Skip blanks, comments, and pip options (e.g. -i, --index-url, -f)
             if not line or line.startswith("#") or line.startswith("-"):
                 continue
+            if deadline is not None and time.monotonic() > deadline:
+                logger.warning("[PY-DEPS] Budget exceeded, skipping remaining packages")
+                break
             try:
                 logger.debug("[PY-DEPS] Installing individual package: %s", line)
-                self._pip_install([line])
+                self._pip_install([line], deadline=deadline)
                 successful += 1
             except DependencyInstallError:
                 logger.warning("[PY-DEPS] Failed to install %s, skipping", line)
         return successful
 
-    def _install_from_package_list(self, packages: dict[str, str]):
+    def _install_from_package_list(
+        self, packages: dict[str, str], deadline: float | None = None,
+    ):
         """Install specific package versions into the venv."""
         skip = {"pip", "setuptools", "wheel", "pkg-resources", "distribute"}
         specs = [
@@ -553,14 +608,20 @@ class SessionManager:
 
         batch_size = 50
         for i in range(0, len(specs), batch_size):
+            if deadline is not None and time.monotonic() > deadline:
+                logger.warning("[PY-DEPS] Budget exceeded, skipping remaining batches")
+                break
             batch = specs[i : i + batch_size]
             try:
-                self._pip_install(batch)
+                self._pip_install(batch, deadline=deadline)
             except DependencyInstallError as e:
                 logger.warning("Batch install failed, trying individually: %s", e)
                 for spec in batch:
+                    if deadline is not None and time.monotonic() > deadline:
+                        logger.warning("[PY-DEPS] Budget exceeded, skipping remaining packages")
+                        break
                     try:
-                        self._pip_install([spec])
+                        self._pip_install([spec], deadline=deadline)
                     except DependencyInstallError:
                         logger.warning("Failed to install %s, skipping", spec)
 
