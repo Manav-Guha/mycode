@@ -343,8 +343,16 @@ function pollProgress() {
             } else if (data.status === "failed") {
                 clearInterval(pollTimer);
                 stopElapsedTimer();
-                $("progress-text").textContent = "Failed: " + (data.error || "Unknown error");
-                $("progress-fill").style.background = "var(--red)";
+                hide("progress-section");
+                show("report-section");
+                $("report-content").innerHTML =
+                    `<div class="finding-card critical">` +
+                    `<div class="finding-header">` +
+                    `<span class="severity-badge critical">error</span>` +
+                    `<span class="finding-title">Analysis failed</span>` +
+                    `</div>` +
+                    `<div class="finding-description">${escapeHtml(data.error || "An unexpected error occurred. Please try again or use a different project.")}</div>` +
+                    `</div>`;
             }
         } catch (err) {
             // Network error — keep polling

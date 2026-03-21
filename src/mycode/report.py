@@ -1086,6 +1086,18 @@ class ReportGenerator:
                 if f._failure_reason != "browser_framework"
             ]
 
+        # 1d. Surface HTTP testing failures as INFO findings
+        for warning in execution.warnings:
+            if "http" in warning.lower() and "could not run" in warning.lower():
+                http_err_finding = Finding(
+                    title="HTTP load testing could not run",
+                    severity="info",
+                    category="http_load_testing",
+                    description=warning,
+                )
+                http_err_finding._failure_reason = "http_testing_error"
+                report.incomplete_tests.append(http_err_finding)
+
         # 1a. Auto-classify every finding against taxonomy
         self._classify_all_findings(report)
 

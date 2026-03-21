@@ -136,6 +136,9 @@ def run_analysis(job: Job) -> None:
             )
         except Exception as exc:
             logger.warning("HTTP testing failed for job %s: %s", job.id, exc)
+            execution.warnings.append(
+                f"HTTP load testing could not run: {exc}"
+            )
         job.progress_scenarios_complete = callable_done + 1
 
         job.progress_stage = "report_generation"

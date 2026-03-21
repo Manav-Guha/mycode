@@ -309,87 +309,95 @@ def handle_converse(job_id: str, turn: int, user_response: str) -> ConverseRespo
 
     interface = ConversationalInterface(offline=True)
 
-    if turn == 1:
-        # Prepare Turn 1 question
-        question, summary = interface.prepare_turn_1(
-            job.ingestion, job.language,
-        )
-        job.conversation_summary = summary
-
-        return ConverseResponse(
-            job_id=job_id,
-            turn=1,
-            question=question,
-            project_summary=summary,
-            done=False,
-        )
-
-    elif turn == 2:
-        # Process Turn 1 response, get Turn 2 question
-        job.turn1_response = user_response
-        question = interface.process_turn_1(
-            user_response, job.ingestion, job.language,
-        )
-
-        return ConverseResponse(
-            job_id=job_id,
-            turn=2,
-            question=question,
-            done=False,
-        )
-
-    elif turn == 3:
-        # Process Turn 2 response, extract constraints from text
-        job.turn2_response = user_response
-        result = interface.process_turn_2(
-            turn1_response=job.turn1_response,
-            turn2_response=user_response,
-            ingestion=job.ingestion,
-            language=job.language,
-        )
-
-        job.interface_result = result
-        job.constraints = result.constraints
-        job.intent_string = result.intent.as_intent_string()
-
-        # Check if there are missing constraints that need follow-up
-        return _followup_or_done(job, turn)
-
-    elif turn >= 4:
-        # Follow-up answer for a specific constraint field
-        if job.constraints is not None and job.pending_followup_field:
-            constraints, parsed_ok, message = (
-                ConversationalInterface.apply_followup_answer(
-                    job.constraints,
-                    job.pending_followup_field,
-                    user_response,
-                    is_retry=job.followup_is_retry,
-                )
+    try:
+        if turn == 1:
+            # Prepare Turn 1 question
+            question, summary = interface.prepare_turn_1(
+                job.ingestion, job.language,
             )
-            job.constraints = constraints
+            job.conversation_summary = summary
 
-            if not parsed_ok:
-                # Re-ask with clarification (first failure only)
-                job.followup_is_retry = True
-                return ConverseResponse(
-                    job_id=job_id,
-                    turn=turn,
-                    question=message,
-                    done=False,
+            return ConverseResponse(
+                job_id=job_id,
+                turn=1,
+                question=question,
+                project_summary=summary,
+                done=False,
+            )
+
+        elif turn == 2:
+            # Process Turn 1 response, get Turn 2 question
+            job.turn1_response = user_response
+            question = interface.process_turn_1(
+                user_response, job.ingestion, job.language,
+            )
+
+            return ConverseResponse(
+                job_id=job_id,
+                turn=2,
+                question=question,
+                done=False,
+            )
+
+        elif turn == 3:
+            # Process Turn 2 response, extract constraints from text
+            job.turn2_response = user_response
+            result = interface.process_turn_2(
+                turn1_response=job.turn1_response,
+                turn2_response=user_response,
+                ingestion=job.ingestion,
+                language=job.language,
+            )
+
+            job.interface_result = result
+            job.constraints = result.constraints
+            job.intent_string = result.intent.as_intent_string()
+
+            # Check if there are missing constraints that need follow-up
+            return _followup_or_done(job, turn)
+
+        elif turn >= 4:
+            # Follow-up answer for a specific constraint field
+            if job.constraints is not None and job.pending_followup_field:
+                constraints, parsed_ok, message = (
+                    ConversationalInterface.apply_followup_answer(
+                        job.constraints,
+                        job.pending_followup_field,
+                        user_response,
+                        is_retry=job.followup_is_retry,
+                    )
                 )
+                job.constraints = constraints
 
-            # Parse succeeded (or defaulted) — reset retry state
-            default_message = message  # non-empty when a default was applied
-            job.pending_followup_field = ""
-            job.followup_is_retry = False
+                if not parsed_ok:
+                    # Re-ask with clarification (first failure only)
+                    job.followup_is_retry = True
+                    return ConverseResponse(
+                        job_id=job_id,
+                        turn=turn,
+                        question=message,
+                        done=False,
+                    )
 
-            # If a default was applied, include the notification
-            result = _followup_or_done(job, turn)
-            if default_message and not result.message:
-                result.message = default_message
-            return result
+                # Parse succeeded (or defaulted) — reset retry state
+                default_message = message  # non-empty when a default was applied
+                job.pending_followup_field = ""
+                job.followup_is_retry = False
 
-        return _followup_or_done(job, turn)
+                # If a default was applied, include the notification
+                result = _followup_or_done(job, turn)
+                if default_message and not result.message:
+                    result.message = default_message
+                return result
+
+            return _followup_or_done(job, turn)
+
+    except Exception as exc:
+        logger.exception("Conversation turn %d failed for job %s", turn, job_id)
+        return ConverseResponse(
+            job_id=job_id,
+            error="Could not process your response. Please try again.",
+        )
 
     return ConverseResponse(job_id=job_id, error=f"Invalid turn number: {turn}")
 
