@@ -435,10 +435,10 @@ function renderReport(report, summary, understandingMd, fixesMd, edition, hasPdf
         html += `</div>`;
     }
 
-    // Degradation curves
-    const degradations = report.degradation_points || [];
+    // Degradation curves (JSON key is "degradation_curves")
+    const degradations = report.degradation_curves || [];
     if (degradations.length > 0) {
-        html += renderDegradations(degradations);
+        html += renderDegradations(degradations, findings);
     }
 
     // Incomplete tests
@@ -547,16 +547,115 @@ function humanizeScenarioName(name) {
     return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function fmtCell(value, label, metric) {
-    const val = formatMetricValue(value, metric);
-    const ctx = humanizeStepLabel(label);
+function stepLabel(step) {
+    // Handle both {label, value} objects and [label, value] tuples
+    if (step && typeof step === "object" && "label" in step) return step.label;
+    if (Array.isArray(step)) return step[0];
+    return "";
+}
+
+function stepValue(step) {
+    if (step && typeof step === "object" && "value" in step) return step.value;
+    if (Array.isArray(step)) return step[1];
+    return 0;
+}
+
+function fmtCell(step, metric) {
+    const val = formatMetricValue(stepValue(step), metric);
+    const ctx = humanizeStepLabel(stepLabel(step));
     return val + " (" + ctx + ")";
 }
 
-function verdictForCurve(d) {
+function _findingSeverityForDp(d, findings) {
+    /**
+     * Match a degradation point against findings by category + metric.
+     * Mirrors _finding_severity_for_dp in documents.py.
+     */
+    if (!findings || findings.length === 0) return null;
+
+    const metric = (d.metric || "").toLowerCase();
+    const isTime = metric.includes("time");
+    const isMemory = metric.includes("memory");
+    const dpName = (d.scenario_name || "").toLowerCase();
+
+    const RESPONSE_KW = ["response time", "degradation", "latency"];
+    const MEMORY_KW = ["memory"];
+
+    let best = null;
+
+    for (const f of findings) {
+        if (f.severity !== "critical" && f.severity !== "warning") continue;
+
+        let matched = false;
+        const title = (f.title || "").toLowerCase();
+
+        // HTTP category ↔ http_ scenario prefix + metric filter
+        if (f.category === "http_load_testing" && dpName.startsWith("http_")) {
+            if (isTime || isMemory) {
+                const kws = isTime ? RESPONSE_KW : MEMORY_KW;
+                if (kws.some(kw => title.includes(kw))) {
+                    matched = true;
+                } else {
+                    // category matches but metric doesn't — fallback
+                    if (!best || f.severity === "critical") {
+                        best = best === "critical" ? "critical" : f.severity;
+                    }
+                    continue;
+                }
+            } else {
+                matched = true;
+            }
+        }
+        // Memory category ↔ memory metric
+        else if (f.category === "memory_profiling" && isMemory) {
+            matched = true;
+        }
+        // Category token in scenario name
+        else {
+            const TOKENS = {
+                concurrent_execution: ["concurrent", "gil_contention"],
+                data_volume_scaling: ["data", "volume", "scaling"],
+                memory_profiling: ["memory"],
+                blocking_io: ["blocking", "io"],
+                edge_case_input: ["edge_case"],
+                http_load_testing: ["http"],
+            };
+            const tokens = TOKENS[f.category] || [];
+            if (tokens.some(t => dpName.includes(t))) {
+                if (isTime && ["concurrent_execution", "blocking_io", "data_volume_scaling"].includes(f.category)) matched = true;
+                else if (isMemory && f.category === "memory_profiling") matched = true;
+                else if (["edge_case_input", "http_load_testing"].includes(f.category)) matched = true;
+            }
+        }
+
+        // Dependency overlap fallback
+        if (!matched && f.affected_dependencies) {
+            for (const dep of f.affected_dependencies) {
+                if (dpName.includes(dep.toLowerCase().replace(/-/g, "_"))) {
+                    matched = true;
+                    break;
+                }
+            }
+        }
+
+        if (matched) {
+            if (f.severity === "critical") return "critical";
+            best = "warning";
+        }
+    }
+    return best;
+}
+
+function verdictForCurve(d, findings) {
+    // Finding-based verdict takes precedence
+    const findingSev = _findingSeverityForDp(d, findings);
+    if (findingSev === "critical") return "Critical \u2014 see above";
+    if (findingSev === "warning") return "Warning \u2014 see above";
+
+    // Threshold-based fallback
     const steps = d.steps || [];
     if (steps.length === 0) return "";
-    const lastVal = steps[steps.length - 1][1] || 0;
+    const lastVal = stepValue(steps[steps.length - 1]) || 0;
     const metric = (d.metric || "").toLowerCase();
     const isTime = metric.includes("time");
     const isMemory = metric.includes("memory");
@@ -573,14 +672,22 @@ function verdictForCurve(d) {
     }
     if (isMemory) {
         if (lastVal < 50) return "Fine at your scale";
-        if (lastVal < 200) return "Heavy — limits concurrent users";
-        return "Very heavy — risk of crashes";
+        if (lastVal < 200) return "Heavy \u2014 limits concurrent users";
+        return "Very heavy \u2014 risk of crashes";
     }
     if (isErrors) {
         if (lastVal <= 0) return "No errors";
         return Math.round(lastVal) + " errors at peak";
     }
     return "";
+}
+
+function verdictColour(verdict) {
+    const v = verdict.toLowerCase();
+    if (v.includes("critical") || v.includes("unresponsive") || v.includes("very heavy")) return "var(--red)";
+    if (v.includes("warning") || v.includes("slow") || v.includes("heavy") || v.includes("noticeable") || v.includes("errors")) return "var(--amber)";
+    if (v.includes("no issues") || v.includes("fine") || v.includes("no errors")) return "var(--green)";
+    return "var(--text-secondary)";
 }
 
 function perfRowLabel(d) {
@@ -599,51 +706,130 @@ function dedupByLabel(degradations) {
         const steps = d.steps || [];
         if (steps.length === 0) continue;
         const label = perfRowLabel(d);
-        const peak = steps[steps.length - 1][1] || 0;
-        if (!groups[label] || peak > (groups[label].steps[groups[label].steps.length - 1][1] || 0)) {
+        const peak = stepValue(steps[steps.length - 1]) || 0;
+        if (!groups[label] || peak > (stepValue(groups[label].steps[groups[label].steps.length - 1]) || 0)) {
             groups[label] = d;
         }
     }
     return Object.values(groups);
 }
 
-function renderDegradations(degradations) {
+function renderCurveChart(d, verdict) {
+    const steps = d.steps || [];
+    if (steps.length < 2) return "";
+
+    const W = 300, H = 150;
+    const PAD = { left: 50, right: 15, top: 12, bottom: 28 };
+    const plotW = W - PAD.left - PAD.right;
+    const plotH = H - PAD.top - PAD.bottom;
+
+    const values = steps.map(s => stepValue(s));
+    const labels = steps.map(s => stepLabel(s));
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const range = maxVal - minVal || 1;
+
+    function x(i) { return PAD.left + (i / (steps.length - 1)) * plotW; }
+    function y(v) { return PAD.top + plotH - ((v - minVal) / range) * plotH; }
+
+    const colour = verdictColour(verdict);
+    const gridColour = "rgba(255,255,255,0.08)";
+    const textColour = "var(--text-secondary)";
+
+    let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">`;
+
+    // Horizontal grid lines (3 lines)
+    for (let i = 0; i <= 2; i++) {
+        const val = minVal + (range * i) / 2;
+        const yPos = y(val);
+        svg += `<line x1="${PAD.left}" y1="${yPos}" x2="${W - PAD.right}" y2="${yPos}" stroke="${gridColour}" stroke-width="1"/>`;
+        const metric = (d.metric || "").toLowerCase();
+        let label;
+        if (metric.includes("memory")) label = val.toFixed(1) + "MB";
+        else if (metric.includes("time")) label = val.toFixed(0) + "ms";
+        else label = String(Math.round(val));
+        svg += `<text x="${PAD.left - 5}" y="${yPos + 3}" text-anchor="end" fill="${textColour}" font-size="9">${label}</text>`;
+    }
+
+    // Data polyline
+    const points = steps.map((_, i) => `${x(i).toFixed(1)},${y(values[i]).toFixed(1)}`).join(" ");
+    svg += `<polyline points="${points}" fill="none" stroke="${colour}" stroke-width="2" stroke-linejoin="round"/>`;
+
+    // Data dots
+    for (let i = 0; i < steps.length; i++) {
+        svg += `<circle cx="${x(i).toFixed(1)}" cy="${y(values[i]).toFixed(1)}" r="2.5" fill="${colour}"/>`;
+    }
+
+    // Breaking point marker
+    if (d.breaking_point) {
+        const bpIdx = labels.indexOf(d.breaking_point);
+        if (bpIdx >= 0) {
+            const bpX = x(bpIdx);
+            svg += `<line x1="${bpX.toFixed(1)}" y1="${PAD.top}" x2="${bpX.toFixed(1)}" y2="${PAD.top + plotH}" stroke="${colour}" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>`;
+            svg += `<circle cx="${bpX.toFixed(1)}" cy="${y(values[bpIdx]).toFixed(1)}" r="5" fill="none" stroke="${colour}" stroke-width="2"/>`;
+        }
+    }
+
+    // X-axis labels: first, middle (if ≥5 steps), last
+    const xLabels = [0];
+    if (steps.length >= 5) xLabels.push(Math.floor(steps.length / 2));
+    xLabels.push(steps.length - 1);
+    for (const i of xLabels) {
+        const lbl = humanizeStepLabel(labels[i]);
+        // Truncate long labels
+        const short = lbl.length > 15 ? lbl.slice(0, 14) + "\u2026" : lbl;
+        svg += `<text x="${x(i).toFixed(1)}" y="${H - 5}" text-anchor="middle" fill="${textColour}" font-size="9">${escapeHtml(short)}</text>`;
+    }
+
+    svg += `</svg>`;
+    return svg;
+}
+
+function renderDegradations(degradations, findings) {
     const rows = dedupByLabel(degradations);
     if (rows.length === 0) return "";
 
     let html = `<div class="degradation-section">`;
     html += `<div class="section-title">Performance under load</div>`;
-    html += `<table class="perf-table" style="width:100%;border-collapse:collapse;font-size:0.88rem;margin-top:0.5rem">`;
-    html += `<thead><tr style="text-align:left;border-bottom:2px solid var(--border)">`;
-    html += `<th style="padding:0.4rem 0.5rem">What we tested</th>`;
-    html += `<th style="padding:0.4rem 0.5rem">At low load</th>`;
-    html += `<th style="padding:0.4rem 0.5rem">At mid load</th>`;
-    html += `<th style="padding:0.4rem 0.5rem">At peak load</th>`;
-    html += `<th style="padding:0.4rem 0.5rem">Verdict</th>`;
+    html += `<table class="perf-table">`;
+    html += `<thead><tr>`;
+    html += `<th>What we tested</th>`;
+    html += `<th>At low load</th>`;
+    html += `<th>At mid load</th>`;
+    html += `<th>At peak load</th>`;
+    html += `<th>Verdict</th>`;
     html += `</tr></thead><tbody>`;
 
     for (const d of rows) {
         const steps = d.steps || [];
+        if (steps.length === 0) continue;
         const label = perfRowLabel(d);
-        const low = fmtCell(steps[0][1], steps[0][0], d.metric);
+        const low = fmtCell(steps[0], d.metric);
         let mid = "\u2014";
         if (steps.length >= 3) {
             const midIdx = Math.floor(steps.length / 2);
-            mid = fmtCell(steps[midIdx][1], steps[midIdx][0], d.metric);
+            mid = fmtCell(steps[midIdx], d.metric);
         }
         let high = "\u2014";
         if (steps.length >= 2) {
-            high = fmtCell(steps[steps.length - 1][1], steps[steps.length - 1][0], d.metric);
+            high = fmtCell(steps[steps.length - 1], d.metric);
         }
-        const verdict = verdictForCurve(d);
+        const verdict = verdictForCurve(d, findings);
+        const vColour = verdictColour(verdict);
 
-        html += `<tr style="border-bottom:1px solid var(--border)">`;
-        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(label)}</td>`;
-        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(low)}</td>`;
-        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(mid)}</td>`;
-        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(high)}</td>`;
-        html += `<td style="padding:0.35rem 0.5rem">${escapeHtml(verdict)}</td>`;
+        html += `<tr>`;
+        html += `<td>${escapeHtml(label)}</td>`;
+        html += `<td>${escapeHtml(low)}</td>`;
+        html += `<td>${escapeHtml(mid)}</td>`;
+        html += `<td>${escapeHtml(high)}</td>`;
+        html += `<td style="color:${vColour};font-weight:600">${escapeHtml(verdict)}</td>`;
         html += `</tr>`;
+
+        // Inline chart row
+        if (steps.length >= 2) {
+            const chart = renderCurveChart(d, verdict);
+            html += `<tr class="chart-row"><td colspan="5">${chart}</td></tr>`;
+        }
     }
 
     html += `</tbody></table></div>`;
