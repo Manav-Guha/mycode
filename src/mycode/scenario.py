@@ -102,6 +102,12 @@ _DATA_TYPE_KEEP: dict[str, frozenset[str]] = {
     }),
 }
 
+# Max coupling scenarios when a data_type filter is active.  Coupling
+# scenarios test generic function-level scaling; when the user has
+# specified a data type the profiled scenarios (data_volume_scaling,
+# memory_profiling) are more valuable and need the time budget.
+_MAX_COUPLING_SCENARIOS_FILTERED = 10
+
 
 class CouplingBehaviorType(str, Enum):
     """Classification of coupling point functions by behavior."""
@@ -1335,6 +1341,24 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                     or s.name.endswith("_discrepancy")  # version discrepancy
                 ]
 
+            # ── Coupling scenario cap ──
+            # When a data_type filter is active, cap coupling scenarios so
+            # profiled scenarios (data_volume_scaling, memory_profiling) get
+            # enough of the time budget.
+            coupling = [s for s in scenarios if s.test_config.get("behavior")]
+            if len(coupling) > _MAX_COUPLING_SCENARIOS_FILTERED:
+                profiled_deps = {
+                    dep
+                    for s in scenarios
+                    for dep in s.target_dependencies
+                }
+                coupling.sort(
+                    key=lambda s: _coupling_relevance(s, profiled_deps),
+                    reverse=True,
+                )
+                drop = set(id(s) for s in coupling[_MAX_COUPLING_SCENARIOS_FILTERED:])
+                scenarios = [s for s in scenarios if id(s) not in drop]
+
         for scenario in scenarios:
             # Ensure params dict exists in test_config so mutations persist
             if "parameters" not in scenario.test_config:
@@ -1763,6 +1787,29 @@ def _data_scale_levels(base_items: int) -> list[int]:
         max(10, base_items * 3),
     })
     return levels
+
+
+def _coupling_relevance(
+    scenario: "StressTestScenario",
+    profiled_deps: set[str],
+) -> tuple[int, int]:
+    """Score a coupling scenario by relevance to profiled dependencies.
+
+    Returns ``(dep_overlap, fan_out)`` — higher is more relevant.
+    Coupling scenarios whose source/targets mention a profiled dependency
+    name are preferred over generic builtins like ``int``, ``float``, ``len``.
+    """
+    config = scenario.test_config
+    source = config.get("coupling_source", "")
+    targets = config.get("coupling_targets", [])
+    all_names = [source] + targets
+    dep_overlap = sum(
+        1 for name in all_names
+        for dep in profiled_deps
+        if dep.lower() in name.lower()
+    )
+    fan_out = len(targets)
+    return (dep_overlap, fan_out)
 
 
 def _safe_name(source: str) -> str:

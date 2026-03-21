@@ -2813,3 +2813,106 @@ class TestConstraintWiringE1E2E3:
         assert "concurrent_execution" in cats
         # data_volume_scaling kept but at low priority
         assert "data_volume_scaling" in cats
+
+
+# ── Coupling scenario cap ──
+
+
+class TestCouplingScenarioCap:
+    """Verify coupling scenarios are capped when data_type filter is active."""
+
+    def _make_setup_with_many_couplings(self, n_couplings=15):
+        """Create ingestion with *n_couplings* PURE_COMPUTATION coupling points."""
+        flask_profile = _make_profile("flask", "web_framework")
+        pandas_profile = _make_profile("pandas", "data_processing")
+        matches = [
+            ProfileMatch(dependency_name="flask", profile=flask_profile),
+            ProfileMatch(dependency_name="pandas", profile=pandas_profile),
+        ]
+        # Create coupling points — most are generic builtins, a few reference pandas
+        cps = []
+        for i in range(n_couplings):
+            if i < 3:
+                # These reference a profiled dependency
+                source = f"pandas_helper_{i}"
+                targets = [f"pandas.read_csv", f"util_{i}"]
+            else:
+                # Generic builtins — low relevance
+                source = f"compute_{i}"
+                targets = [f"int_{i}", f"float_{i}"]
+            cps.append(CouplingPoint(
+                source=source,
+                targets=targets,
+                coupling_type="high_fan_in",
+                description=f"Function {source} is called by {len(targets)} functions",
+            ))
+        ingestion = IngestionResult(
+            project_path="/tmp/test",
+            files_analyzed=5,
+            total_lines=500,
+            file_analyses=[],
+            coupling_points=cps,
+        )
+        return ingestion, matches
+
+    def test_cap_applied_with_documents_data_type(self):
+        """data_type='documents' + >10 coupling points → ≤10 coupling scenarios."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_setup_with_many_couplings(20)
+        constraints = OperationalConstraints(data_type="documents")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        coupling = [s for s in result.scenarios if s.test_config.get("behavior")]
+        assert len(coupling) <= 10
+
+        # Profiled scenarios should still exist
+        cats = {s.category for s in result.scenarios}
+        assert "memory_profiling" in cats or "data_volume_scaling" in cats
+
+    def test_no_cap_without_data_type(self):
+        """data_type=None → all coupling scenarios kept (backward compatible)."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_setup_with_many_couplings(20)
+        constraints = OperationalConstraints(data_type=None)
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        coupling = [s for s in result.scenarios if s.test_config.get("behavior")]
+        assert len(coupling) > 10
+
+    def test_no_cap_with_mixed_data_type(self):
+        """data_type='mixed' → all coupling scenarios kept."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_setup_with_many_couplings(20)
+        constraints = OperationalConstraints(data_type="mixed")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        coupling = [s for s in result.scenarios if s.test_config.get("behavior")]
+        assert len(coupling) > 10
+
+    def test_cap_prefers_profiled_dep_overlap(self):
+        """Coupling scenarios referencing profiled deps survive the cap."""
+        from mycode.constraints import OperationalConstraints
+
+        ingestion, matches = self._make_setup_with_many_couplings(20)
+        constraints = OperationalConstraints(data_type="documents")
+
+        gen = ScenarioGenerator(offline=True)
+        result = gen.generate(ingestion, matches, "An app", "python", constraints)
+
+        coupling = [s for s in result.scenarios if s.test_config.get("behavior")]
+        # The 3 pandas-referencing coupling points should survive
+        pandas_coupling = [
+            s for s in coupling
+            if "pandas" in s.test_config.get("coupling_source", "").lower()
+            or any("pandas" in t.lower() for t in s.test_config.get("coupling_targets", []))
+        ]
+        assert len(pandas_coupling) >= 3
