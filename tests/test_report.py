@@ -3963,13 +3963,14 @@ class TestUserTimeoutInReport:
 class TestBudgetExceededInReport:
     """Tests for budget_exceeded scenarios in report generation."""
 
-    def test_budget_exceeded_creates_info_finding(self):
-        """budget_exceeded scenario gets 'Time budget reached' finding."""
+    def test_budget_exceeded_creates_info_finding_with_description(self):
+        """budget_exceeded uses the improved three-part description format."""
         sr = ScenarioResult(
             scenario_name="coupling_compute_main",
             scenario_category="data_volume_scaling",
             status="partial",
             failure_reason="budget_exceeded",
+            source_functions=["process_data"],
             steps=[
                 StepResult(step_name="tier_1", execution_time_ms=100),
                 StepResult(step_name="tier_2", execution_time_ms=200),
@@ -3988,8 +3989,15 @@ class TestBudgetExceededInReport:
             if f._failure_reason == "budget_exceeded"
         ]
         assert len(budget_findings) == 1
+        desc = budget_findings[0].description
         assert "time budget" in budget_findings[0].title.lower()
-        assert "2 steps" in budget_findings[0].description
+        # Part 1: why (avg execution time)
+        assert "process_data" in desc
+        assert "150ms" in desc  # avg of 100 and 200
+        # Part 2: what's missing (category-specific)
+        assert "data processing" in desc.lower()
+        # Part 3: what to do
+        assert "re-run" in desc.lower() or "deep analysis" in desc.lower()
 
     def test_budget_exceeded_excluded_from_pass_fail(self):
         """budget_exceeded scenarios are not counted as passed or failed."""

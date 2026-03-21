@@ -736,7 +736,7 @@ function fmtCell(step, metric) {
 function _findingSeverityForDp(d, findings) {
     /**
      * Match a degradation point against findings by category + metric.
-     * Mirrors _finding_severity_for_dp in documents.py.
+     * Mirrors _finding_severity_for_dp in documents.py exactly.
      */
     if (!findings || findings.length === 0) return null;
 
@@ -748,7 +748,9 @@ function _findingSeverityForDp(d, findings) {
     const RESPONSE_KW = ["response time", "degradation", "latency"];
     const MEMORY_KW = ["memory"];
 
+    // Two tracking variables — mirrors Python's best / fallback_best
     let best = null;
+    let fallbackBest = null;
 
     for (const f of findings) {
         if (f.severity !== "critical" && f.severity !== "warning") continue;
@@ -756,16 +758,18 @@ function _findingSeverityForDp(d, findings) {
         let matched = false;
         const title = (f.title || "").toLowerCase();
 
-        // HTTP category ↔ http_ scenario prefix + metric filter
+        // Rule 1: HTTP category ↔ http_ scenario prefix + metric filter
         if (f.category === "http_load_testing" && dpName.startsWith("http_")) {
             if (isTime || isMemory) {
                 const kws = isTime ? RESPONSE_KW : MEMORY_KW;
                 if (kws.some(kw => title.includes(kw))) {
                     matched = true;
                 } else {
-                    // category matches but metric doesn't — fallback
-                    if (!best || f.severity === "critical") {
-                        best = best === "critical" ? "critical" : f.severity;
+                    // Category matches but metric doesn't — track as fallback
+                    if (f.severity === "critical") {
+                        fallbackBest = "critical";
+                    } else if (fallbackBest === null) {
+                        fallbackBest = "warning";
                     }
                     continue;
                 }
@@ -773,11 +777,11 @@ function _findingSeverityForDp(d, findings) {
                 matched = true;
             }
         }
-        // Memory category ↔ memory metric
+        // Rule 2: Memory category ↔ memory metric
         else if (f.category === "memory_profiling" && isMemory) {
             matched = true;
         }
-        // Category token in scenario name
+        // Rule 3: Category token in scenario name
         else {
             const TOKENS = {
                 concurrent_execution: ["concurrent", "gil_contention"],
@@ -795,7 +799,7 @@ function _findingSeverityForDp(d, findings) {
             }
         }
 
-        // Dependency overlap fallback
+        // Rule 4: Dependency overlap as tiebreaker
         if (!matched && f.affected_dependencies) {
             for (const dep of f.affected_dependencies) {
                 if (dpName.includes(dep.toLowerCase().replace(/-/g, "_"))) {
@@ -810,7 +814,10 @@ function _findingSeverityForDp(d, findings) {
             best = "warning";
         }
     }
-    return best;
+
+    // Primary metric-matched results take precedence over fallback
+    if (best !== null) return best;
+    return fallbackBest;
 }
 
 function verdictForCurve(d, findings) {

@@ -1247,23 +1247,20 @@ class ReportGenerator:
                 incomplete += 1
                 continue
 
-            # ── Budget exceeded → INFO finding ──
+            # ── Budget exceeded → INFO finding with improved description ──
             if sr.failure_reason == "budget_exceeded":
-                n_steps = len(sr.steps)
-                depth_hint = (
-                    " Choose 'deep analysis' for more thorough testing."
-                    if report._analysis_depth != "deep" else ""
+                deps = self._deps_from_name(sr.scenario_name)
+                desc = _build_timeout_description(
+                    sr, execution.scenario_results, deps,
+                    report._timeout_per_scenario,
+                    analysis_depth=report._analysis_depth,
                 )
                 f = Finding(
                     title=f"Time budget reached: {_humanize_title_name(sr.scenario_name)}",
                     severity="info",
                     category=sr.scenario_category,
-                    description=(
-                        f"This scenario completed {n_steps} "
-                        f"step{'s' if n_steps != 1 else ''} within its "
-                        f"time allocation.{depth_hint}"
-                    ),
-                    affected_dependencies=self._deps_from_name(sr.scenario_name),
+                    description=desc,
+                    affected_dependencies=deps,
                 )
                 f._failure_reason = "budget_exceeded"
                 report.incomplete_tests.append(_tag_source(f))
@@ -3533,12 +3530,16 @@ def _build_timeout_description(
     all_results: list["ScenarioResult"],
     deps: list[str],
     current_timeout: int | None,
+    analysis_depth: str | None = None,
 ) -> str:
     """Build a detailed timeout description explaining why, what, and how.
 
     Uses timing data from the timed-out scenario's completed steps and
     from sibling scenarios that tested the same functions to estimate
     how long the full test would take.
+
+    When *analysis_depth* is provided and not ``"deep"``, the "what to do"
+    section suggests upgrading to deep analysis instead of a raw timeout.
     """
     import math
 
@@ -3599,32 +3600,37 @@ def _build_timeout_description(
             f"increasing stress."
         )
 
-    # ── 3. What to do: recommend a timeout ──
-    timeout_s = current_timeout or 90
-    if avg_ms > 0 and completed_steps:
-        # Estimate: typical data_volume_scaling has 5 tiers × N functions.
-        # Use completed step count to estimate remaining work.
-        total_steps_estimate = max(len(completed_steps) + 2, 5)
-        estimated_total_s = (avg_ms * total_steps_estimate) / 1000
-        recommended = max(
-            timeout_s,
-            math.ceil(estimated_total_s / 60) * 60,
+    # ── 3. What to do ──
+    if analysis_depth and analysis_depth != "deep":
+        # Budget-limited — suggest upgrading depth
+        parts.append(
+            "Choose 'deep analysis' for more thorough testing."
         )
-        if recommended > timeout_s:
-            parts.append(
-                f"Re-run with a {recommended}s limit (currently "
-                f"{timeout_s}s) to complete this test."
+    else:
+        # User-timeout or already deep — suggest raw timeout increase
+        timeout_s = current_timeout or 90
+        if avg_ms > 0 and completed_steps:
+            total_steps_estimate = max(len(completed_steps) + 2, 5)
+            estimated_total_s = (avg_ms * total_steps_estimate) / 1000
+            recommended = max(
+                timeout_s,
+                math.ceil(estimated_total_s / 60) * 60,
             )
+            if recommended > timeout_s:
+                parts.append(
+                    f"Re-run with a {recommended}s limit (currently "
+                    f"{timeout_s}s) to complete this test."
+                )
+            else:
+                parts.append(
+                    f"Re-run with a longer limit (currently {timeout_s}s) "
+                    f"to complete this test."
+                )
         else:
             parts.append(
                 f"Re-run with a longer limit (currently {timeout_s}s) "
                 f"to complete this test."
             )
-    else:
-        parts.append(
-            f"Re-run with a longer limit (currently {timeout_s}s) "
-            f"to complete this test."
-        )
 
     return " ".join(parts)
 
