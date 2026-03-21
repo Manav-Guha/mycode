@@ -243,6 +243,7 @@ async function requestConverseTurn(turn, userResponse) {
         }
         hide("reply-area");
         show("run-section");
+        $("run-section").scrollIntoView({ behavior: "smooth", block: "nearest" });
     } else {
         converseTurn = data.turn + 1;
         show("reply-area");
