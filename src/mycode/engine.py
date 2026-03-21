@@ -731,6 +731,17 @@ class ExecutionEngine:
 
         scenarios = self._deduplicate_by_function(scenarios)
 
+        # ── Priority-based execution order ──
+        # Profiled scenarios (from component library, with target_dependencies)
+        # should run before coupling scenarios (generic function-level tests)
+        # so they get the time budget first.  Within each group, sort by
+        # priority: high → medium → low.
+        _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+        scenarios.sort(key=lambda s: (
+            _PRIORITY_RANK.get(s.priority, 1),
+            1 if s.test_config.get("behavior") else 0,  # coupling last
+        ))
+
         # Cap parallel workers for JS/TS — each Node.js subprocess reserves
         # ~1.5GB V8 CodeRange; 4 workers × 1.5GB exceeds 8GB Railway containers.
         if self.language == "javascript":

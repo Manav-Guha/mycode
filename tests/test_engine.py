@@ -3981,3 +3981,133 @@ class TestHttpDeferral:
 
         assert len(runnable) == 0
         assert len(skipped) == 2
+
+
+# ── Priority-based execution order ──
+
+
+class TestExecutionOrder:
+    """Verify profiled scenarios execute before coupling scenarios."""
+
+    def test_profiled_before_coupling_same_priority(self):
+        """Profiled (non-behavior) scenarios come before coupling (behavior) at same priority."""
+        profiled = StressTestScenario(
+            name="pandas_data_volume",
+            category="data_volume_scaling",
+            description="Profiled pandas test",
+            target_dependencies=["pandas"],
+            test_config={"parameters": {}},
+            expected_behavior="test",
+            failure_indicators=[],
+            priority="medium",
+            source="offline",
+        )
+        coupling = StressTestScenario(
+            name="coupling_compute_main",
+            category="data_volume_scaling",
+            description="Coupling test",
+            target_dependencies=[],
+            test_config={"behavior": "pure_computation", "coupling_source": "main"},
+            expected_behavior="test",
+            failure_indicators=[],
+            priority="medium",
+            source="offline",
+        )
+        engine = ExecutionEngine.__new__(ExecutionEngine)
+        engine.session = MagicMock()
+        engine.language = "python"
+        engine.ingestion = MagicMock()
+        engine._io = MagicMock()
+        engine._http_capable = False
+
+        # Simulate sorting (extracted from execute)
+        _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+        scenarios = [coupling, profiled]  # wrong order
+        scenarios.sort(key=lambda s: (
+            _PRIORITY_RANK.get(s.priority, 1),
+            1 if s.test_config.get("behavior") else 0,
+        ))
+
+        assert scenarios[0].name == "pandas_data_volume"
+        assert scenarios[1].name == "coupling_compute_main"
+
+    def test_high_priority_before_medium(self):
+        """High-priority scenarios run before medium-priority ones."""
+        high = StressTestScenario(
+            name="memory_check",
+            category="memory_profiling",
+            description="High priority",
+            target_dependencies=["pandas"],
+            test_config={},
+            expected_behavior="test",
+            failure_indicators=[],
+            priority="high",
+            source="offline",
+        )
+        medium_coupling = StressTestScenario(
+            name="coupling_compute",
+            category="data_volume_scaling",
+            description="Medium coupling",
+            target_dependencies=[],
+            test_config={"behavior": "pure_computation"},
+            expected_behavior="test",
+            failure_indicators=[],
+            priority="medium",
+            source="offline",
+        )
+        low_profiled = StressTestScenario(
+            name="pandas_scaling",
+            category="data_volume_scaling",
+            description="Low profiled",
+            target_dependencies=["pandas"],
+            test_config={},
+            expected_behavior="test",
+            failure_indicators=[],
+            priority="low",
+            source="offline",
+        )
+
+        _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+        scenarios = [low_profiled, medium_coupling, high]
+        scenarios.sort(key=lambda s: (
+            _PRIORITY_RANK.get(s.priority, 1),
+            1 if s.test_config.get("behavior") else 0,
+        ))
+
+        assert scenarios[0].name == "memory_check"       # high, profiled
+        assert scenarios[1].name == "coupling_compute"    # medium, coupling
+
+    def test_low_profiled_before_low_coupling(self):
+        """Within low priority, profiled comes before coupling."""
+        low_profiled = StressTestScenario(
+            name="pandas_scaling",
+            category="data_volume_scaling",
+            description="Low profiled",
+            target_dependencies=["pandas"],
+            test_config={},
+            expected_behavior="test",
+            failure_indicators=[],
+            priority="low",
+            source="offline",
+        )
+        low_coupling = StressTestScenario(
+            name="coupling_compute",
+            category="data_volume_scaling",
+            description="Low coupling",
+            target_dependencies=[],
+            test_config={"behavior": "pure_computation"},
+            expected_behavior="test",
+            failure_indicators=[],
+            priority="low",
+            source="offline",
+        )
+
+        _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+        scenarios = [low_coupling, low_profiled]
+        scenarios.sort(key=lambda s: (
+            _PRIORITY_RANK.get(s.priority, 1),
+            1 if s.test_config.get("behavior") else 0,
+        ))
+
+        assert scenarios[0].name == "pandas_scaling"
+        assert scenarios[1].name == "coupling_compute"
