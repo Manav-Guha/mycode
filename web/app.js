@@ -1134,12 +1134,20 @@ function downloadJSON() {
     downloadBlob(blob, "mycode-report.json");
 }
 
-function downloadUnderstanding() {
+async function downloadUnderstanding() {
     const content = $("report-content");
     if (content.dataset.hasPdf && currentJobId) {
-        // Download PDF from dedicated endpoint
-        window.location.href = `${API}/api/report/${currentJobId}/understanding.pdf`;
-        return;
+        // Fetch PDF via API (same base URL as all other calls)
+        try {
+            const res = await fetch(`${API}/api/report/${currentJobId}/understanding.pdf`);
+            if (res.ok) {
+                const blob = await res.blob();
+                downloadBlob(blob, "mycode-understanding-your-results.pdf");
+                return;
+            }
+        } catch (err) {
+            // Fall through to markdown
+        }
     }
     // Fallback to markdown
     const md = content.dataset.understandingMd;
