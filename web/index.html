@@ -13,7 +13,7 @@
             <p>Stress test your AI-generated code before it breaks</p>
         </header>
 
-        <!-- INPUT -->
+        <!-- INPUT — full width, top center -->
         <div class="section" id="input-section">
             <div class="section-title">Analyse a project</div>
             <div class="input-group">
@@ -27,45 +27,68 @@
             </div>
         </div>
 
-        <!-- PREFLIGHT -->
-        <div class="section hidden" id="preflight-section">
-            <div class="section-title">Preflight diagnostics</div>
-            <div id="preflight-loading" class="loading-text"><span class="spinner"></span>Analysing project...</div>
-            <div id="preflight-content" class="hidden">
-                <div class="diagnostics-grid" id="diag-grid"></div>
-                <div id="viability-banner"></div>
-            </div>
-        </div>
+        <!-- TWO-COLUMN LAYOUT -->
+        <div class="columns hidden" id="columns-wrapper">
 
-        <!-- CONVERSATION -->
-        <div class="section hidden" id="converse-section">
-            <div class="section-title">Context</div>
-            <div class="conversation-thread" id="converse-thread"></div>
-            <div class="reply-area hidden" id="reply-area">
-                <textarea id="reply-input" rows="2" placeholder="Describe your project..."></textarea>
-                <button class="btn btn-accent" id="reply-btn" onclick="sendReply()">Send</button>
-            </div>
-        </div>
+            <!-- LEFT COLUMN — interaction flow -->
+            <div class="col-left" id="col-left">
 
-        <!-- RUN -->
-        <div class="section hidden" id="run-section">
-            <button class="btn btn-primary" id="run-btn" onclick="startAnalysis()" style="width:100%">Run Stress Tests</button>
-            <div class="progress-container hidden" id="progress-container">
-                <div class="progress-bar-track">
-                    <div class="progress-bar-fill" id="progress-fill"></div>
+                <!-- PREFLIGHT -->
+                <div class="section hidden" id="preflight-section">
+                    <div class="section-title">Preflight diagnostics</div>
+                    <div id="preflight-loading" class="loading-text"><span class="spinner"></span>Analysing project...</div>
+                    <div id="preflight-content" class="hidden">
+                        <div class="diagnostics-grid" id="diag-grid"></div>
+                        <div id="viability-banner"></div>
+                    </div>
                 </div>
-                <div class="progress-info">
-                    <span id="progress-text">Starting...</span>
-                    <span class="progress-right"><span id="progress-elapsed"></span><span id="progress-pct">0%</span></span>
-                </div>
-                <div class="progress-scenario" id="progress-scenario"></div>
-            </div>
-        </div>
 
-        <!-- REPORT -->
-        <div class="section hidden" id="report-section">
-            <div class="section-title">Diagnostic Report</div>
-            <div id="report-content"></div>
+                <!-- CONVERSATION -->
+                <div class="section hidden" id="converse-section">
+                    <div class="section-title">Context</div>
+                    <div class="conversation-thread" id="converse-thread"></div>
+                    <div class="reply-area hidden" id="reply-area">
+                        <textarea id="reply-input" rows="2" placeholder="Describe your project..."></textarea>
+                        <button class="btn btn-accent" id="reply-btn" onclick="sendReply()">Send</button>
+                    </div>
+                </div>
+
+                <!-- RUN BUTTON -->
+                <div class="section hidden" id="run-section">
+                    <button class="btn btn-primary" id="run-btn" onclick="startAnalysis()" style="width:100%">Run Stress Tests</button>
+                </div>
+
+            </div>
+
+            <!-- RIGHT COLUMN — results -->
+            <div class="col-right" id="col-right">
+
+                <!-- Placeholder before results -->
+                <div class="results-placeholder" id="results-placeholder">
+                    Results will appear here
+                </div>
+
+                <!-- Progress (shown during analysis) -->
+                <div class="section hidden" id="progress-section">
+                    <div class="progress-container" id="progress-container">
+                        <div class="progress-bar-track">
+                            <div class="progress-bar-fill" id="progress-fill"></div>
+                        </div>
+                        <div class="progress-info">
+                            <span id="progress-text">Starting...</span>
+                            <span class="progress-right"><span id="progress-elapsed"></span><span id="progress-pct">0%</span></span>
+                        </div>
+                        <div class="progress-scenario" id="progress-scenario"></div>
+                    </div>
+                </div>
+
+                <!-- REPORT (shown after completion) -->
+                <div class="section hidden" id="report-section">
+                    <div class="section-title">Diagnostic Report</div>
+                    <div id="report-content"></div>
+                </div>
+
+            </div>
         </div>
 
         <footer>

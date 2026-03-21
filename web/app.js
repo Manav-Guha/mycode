@@ -109,6 +109,7 @@ async function submitFile(input) {
 // ── Preflight ──
 
 async function runPreflight(formData) {
+    show("columns-wrapper");
     show("preflight-section");
     show("preflight-loading");
     hide("preflight-content");
@@ -309,8 +310,9 @@ function formatConstraints(c) {
 
 async function startAnalysis() {
     $("run-btn").disabled = true;
-    $("run-btn").textContent = "Starting...";
-    show("progress-container");
+    $("run-btn").textContent = "Running...";
+    hide("results-placeholder");
+    show("progress-section");
 
     const fd = new FormData();
     fd.append("job_id", currentJobId);
@@ -376,7 +378,7 @@ async function fetchReport() {
         return;
     }
 
-    // Replace progress bar with run summary
+    // Show completion summary in progress, then reveal report
     const scenarioCount = (data.pipeline_summary && data.pipeline_summary.scenarios_run) || 0;
     const elapsed = elapsedStart ? formatElapsed((Date.now() - elapsedStart) / 1000) : "";
     const summaryParts = [];
@@ -392,6 +394,7 @@ async function fetchReport() {
     $("progress-text").textContent = summaryText;
     $("progress-scenario").textContent = "";
 
+    hide("progress-section");
     show("report-section");
     renderReport(data.report, data.pipeline_summary, data.understanding_md, data.fixes_md, data.edition, data.has_pdf);
 }
