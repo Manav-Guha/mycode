@@ -230,16 +230,45 @@ def _finding_severity_for_dp(
         "http_load_testing": ["http"],
     }
 
+    # ── Metric-aware title keywords ──
+    _RESPONSE_TIME_KEYWORDS = ("response time", "degradation", "latency")
+    _MEMORY_KEYWORDS = ("memory",)
+
+    def _metric_matches_finding(metric_is_time: bool, metric_is_memory: bool,
+                                title_lower: str) -> bool:
+        """Check whether a finding's title is compatible with the dp metric."""
+        if metric_is_time:
+            return any(kw in title_lower for kw in _RESPONSE_TIME_KEYWORDS)
+        if metric_is_memory:
+            return any(kw in title_lower for kw in _MEMORY_KEYWORDS)
+        return True  # unknown metric — don't filter
+
+    # First pass: category + metric match
     best: str | None = None
+    fallback_best: str | None = None
+
     for f in findings:
         if f.severity not in ("critical", "warning"):
             continue
 
         matched = False
+        title_lower = f.title.lower()
 
-        # Rule 1: HTTP category ↔ http_ scenario prefix
+        # Rule 1: HTTP category ↔ http_ scenario prefix + metric filter
         if f.category == "http_load_testing" and dp_name_lower.startswith("http_"):
-            matched = True
+            if (is_time_metric or is_memory_metric):
+                if _metric_matches_finding(is_time_metric, is_memory_metric,
+                                           title_lower):
+                    matched = True
+                else:
+                    # Category matches but metric doesn't — track as fallback
+                    if f.severity == "critical":
+                        fallback_best = "critical"
+                    elif fallback_best is None:
+                        fallback_best = "warning"
+                    continue
+            else:
+                matched = True
 
         # Rule 2: Memory category ↔ memory metric
         elif f.category == "memory_profiling" and is_memory_metric:
@@ -272,7 +301,10 @@ def _finding_severity_for_dp(
                 return "critical"
             best = "warning"
 
-    return best
+    # If metric-filtered matching found results, use those; else fall back
+    if best is not None:
+        return best
+    return fallback_best
 
 
 def _perf_row_label(dp: DegradationPoint) -> str:

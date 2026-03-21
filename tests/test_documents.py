@@ -14,6 +14,7 @@ from mycode.documents import (
     _MAX_EDITIONS,
     _REPORTS_DIR,
     _edition_number,
+    _finding_severity_for_dp,
     _hash_key,
     _normalize_github_url,
     _prune_old_editions,
@@ -1661,3 +1662,95 @@ class TestConsequenceForUser:
             "You said 10,000 users. Breaks."
         ) == 10000
         assert _extract_user_scale_from_desc("No user info here.") is None
+
+
+# ── _finding_severity_for_dp metric-aware matching ──
+
+
+class TestFindingSeverityForDpMetricMatching:
+    """Verify that _finding_severity_for_dp matches by category AND metric."""
+
+    def _make_dp(self, scenario="http_endpoint_load", metric="response_time_ms"):
+        return DegradationPoint(
+            scenario_name=scenario,
+            metric=metric,
+            steps=[("1 user", 50), ("10 users", 200)],
+        )
+
+    def _make_finding(self, title, severity="critical", category="http_load_testing"):
+        return Finding(
+            title=title,
+            severity=severity,
+            category=category,
+            description="test",
+        )
+
+    def test_response_time_dp_picks_warning_not_critical_memory(self):
+        """Response time dp should match WARNING response-time finding,
+        not CRITICAL memory finding, even though both are http_load_testing."""
+        dp = self._make_dp(metric="response_time_ms")
+        findings = [
+            self._make_finding("Memory usage exceeds safe limits", severity="critical"),
+            self._make_finding("Response time degradation under load", severity="warning"),
+        ]
+        assert _finding_severity_for_dp(dp, findings) == "warning"
+
+    def test_memory_dp_picks_critical_memory_not_warning_response(self):
+        """Memory dp should match CRITICAL memory finding, not WARNING response."""
+        dp = self._make_dp(metric="memory_peak_mb")
+        findings = [
+            self._make_finding("Memory usage exceeds safe limits", severity="critical"),
+            self._make_finding("Response time degradation under load", severity="warning"),
+        ]
+        assert _finding_severity_for_dp(dp, findings) == "critical"
+
+    def test_response_time_dp_with_only_critical_response_finding(self):
+        """When response time finding is critical, dp should return critical."""
+        dp = self._make_dp(metric="response_time_ms")
+        findings = [
+            self._make_finding("Response time degradation under load", severity="critical"),
+        ]
+        assert _finding_severity_for_dp(dp, findings) == "critical"
+
+    def test_fallback_to_category_when_no_metric_match(self):
+        """If no finding title matches the metric, fall back to category match."""
+        dp = self._make_dp(metric="response_time_ms")
+        findings = [
+            self._make_finding("Server crashed under load", severity="critical"),
+        ]
+        # "Server crashed" doesn't mention response time or memory,
+        # so metric filter doesn't match — should fall back to category
+        assert _finding_severity_for_dp(dp, findings) == "critical"
+
+    def test_execution_time_matches_latency_keyword(self):
+        """execution_time_ms metric should match 'latency' in title."""
+        dp = self._make_dp(metric="execution_time_ms")
+        findings = [
+            self._make_finding("Memory usage exceeds safe limits", severity="critical"),
+            self._make_finding("High latency detected at scale", severity="warning"),
+        ]
+        assert _finding_severity_for_dp(dp, findings) == "warning"
+
+    def test_memory_growth_matches_memory_keyword(self):
+        """memory_growth_mb metric should match 'memory' in title."""
+        dp = self._make_dp(metric="memory_growth_mb")
+        findings = [
+            self._make_finding("Response time degradation", severity="critical"),
+            self._make_finding("Memory leak detected", severity="warning"),
+        ]
+        assert _finding_severity_for_dp(dp, findings) == "warning"
+
+    def test_non_http_categories_unaffected(self):
+        """Non-HTTP categories should still work as before."""
+        dp = self._make_dp(
+            scenario="concurrent_request_load", metric="execution_time_ms",
+        )
+        findings = [
+            Finding(
+                title="Concurrent access fails",
+                severity="critical",
+                category="concurrent_execution",
+                description="test",
+            ),
+        ]
+        assert _finding_severity_for_dp(dp, findings) == "critical"
