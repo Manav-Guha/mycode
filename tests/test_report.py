@@ -3892,8 +3892,39 @@ class TestUserTimeoutInReport:
         assert "175ms" in desc  # avg of 150 and 200
         assert "re-run" in desc.lower()
 
-    def test_user_timeout_with_current_timeout_shows_value(self):
-        """Description includes the current timeout value."""
+    def test_user_timeout_with_depth_shows_depth_suggestion(self):
+        """When analysis_depth is set, suggests deep analysis not raw seconds."""
+        from mycode.constraints import OperationalConstraints
+        sr = ScenarioResult(
+            scenario_name="pandas_data_volume_scaling",
+            scenario_category="data_volume_scaling",
+            status="partial",
+            failure_reason="timeout",
+            hit_user_timeout=True,
+            steps=[
+                StepResult(step_name="tier_1", execution_time_ms=100.0),
+            ],
+        )
+        execution = ExecutionEngineResult(
+            scenario_results=[sr],
+            scenarios_failed=1,
+        )
+        constraints = OperationalConstraints(
+            timeout_per_scenario=300,
+            analysis_depth="standard",
+        )
+        gen = ReportGenerator(offline=True)
+        report = gen.generate(
+            execution, _s14_ingestion(["pandas"]), [], "test intent",
+            constraints=constraints,
+        )
+        desc = report.incomplete_tests[0].description
+        assert "deep analysis" in desc.lower()
+        # Should NOT show raw "300s" to users who used depth selector
+        assert "300s" not in desc
+
+    def test_user_timeout_without_depth_shows_raw_timeout(self):
+        """When no analysis_depth, falls back to raw timeout value."""
         from mycode.constraints import OperationalConstraints
         sr = ScenarioResult(
             scenario_name="pandas_data_volume_scaling",

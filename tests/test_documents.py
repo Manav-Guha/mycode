@@ -1756,6 +1756,56 @@ class TestFindingSeverityForDpMetricMatching:
         ]
         assert _finding_severity_for_dp(dp, findings) == "critical"
 
+    def test_dep_overlap_respects_metric_time_vs_memory(self):
+        """Dependency overlap with memory finding should not match time curve."""
+        dp = self._make_dp(
+            scenario="coupling_compute_streamlit_markdown",
+            metric="execution_time_ms",
+        )
+        findings = [
+            self._make_finding(
+                "Memory baseline limits concurrent capacity",
+                severity="critical",
+                category="http_load_testing",
+            ),
+        ]
+        # streamlit is in the dp name but the finding is about memory
+        # and the curve is execution_time — should NOT match
+        findings[0].affected_dependencies = ["streamlit"]
+        assert _finding_severity_for_dp(dp, findings) is None
+
+    def test_dep_overlap_matches_compatible_metric(self):
+        """Dependency overlap with time finding matches time curve."""
+        dp = self._make_dp(
+            scenario="coupling_compute_streamlit_markdown",
+            metric="execution_time_ms",
+        )
+        findings = [
+            self._make_finding(
+                "Response time degradation under load",
+                severity="warning",
+                category="http_load_testing",
+            ),
+        ]
+        findings[0].affected_dependencies = ["streamlit"]
+        assert _finding_severity_for_dp(dp, findings) == "warning"
+
+    def test_dep_overlap_memory_finding_matches_memory_curve(self):
+        """Dependency overlap with memory finding matches memory curve."""
+        dp = self._make_dp(
+            scenario="coupling_compute_streamlit_markdown",
+            metric="memory_peak_mb",
+        )
+        findings = [
+            self._make_finding(
+                "Memory baseline limits concurrent capacity",
+                severity="critical",
+                category="http_load_testing",
+            ),
+        ]
+        findings[0].affected_dependencies = ["streamlit"]
+        assert _finding_severity_for_dp(dp, findings) == "critical"
+
 
 # ── _integrate_details ──
 

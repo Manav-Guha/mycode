@@ -289,10 +289,20 @@ def _finding_severity_for_dp(
                 elif f.category in ("edge_case_input", "http_load_testing"):
                     matched = True
 
-        # Rule 4: Dependency overlap as tiebreaker
+        # Rule 4: Dependency overlap as tiebreaker — with metric awareness
         if not matched and f.affected_dependencies:
             for dep in f.affected_dependencies:
                 if dep.lower().replace("-", "_") in dp_name_lower:
+                    # Check metric compatibility: a memory finding should
+                    # not match a time curve, and vice versa
+                    if is_time_metric and any(
+                        kw in title_lower for kw in _MEMORY_KEYWORDS
+                    ):
+                        continue
+                    if is_memory_metric and any(
+                        kw in title_lower for kw in _RESPONSE_TIME_KEYWORDS
+                    ):
+                        continue
                     matched = True
                     break
 

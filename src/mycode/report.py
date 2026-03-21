@@ -648,9 +648,12 @@ class DiagnosticReport:
             return d
 
         def _degradation_dict(dp: DegradationPoint) -> dict:
+            # Lazy import to avoid circular dependency
+            from mycode.documents import _perf_row_label
             d: dict = {
                 "scenario_name": dp.scenario_name,
                 "metric": dp.metric,
+                "display_label": _perf_row_label(dp),
                 "steps": [
                     {"label": label, "value": value}
                     for label, value in dp.steps
@@ -1246,6 +1249,7 @@ class ReportGenerator:
                 desc = _build_timeout_description(
                     sr, execution.scenario_results, deps,
                     report._timeout_per_scenario,
+                    analysis_depth=report._analysis_depth,
                 )
                 f = Finding(
                     title=f"Reached time limit: {_humanize_title_name(sr.scenario_name)}",

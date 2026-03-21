@@ -808,10 +808,13 @@ function _findingSeverityForDp(d, findings) {
             }
         }
 
-        // Rule 4: Dependency overlap as tiebreaker
+        // Rule 4: Dependency overlap as tiebreaker — with metric awareness
         if (!matched && f.affected_dependencies) {
             for (const dep of f.affected_dependencies) {
                 if (dpName.includes(dep.toLowerCase().replace(/-/g, "_"))) {
+                    // Memory finding should not match time curve, and vice versa
+                    if (isTime && MEMORY_KW.some(kw => title.includes(kw))) continue;
+                    if (isMemory && RESPONSE_KW.some(kw => title.includes(kw))) continue;
                     matched = true;
                     break;
                 }
@@ -874,6 +877,9 @@ function verdictColour(verdict) {
 }
 
 function perfRowLabel(d) {
+    // Use pre-computed label from JSON (matches PDF exactly)
+    if (d.display_label) return d.display_label;
+    // Fallback for cached reports without display_label
     let name = humanizeScenarioName(d.scenario_name || "");
     const metric = (d.metric || "").toLowerCase();
     if (metric.includes("memory")) {
