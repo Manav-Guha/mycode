@@ -903,10 +903,34 @@ function dedupByLabel(degradations) {
     return Object.values(groups);
 }
 
+let _chartIdCounter = 0;
+
+function _showChartTip(chartId, cx, cy, text, svgW) {
+    let tip = document.getElementById("chart-tooltip-" + chartId);
+    if (!tip) return;
+    tip.textContent = text;
+    tip.style.display = "block";
+    // Position above the point, clamped within SVG bounds
+    const tipW = tip.offsetWidth || 80;
+    let left = cx - tipW / 2;
+    if (left < 2) left = 2;
+    if (left + tipW > svgW - 2) left = svgW - tipW - 2;
+    let top = cy - 28;
+    if (top < 2) top = cy + 12; // flip below if too close to top
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+}
+
+function _hideChartTip(chartId) {
+    let tip = document.getElementById("chart-tooltip-" + chartId);
+    if (tip) tip.style.display = "none";
+}
+
 function renderCurveChart(d, verdict) {
     const steps = d.steps || [];
     if (steps.length < 2) return "";
 
+    const chartId = _chartIdCounter++;
     const W = 300, H = 150;
     const PAD = { left: 50, right: 15, top: 12, bottom: 28 };
     const plotW = W - PAD.left - PAD.right;
@@ -918,45 +942,66 @@ function renderCurveChart(d, verdict) {
     const maxVal = Math.max(...values);
     const range = maxVal - minVal || 1;
 
+    const metric = (d.metric || "").toLowerCase();
     function x(i) { return PAD.left + (i / (steps.length - 1)) * plotW; }
     function y(v) { return PAD.top + plotH - ((v - minVal) / range) * plotH; }
 
+    function fmtVal(v) {
+        if (metric.includes("memory")) return v.toFixed(1) + " MB";
+        if (metric.includes("time")) return v.toFixed(0) + "ms";
+        return String(Math.round(v * 100) / 100);
+    }
+
+    const bpIdx = d.breaking_point ? labels.indexOf(d.breaking_point) : -1;
     const colour = verdictColour(verdict);
     const gridColour = "rgba(255,255,255,0.08)";
     const textColour = "var(--text-secondary)";
 
-    let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">`;
+    // Wrapper div with relative positioning for tooltip
+    let html = `<div class="chart-wrapper" style="position:relative;display:inline-block">`;
+    html += `<div class="chart-tooltip" id="chart-tooltip-${chartId}"></div>`;
+    html += `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">`;
 
     // Horizontal grid lines (3 lines)
     for (let i = 0; i <= 2; i++) {
         const val = minVal + (range * i) / 2;
         const yPos = y(val);
-        svg += `<line x1="${PAD.left}" y1="${yPos}" x2="${W - PAD.right}" y2="${yPos}" stroke="${gridColour}" stroke-width="1"/>`;
-        const metric = (d.metric || "").toLowerCase();
-        let label;
-        if (metric.includes("memory")) label = val.toFixed(1) + "MB";
-        else if (metric.includes("time")) label = val.toFixed(0) + "ms";
-        else label = String(Math.round(val));
-        svg += `<text x="${PAD.left - 5}" y="${yPos + 3}" text-anchor="end" fill="${textColour}" font-size="9">${label}</text>`;
+        html += `<line x1="${PAD.left}" y1="${yPos}" x2="${W - PAD.right}" y2="${yPos}" stroke="${gridColour}" stroke-width="1"/>`;
+        let glabel;
+        if (metric.includes("memory")) glabel = val.toFixed(1) + "MB";
+        else if (metric.includes("time")) glabel = val.toFixed(0) + "ms";
+        else glabel = String(Math.round(val));
+        html += `<text x="${PAD.left - 5}" y="${yPos + 3}" text-anchor="end" fill="${textColour}" font-size="9">${glabel}</text>`;
     }
 
     // Data polyline
     const points = steps.map((_, i) => `${x(i).toFixed(1)},${y(values[i]).toFixed(1)}`).join(" ");
-    svg += `<polyline points="${points}" fill="none" stroke="${colour}" stroke-width="2" stroke-linejoin="round"/>`;
+    html += `<polyline points="${points}" fill="none" stroke="${colour}" stroke-width="2" stroke-linejoin="round"/>`;
 
-    // Data dots
+    // Data dots (visible)
     for (let i = 0; i < steps.length; i++) {
-        svg += `<circle cx="${x(i).toFixed(1)}" cy="${y(values[i]).toFixed(1)}" r="2.5" fill="${colour}"/>`;
+        html += `<circle cx="${x(i).toFixed(1)}" cy="${y(values[i]).toFixed(1)}" r="2.5" fill="${colour}"/>`;
     }
 
     // Breaking point marker
-    if (d.breaking_point) {
-        const bpIdx = labels.indexOf(d.breaking_point);
-        if (bpIdx >= 0) {
-            const bpX = x(bpIdx);
-            svg += `<line x1="${bpX.toFixed(1)}" y1="${PAD.top}" x2="${bpX.toFixed(1)}" y2="${PAD.top + plotH}" stroke="${colour}" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>`;
-            svg += `<circle cx="${bpX.toFixed(1)}" cy="${y(values[bpIdx]).toFixed(1)}" r="5" fill="none" stroke="${colour}" stroke-width="2"/>`;
-        }
+    if (bpIdx >= 0) {
+        const bpX = x(bpIdx);
+        html += `<line x1="${bpX.toFixed(1)}" y1="${PAD.top}" x2="${bpX.toFixed(1)}" y2="${PAD.top + plotH}" stroke="${colour}" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>`;
+        html += `<circle cx="${bpX.toFixed(1)}" cy="${y(values[bpIdx]).toFixed(1)}" r="5" fill="none" stroke="${colour}" stroke-width="2"/>`;
+    }
+
+    // Invisible hover hit areas + tooltip triggers
+    for (let i = 0; i < steps.length; i++) {
+        const cx = x(i).toFixed(1);
+        const cy = y(values[i]).toFixed(1);
+        const xLabel = humanizeStepLabel(labels[i]);
+        const yLabel = fmtVal(values[i]);
+        let tipText = xLabel + ": " + yLabel;
+        if (i === bpIdx) tipText += " \u25C6 Breaking point";
+        const escaped = tipText.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+        html += `<circle cx="${cx}" cy="${cy}" r="15" fill="transparent" style="cursor:pointer" `
+            + `onmouseover="_showChartTip(${chartId},${cx},${cy},'${escaped}',${W})" `
+            + `onmouseout="_hideChartTip(${chartId})"/>`;
     }
 
     // X-axis labels: first, middle (if ≥5 steps), last — compact numbers
@@ -965,17 +1010,17 @@ function renderCurveChart(d, verdict) {
     xLabels.push(steps.length - 1);
     for (const i of xLabels) {
         const short = shortStepLabel(labels[i]);
-        svg += `<text x="${x(i).toFixed(1)}" y="${H - 5}" text-anchor="middle" fill="${textColour}" font-size="9">${escapeHtml(short)}</text>`;
+        html += `<text x="${x(i).toFixed(1)}" y="${H - 5}" text-anchor="middle" fill="${textColour}" font-size="9">${escapeHtml(short)}</text>`;
     }
 
     // X-axis title (e.g. "connections", "items")
     const axisTitle = chartAxisTitle(labels);
     if (axisTitle) {
-        svg += `<text x="${W - PAD.right}" y="${H - 5}" text-anchor="end" fill="${textColour}" font-size="8" font-style="italic">${escapeHtml(axisTitle)}</text>`;
+        html += `<text x="${W - PAD.right}" y="${H - 5}" text-anchor="end" fill="${textColour}" font-size="8" font-style="italic">${escapeHtml(axisTitle)}</text>`;
     }
 
-    svg += `</svg>`;
-    return svg;
+    html += `</svg></div>`;
+    return html;
 }
 
 function renderDegradations(degradations, findings) {

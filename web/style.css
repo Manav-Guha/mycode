@@ -557,6 +557,23 @@ footer {
     color: var(--text-muted);
 }
 
+/* ── Chart Tooltips ── */
+
+.chart-tooltip {
+    display: none;
+    position: absolute;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.78rem;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10;
+}
+
 /* ── Degradation Bars ── */
 
 .degradation-section {
