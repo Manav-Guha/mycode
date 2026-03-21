@@ -266,3 +266,183 @@ class TestCLIForceFlag:
                 batch_mine.main(["--input", "x.json"])
         _, kwargs = mock_mine.call_args
         assert kwargs.get("force") is False
+
+
+# ── _parse_phase_timing ──
+
+
+class TestParsePhraseTiming:
+    def test_full_pipeline_phases(self):
+        stderr = textwrap.dedent("""\
+            10:00:00 INFO Language detected: python
+            10:00:02 INFO Session ready: /tmp/mycode_abc
+            10:00:45 INFO Ingestion complete: 12 files, 5 dependencies
+            10:00:46 INFO Library matching: 3 recognized, 2 unrecognized
+            10:01:00 INFO Generated 8 scenarios (model: offline)
+            10:01:01 INFO Scenario review: 8 approved, 0 skipped
+            10:03:30 INFO Execution complete: 8 completed, 2 failed, 0 skipped
+            10:03:31 INFO Report generated (model: offline)
+        """)
+        result = batch_mine._parse_phase_timing(stderr, 211.0, timed_out=False)
+        assert "PHASE detect:" in result
+        assert "PHASE deps:" in result
+        assert "PHASE ingest:" in result
+        assert "PHASE execute:" in result
+        assert "PHASE report:" in result
+        assert "TIMEOUT" not in result
+
+    def test_timeout_shows_stuck_phase(self):
+        stderr = textwrap.dedent("""\
+            10:00:00 INFO Language detected: python
+            10:00:02 INFO Session ready: /tmp/mycode_abc
+            10:00:45 INFO Ingestion complete: 12 files, 5 dependencies
+            10:00:46 INFO Library matching: 3 recognized, 2 unrecognized
+        """)
+        result = batch_mine._parse_phase_timing(stderr, 310.0, timed_out=True)
+        assert "PHASE detect:" in result
+        assert "PHASE deps:" in result
+        assert "PHASE ingest:" in result
+        # Should show scenario_gen as the stuck phase (next after library)
+        assert "PHASE scenario_gen: TIMEOUT" in result
+
+    def test_timeout_during_deps(self):
+        stderr = textwrap.dedent("""\
+            10:00:00 INFO Language detected: python
+        """)
+        result = batch_mine._parse_phase_timing(stderr, 300.0, timed_out=True)
+        assert "PHASE detect:" in result
+        assert "PHASE deps: TIMEOUT" in result
+
+    def test_no_stderr(self):
+        result = batch_mine._parse_phase_timing("", 300.0, timed_out=True)
+        assert "no stderr" in result
+
+    def test_no_phase_markers(self):
+        stderr = "10:00:00 DEBUG Some random log line\n"
+        result = batch_mine._parse_phase_timing(stderr, 300.0, timed_out=True)
+        assert "no phase markers" in result
+
+    def test_timeout_during_execute(self):
+        stderr = textwrap.dedent("""\
+            10:00:00 INFO Language detected: python
+            10:00:02 INFO Session ready: /tmp/abc
+            10:00:10 INFO Ingestion complete: 5 files
+            10:00:11 INFO Library matching: 2 recognized
+            10:00:15 INFO Generated 4 scenarios (model: offline)
+            10:00:16 INFO Scenario review: 4 approved, 0 skipped
+        """)
+        result = batch_mine._parse_phase_timing(stderr, 310.0, timed_out=True)
+        assert "PHASE execute: TIMEOUT" in result
+
+
+# ── _classify_failure ──
+
+
+class TestClassifyFailure:
+    def test_timeout_from_stderr(self):
+        status, _ = batch_mine._classify_failure(
+            returncode=-1, stderr="mycode timed out",
+            report={}, elapsed=305.0, timeout=300,
+        )
+        assert status == "timeout"
+
+    def test_timeout_from_elapsed(self):
+        status, _ = batch_mine._classify_failure(
+            returncode=-1, stderr="some error",
+            report={}, elapsed=298.0, timeout=300,
+        )
+        assert status == "timeout"
+
+    def test_skip_baseline_failed(self):
+        report = {
+            "summary": "No testable code found",
+            "statistics": {"scenarios_run": 0},
+        }
+        status, error = batch_mine._classify_failure(
+            returncode=1, stderr="",
+            report=report, elapsed=10.0, timeout=300,
+        )
+        assert status == "skip"
+        assert "No testable code" in error
+
+    def test_crash_on_unknown_error(self):
+        status, _ = batch_mine._classify_failure(
+            returncode=-1, stderr="Traceback: something broke",
+            report={}, elapsed=10.0, timeout=300,
+        )
+        assert status == "mycode_crash"
+
+    def test_crash_with_no_report(self):
+        status, _ = batch_mine._classify_failure(
+            returncode=-1, stderr="segfault",
+            report={}, elapsed=50.0, timeout=300,
+        )
+        assert status == "mycode_crash"
+
+
+# ── mine() failure classification integration ──
+
+
+class TestMineFailureClassification:
+    """Test that mine() uses the new status labels."""
+
+    def _run_mine_with_mycode_result(self, tmp_path, returncode, stdout, stderr,
+                                     report=None):
+        urls = ["https://github.com/a/b"]
+        input_path = _make_repos_json(tmp_path, urls)
+        results_dir = tmp_path / "results"
+        processed_file = tmp_path / "processed.txt"
+
+        def fake_clone(url, dest):
+            dest.mkdir(parents=True, exist_ok=True)
+            if report:
+                (dest / "mycode-report.json").write_text(json.dumps(report))
+            return True
+
+        with (
+            mock.patch.object(batch_mine, "_PROCESSED_REPOS_PATH", processed_file),
+            mock.patch.object(batch_mine, "_clone_repo", side_effect=fake_clone),
+            mock.patch.object(
+                batch_mine, "_run_mycode",
+                return_value=(returncode, stdout, stderr),
+            ),
+            mock.patch.object(batch_mine, "_snapshot_discoveries", return_value=set()),
+            mock.patch.object(batch_mine, "_collect_new_discoveries", return_value=[]),
+        ):
+            return batch_mine.mine(
+                input_path=input_path, results_dir=results_dir, max_repos=0,
+            )
+
+    def test_timeout_status(self, tmp_path):
+        summary = self._run_mine_with_mycode_result(
+            tmp_path, returncode=-1, stdout="", stderr="mycode timed out",
+        )
+        repo = summary["repos"][0]
+        assert repo["status"] == "timeout"
+        assert summary["timeouts"] == 1
+
+    def test_crash_status(self, tmp_path):
+        summary = self._run_mine_with_mycode_result(
+            tmp_path, returncode=-1, stdout="",
+            stderr="Traceback: ValueError: boom",
+        )
+        repo = summary["repos"][0]
+        assert repo["status"] == "mycode_crash"
+        assert summary["crashes"] == 1
+
+    def test_skip_status(self, tmp_path):
+        report = {
+            "summary": "No testable code found",
+            "statistics": {"scenarios_run": 0},
+            "findings": [],
+            "unrecognized_dependencies": [],
+        }
+        summary = self._run_mine_with_mycode_result(
+            tmp_path, returncode=1, stdout="", stderr="",
+            report=report,
+        )
+        repo = summary["repos"][0]
+        assert repo["status"] == "skip"
+        assert summary["skips"] == 1
+        # Skips count as "tested" (processed)
+        assert summary["repos_tested"] == 1

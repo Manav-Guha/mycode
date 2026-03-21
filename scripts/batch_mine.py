@@ -25,12 +25,14 @@ import gc
 import json
 import logging
 import os
+import re
 import signal
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from collections import Counter
 from pathlib import Path
 
@@ -277,6 +279,137 @@ def _run_mycode(project_path: Path, timeout: int = _DEFAULT_MYCODE_TIMEOUT) -> t
         return -1, "", str(exc)
 
 
+# ── Phase timing & failure classification ──
+
+# Pipeline log markers → phase name.  Order matters: we walk stderr
+# line-by-line and record timestamps when each marker is first seen.
+_PHASE_MARKERS: list[tuple[str, str]] = [
+    ("Language detected:", "detect"),
+    ("Session ready:", "deps"),       # session setup + dependency install
+    ("Session created:", "deps"),     # alternate wording
+    ("Ingestion complete:", "ingest"),
+    ("Library matching:", "library"),
+    ("Generated", "scenario_gen"),    # "Generated N scenarios"
+    ("Scenario review:", "review"),
+    ("Execution complete:", "execute"),
+    ("Report generated", "report"),
+]
+
+# Ordered phase names for display (subset of what we track)
+_PHASE_DISPLAY_ORDER = [
+    "detect", "deps", "ingest", "library",
+    "scenario_gen", "review", "execute", "report",
+]
+
+
+def _parse_phase_timing(
+    stderr: str,
+    total_elapsed: float,
+    timed_out: bool,
+) -> str:
+    """Parse pipeline stderr to produce a phase-timing summary line.
+
+    Returns a string like:
+        ``PHASE detect: 0.1s | PHASE deps: 45.3s | PHASE ingest: TIMEOUT at 260s``
+    """
+    if not stderr:
+        return "PHASE unknown: no stderr captured"
+
+    # Extract timestamps from log lines: "HH:MM:SS INFO ..."
+    # We record wall-clock offsets by parsing the timestamp from each
+    # matching line relative to the first log line's timestamp.
+    ts_pattern = re.compile(r"^(\d{2}:\d{2}:\d{2})\s")
+    first_ts: float | None = None
+    phase_end_times: dict[str, float] = {}
+
+    def _parse_ts(line: str) -> float | None:
+        m = ts_pattern.match(line)
+        if not m:
+            return None
+        parts = m.group(1).split(":")
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+
+    for line in stderr.splitlines():
+        ts = _parse_ts(line)
+        if ts is not None and first_ts is None:
+            first_ts = ts
+
+        for marker, phase in _PHASE_MARKERS:
+            if marker in line and phase not in phase_end_times:
+                if ts is not None and first_ts is not None:
+                    phase_end_times[phase] = ts - first_ts
+                break
+
+    if not phase_end_times:
+        if timed_out:
+            return f"PHASE unknown: TIMEOUT at {total_elapsed:.0f}s (no phase markers in stderr)"
+        return "PHASE unknown: no phase markers in stderr"
+
+    # Compute per-phase durations from end timestamps
+    parts: list[str] = []
+    prev_end = 0.0
+    last_completed_phase = ""
+    for phase in _PHASE_DISPLAY_ORDER:
+        if phase in phase_end_times:
+            duration = phase_end_times[phase] - prev_end
+            parts.append(f"PHASE {phase}: {duration:.1f}s")
+            prev_end = phase_end_times[phase]
+            last_completed_phase = phase
+
+    # If timed out, show which phase it was stuck in
+    if timed_out:
+        # Determine the phase that was running when timeout hit
+        completed_phases = [
+            p for p in _PHASE_DISPLAY_ORDER if p in phase_end_times
+        ]
+        if completed_phases:
+            last_idx = _PHASE_DISPLAY_ORDER.index(completed_phases[-1])
+            if last_idx + 1 < len(_PHASE_DISPLAY_ORDER):
+                stuck_phase = _PHASE_DISPLAY_ORDER[last_idx + 1]
+            else:
+                stuck_phase = "post_report"
+        else:
+            stuck_phase = _PHASE_DISPLAY_ORDER[0]
+        time_in_phase = total_elapsed - prev_end
+        parts.append(f"PHASE {stuck_phase}: TIMEOUT at {time_in_phase:.0f}s")
+
+    return " | ".join(parts)
+
+
+def _classify_failure(
+    returncode: int,
+    stderr: str,
+    report: dict,
+    elapsed: float,
+    timeout: int,
+) -> tuple[str, str]:
+    """Classify a mycode failure into (status, error_snippet).
+
+    Returns one of:
+    - ``("timeout", ...)``  — repo exceeded time limit
+    - ``("skip", ...)``     — repo has no testable code (viability failed)
+    - ``("mycode_crash", ...)`` — myCode itself errored
+    """
+    # Timeout: returncode -1 with "timed out" in stderr, or elapsed ≈ timeout
+    if returncode == -1 and (
+        "timed out" in (stderr or "").lower()
+        or elapsed >= timeout - 5
+    ):
+        return "timeout", stderr[:200] if stderr else "mycode timed out"
+
+    # Skip: report exists with baseline_failed or 0 scenarios + viability reason
+    if report:
+        # Check for baseline_failed in the report JSON
+        summary = report.get("summary", "")
+        stats = report.get("statistics", {})
+        scenarios_run = stats.get("scenarios_run", -1)
+        if scenarios_run == 0 and summary:
+            return "skip", summary[:200]
+
+    # Everything else is a crash
+    return "mycode_crash", stderr[:200] if stderr else "unknown error"
+
+
 def _safe_name(repo_url: str) -> str:
     """Derive a filesystem-safe name from a repo URL.
 
@@ -423,11 +556,9 @@ def _generate_xlsx_report(summary: dict, results_dir: Path) -> None:
     tested = summary.get("repos_tested", 0)
     failed = summary.get("repos_failed", 0)
     clone_errs = summary.get("clone_errors", 0)
-    timeout_errs = sum(
-        1 for r in summary.get("repos", [])
-        if r.get("status") == "mycode_error"
-        and "timed out" in (r.get("error") or "").lower()
-    )
+    timeouts = summary.get("timeouts", 0)
+    crashes = summary.get("crashes", 0)
+    skips = summary.get("skips", 0)
     success_rate = f"{tested / total * 100:.1f}%" if total > 0 else "N/A"
 
     for i, (metric, value) in enumerate([
@@ -436,7 +567,9 @@ def _generate_xlsx_report(summary: dict, results_dir: Path) -> None:
         ("Failed", failed),
         ("Success rate", success_rate),
         ("Clone errors", clone_errs),
-        ("Timeout errors", timeout_errs),
+        ("Timeouts", timeouts),
+        ("Crashes", crashes),
+        ("Skips (no testable code)", skips),
     ], 2):
         ws.cell(row=i, column=1, value=metric)
         ws.cell(row=i, column=2, value=value)
@@ -602,11 +735,18 @@ def _rebuild_summary(results_dir: Path) -> dict:
     total = len(final_entries)
     passed = sum(
         1 for e in final_entries
-        if e.get("status") in ("success", "completed_with_errors")
+        if e.get("status") in ("success", "completed_with_errors", "skip")
     )
     failed = total - passed
     clone_errors = sum(1 for e in final_entries if e.get("status") == "clone_error")
-    mycode_errors = sum(1 for e in final_entries if e.get("status") == "mycode_error")
+    # Count both legacy "mycode_error" and new status types
+    mycode_errors = sum(
+        1 for e in final_entries
+        if e.get("status") in ("mycode_error", "timeout", "mycode_crash")
+    )
+    timeouts = sum(1 for e in final_entries if e.get("status") == "timeout")
+    crashes = sum(1 for e in final_entries if e.get("status") == "mycode_crash")
+    skips = sum(1 for e in final_entries if e.get("status") == "skip")
 
     return {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -615,6 +755,9 @@ def _rebuild_summary(results_dir: Path) -> dict:
         "repos_failed": failed,
         "clone_errors": clone_errors,
         "mycode_errors": mycode_errors,
+        "timeouts": timeouts,
+        "crashes": crashes,
+        "skips": skips,
         "repos": final_entries,
         "top_failure_signatures": [
             {"signature": sig, "count": count}
@@ -739,6 +882,8 @@ def mine(
                 for dp in new_discoveries:
                     shutil.copy2(dp, disc_dest / dp.name)
 
+            elapsed = time.monotonic() - repo_start
+
             # Save stdout/stderr for debugging, then release immediately.
             # These strings can be tens of MB per repo — holding references
             # across 300+ iterations caused 130GB accumulation and OOM.
@@ -746,24 +891,63 @@ def mine(
                 (repo_result_dir / "stdout.txt").write_text(stdout)
             if stderr:
                 (repo_result_dir / "stderr.txt").write_text(stderr)
-            error_snippet = stderr[:200] if stderr else ""
-            del stdout, stderr
 
             # Classify result
             if returncode == 0:
                 entry["status"] = "success"
                 passed += 1
                 _record_processed_repo(repo_url)
-            elif returncode == -1:
-                entry["status"] = "mycode_error"
-                entry["error"] = error_snippet
-                mycode_errors += 1
-                failed += 1
             else:
-                # Non-zero exit but ran — partial results may exist
-                entry["status"] = "completed_with_errors"
-                passed += 1  # still counts as tested
-                _record_processed_repo(repo_url)
+                is_timeout = returncode == -1 and (
+                    "timed out" in (stderr or "").lower()
+                    or elapsed >= timeout - 5
+                )
+
+                if is_timeout:
+                    # Parse phase timing from stderr before we delete it
+                    phase_line = _parse_phase_timing(
+                        stderr or "", elapsed, timed_out=True,
+                    )
+                    status, error_snippet = "timeout", stderr[:200] if stderr else "mycode timed out"
+                    entry["phase_timing"] = phase_line
+                    logger.warning("  TIMEOUT (%.1fs) — %s", elapsed, phase_line)
+                elif returncode == -1:
+                    # Crash — myCode errored
+                    phase_line = _parse_phase_timing(
+                        stderr or "", elapsed, timed_out=False,
+                    )
+                    status, error_snippet = _classify_failure(
+                        returncode, stderr or "", report, elapsed, timeout,
+                    )
+                    entry["phase_timing"] = phase_line
+                    logger.warning(
+                        "  %s (%.1fs) — %s\n    %s",
+                        status.upper(), elapsed, phase_line,
+                        (stderr or "")[:300].replace("\n", "\n    "),
+                    )
+                else:
+                    # Non-zero exit but ran — check if it's a skip
+                    status, error_snippet = _classify_failure(
+                        returncode, stderr or "", report, elapsed, timeout,
+                    )
+                    if status == "skip":
+                        passed += 1  # viability-failed repos are "processed"
+                        _record_processed_repo(repo_url)
+                    else:
+                        # Non-zero exit with partial results
+                        status = "completed_with_errors"
+                        passed += 1
+                        _record_processed_repo(repo_url)
+
+                if status in ("timeout", "mycode_crash"):
+                    mycode_errors += 1
+                    failed += 1
+
+                entry["status"] = status
+                entry["error"] = error_snippet
+
+            # Release stderr/stdout strings — can be tens of MB
+            del stdout, stderr
 
             entry["findings_count"] = len(report.get("findings", []))
             entry["discovery_count"] = len(new_discoveries)
@@ -784,12 +968,13 @@ def mine(
 
             repo_results.append(entry)
 
-            elapsed = time.monotonic() - repo_start
             entry["elapsed_seconds"] = round(elapsed, 1)
-            logger.info(
-                "  %s — %d findings, %d discoveries (%.1fs)",
-                entry["status"], entry["findings_count"], entry["discovery_count"], elapsed,
-            )
+            if entry["status"] not in ("timeout", "mycode_crash"):
+                logger.info(
+                    "  %s — %d findings, %d discoveries (%.1fs)",
+                    entry["status"], entry["findings_count"],
+                    entry["discovery_count"], elapsed,
+                )
 
         finally:
             # Clean up temp clone
@@ -803,6 +988,9 @@ def mine(
             gc.collect()
 
     # Build aggregate summary
+    timeouts = sum(1 for e in repo_results if e.get("status") == "timeout")
+    crashes = sum(1 for e in repo_results if e.get("status") == "mycode_crash")
+    skips = sum(1 for e in repo_results if e.get("status") == "skip")
     summary = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "total_repos": total,
@@ -810,6 +998,9 @@ def mine(
         "repos_failed": failed,
         "clone_errors": clone_errors,
         "mycode_errors": mycode_errors,
+        "timeouts": timeouts,
+        "crashes": crashes,
+        "skips": skips,
         "repos": repo_results,
         "top_failure_signatures": [
             {"signature": sig, "count": count}
