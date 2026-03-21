@@ -16,6 +16,7 @@ from mycode.documents import (
     _edition_number,
     _finding_severity_for_dp,
     _hash_key,
+    _integrate_details,
     _normalize_github_url,
     _prune_old_editions,
     _sanitize_dirname,
@@ -1754,3 +1755,54 @@ class TestFindingSeverityForDpMetricMatching:
             ),
         ]
         assert _finding_severity_for_dp(dp, findings) == "critical"
+
+
+# ── _integrate_details ──
+
+
+class TestIntegrateDetails:
+    def test_at_prefix_becomes_sentence(self):
+        desc = "Memory usage grows without bound, eventually crashing."
+        detail = "at first iteration"
+        result = _integrate_details(desc, detail)
+        assert result == (
+            "Memory usage grows without bound, eventually crashing."
+            " This issue begins at first iteration."
+        )
+
+    def test_at_prefix_with_number(self):
+        desc = "Data processing slows significantly"
+        detail = "at 25,000 items"
+        result = _integrate_details(desc, detail)
+        assert result == (
+            "Data processing slows significantly."
+            " This issue begins at 25,000 items."
+        )
+
+    def test_at_prefix_strips_trailing_period(self):
+        desc = "Response time degrades."
+        detail = "at 10 concurrent users."
+        result = _integrate_details(desc, detail)
+        assert result == (
+            "Response time degrades."
+            " This issue begins at 10 concurrent users."
+        )
+
+    def test_non_at_detail_appended_as_sentence(self):
+        desc = "The function fails under load"
+        detail = "Error count reached 47"
+        result = _integrate_details(desc, detail)
+        assert result == "The function fails under load. Error count reached 47."
+
+    def test_empty_details_returns_description(self):
+        assert _integrate_details("Some description.", "") == "Some description."
+
+    def test_empty_description_returns_details(self):
+        assert _integrate_details("", "some detail") == "some detail"
+
+    def test_duplicate_detail_skipped(self):
+        desc = "Memory usage grows at first iteration and keeps going."
+        detail = "at first iteration"
+        result = _integrate_details(desc, detail)
+        # "at first iteration" is already in desc, so should be skipped
+        assert result == desc

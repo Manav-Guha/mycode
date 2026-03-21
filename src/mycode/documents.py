@@ -1584,9 +1584,16 @@ def _integrate_details(description: str, details: str) -> str:
     # If details look like they're already in the description, skip
     if details.lower()[:20] in description.lower():
         return description
+    # Threshold indicators like "at first iteration" read better as a sentence
+    detail_clean = details.rstrip(". ")
+    if detail_clean.lower().startswith("at "):
+        desc = description.rstrip()
+        if not desc.endswith("."):
+            desc += "."
+        return f"{desc} This issue begins {detail_clean}."
     # Append as additional context
     desc = description.rstrip(". ")
-    return f"{desc}. {details.rstrip('. ')}."
+    return f"{desc}. {detail_clean}."
 
 
 def _render_pdf_finding(pdf, f: Finding) -> None:
