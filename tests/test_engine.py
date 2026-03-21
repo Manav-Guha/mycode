@@ -1232,8 +1232,8 @@ class TestHarnessConfig:
         assert len(result) == 1
         assert result[0].name == "flask_stress"
 
-    def test_function_dedup_keeps_coupling_scenarios(self, tmp_path):
-        """Coupling/behavior scenarios are never dropped by dedup."""
+    def test_function_dedup_keeps_coupling_scenarios_non_overlapping(self, tmp_path):
+        """Coupling scenarios with non-overlapping sources are kept."""
         session = _make_session(tmp_path)
         ingestion = _make_ingestion()
         engine = ExecutionEngine(session, ingestion)
@@ -4111,3 +4111,116 @@ class TestExecutionOrder:
 
         assert scenarios[0].name == "pandas_scaling"
         assert scenarios[1].name == "coupling_compute"
+
+
+# ── Coupling dedup against profiled scenarios ──
+
+
+class TestCouplingDedup:
+    """Coupling scenarios in data_volume_scaling/memory_profiling should be
+    dropped when a profiled scenario already covers the same function."""
+
+    def test_coupling_dropped_when_profiled_covers_same_function(self, tmp_path):
+        """Coupling data_volume_scaling on 'app.hello' dropped when profiled claims it."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()  # has app.hello, app.process_data
+        engine = ExecutionEngine(session, ingestion)
+
+        profiled = _make_scenario(
+            name="pandas_data_volume",
+            category="data_volume_scaling",
+        )
+        coupling = _make_scenario(
+            name="coupling_compute_hello",
+            category="data_volume_scaling",
+            test_config={
+                "behavior": "pure_computation",
+                "coupling_source": "app.hello",
+                "parameters": {},
+                "resource_limits": {},
+                "measurements": [],
+            },
+        )
+        # Profiled first (priority sort puts it first)
+        result = engine._deduplicate_by_function([profiled, coupling])
+        names = [s.name for s in result]
+        assert "pandas_data_volume" in names
+        assert "coupling_compute_hello" not in names
+
+    def test_coupling_kept_when_source_not_covered(self, tmp_path):
+        """Coupling kept when its source function is NOT in profiled scenario."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+        engine = ExecutionEngine(session, ingestion)
+
+        profiled = _make_scenario(
+            name="pandas_data_volume",
+            category="data_volume_scaling",
+        )
+        coupling = _make_scenario(
+            name="coupling_compute_other",
+            category="data_volume_scaling",
+            test_config={
+                "behavior": "pure_computation",
+                "coupling_source": "other_module.other_func",
+                "parameters": {},
+                "resource_limits": {},
+                "measurements": [],
+            },
+        )
+        result = engine._deduplicate_by_function([profiled, coupling])
+        names = [s.name for s in result]
+        assert "pandas_data_volume" in names
+        assert "coupling_compute_other" in names
+
+    def test_coupling_kept_for_concurrent_execution(self, tmp_path):
+        """Coupling in concurrent_execution is NOT deduped even if same function."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+        engine = ExecutionEngine(session, ingestion)
+
+        profiled = _make_scenario(
+            name="flask_concurrent",
+            category="concurrent_execution",
+        )
+        coupling = _make_scenario(
+            name="coupling_state_hello",
+            category="concurrent_execution",
+            test_config={
+                "behavior": "state_setter",
+                "coupling_source": "app.hello",
+                "parameters": {},
+                "resource_limits": {},
+                "measurements": [],
+            },
+        )
+        result = engine._deduplicate_by_function([profiled, coupling])
+        names = [s.name for s in result]
+        assert "flask_concurrent" in names
+        assert "coupling_state_hello" in names
+
+    def test_memory_profiling_coupling_dropped(self, tmp_path):
+        """Coupling in memory_profiling is deduped when source is covered."""
+        session = _make_session(tmp_path)
+        ingestion = _make_ingestion()
+        engine = ExecutionEngine(session, ingestion)
+
+        profiled = _make_scenario(
+            name="pandas_memory",
+            category="memory_profiling",
+        )
+        coupling = _make_scenario(
+            name="coupling_render_hello",
+            category="memory_profiling",
+            test_config={
+                "behavior": "dom_render",
+                "coupling_source": "app.hello",
+                "parameters": {},
+                "resource_limits": {},
+                "measurements": [],
+            },
+        )
+        result = engine._deduplicate_by_function([profiled, coupling])
+        names = [s.name for s in result]
+        assert "pandas_memory" in names
+        assert "coupling_render_hello" not in names

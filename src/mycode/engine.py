@@ -566,29 +566,44 @@ class ExecutionEngine:
 
         return runnable, skipped
 
+    # Categories where coupling scenarios duplicate profiled work.
+    # Coupling scenarios in these categories test generic function-level
+    # scaling/memory — the profiled scenario does this with calibrated
+    # tiers from the component library.  Other categories (edge_case_input,
+    # concurrent_execution) test different behaviour and should be kept.
+    _COUPLING_DEDUP_CATEGORIES = frozenset({
+        "data_volume_scaling", "memory_profiling",
+    })
+
     def _deduplicate_by_function(
         self,
         scenarios: list[StressTestScenario],
     ) -> list[StressTestScenario]:
         """Remove scenarios whose target functions are already covered.
 
-        Coupling/behavior scenarios (standalone harness bodies) are never
-        deduplicated — they test coupling interactions, not individual
-        functions.  Profile-based scenarios carry ``target_functions`` in
-        their harness config; the first scenario that claims a function
-        wins.  Later scenarios get their function list trimmed to only
-        unseen functions; if nothing remains, the scenario is dropped.
+        Two dedup passes:
+
+        1. **Profiled scenarios** (no ``behavior`` key): first-come wins.
+           Later profiled scenarios get their function list trimmed to
+           unseen functions; if nothing remains the scenario is dropped.
+
+        2. **Coupling scenarios** (``behavior`` key): always kept UNLESS
+           their category is ``data_volume_scaling`` or ``memory_profiling``
+           AND the coupling source function was already claimed by a
+           profiled scenario.  In those categories the profiled scenario
+           has calibrated tiers and produces proper findings — the coupling
+           scenario would duplicate that work with generic tiers.
         """
         seen_funcs: set[str] = set()
-        kept: list[StressTestScenario] = []
+        profiled: list[StressTestScenario] = []
+        coupling_deferred: list[StressTestScenario] = []
 
+        # ── Pass 1: process profiled scenarios, defer coupling ──
         for scenario in scenarios:
             config = scenario.test_config
 
-            # Standalone coupling/behavior bodies don't use target_functions
-            # — always keep them.
             if config.get("behavior"):
-                kept.append(scenario)
+                coupling_deferred.append(scenario)
                 continue
 
             # Build the harness config to see what functions this scenario
@@ -599,7 +614,7 @@ class ExecutionEngine:
             if not funcs:
                 # No callable functions (e.g. version discrepancy, generic
                 # stress) — keep the scenario as-is.
-                kept.append(scenario)
+                profiled.append(scenario)
                 continue
 
             # Identify functions not yet seen
@@ -631,6 +646,20 @@ class ExecutionEngine:
                     scenario.name, len(funcs), len(new_funcs),
                 )
 
+            profiled.append(scenario)
+
+        # ── Pass 2: check coupling scenarios against seen_funcs ──
+        kept = list(profiled)
+        for scenario in coupling_deferred:
+            if scenario.category in self._COUPLING_DEDUP_CATEGORIES:
+                source = scenario.test_config.get("coupling_source", "")
+                if source and source in seen_funcs:
+                    logger.debug(
+                        "Dedup: dropping coupling scenario '%s' — source "
+                        "'%s' already covered by profiled scenario",
+                        scenario.name, source,
+                    )
+                    continue
             kept.append(scenario)
 
         if len(kept) < len(scenarios):
