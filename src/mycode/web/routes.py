@@ -78,11 +78,6 @@ def handle_preflight(
     Accepts either a GitHub URL or an uploaded file object.
     Returns structured preflight data for the frontend.
     """
-    if store.active_count() >= MAX_CONCURRENT_JOBS:
-        return PreflightResponse(
-            error="Server is at capacity. Please try again shortly."
-        )
-
     job = store.create()
     warnings: list[str] = []
 
@@ -598,15 +593,23 @@ def handle_download_pdf(job_id: str, doc_type: str) -> tuple[bytes, str, str]:
 
 # ── Health ──
 
+# Cache Docker availability — subprocess call can take 10s if daemon is down.
+# Rechecked every 5 minutes.
+_docker_cache: dict[str, object] = {}
+
 
 def handle_health() -> HealthResponse:
     """Return server health status."""
-    docker_available = False
-    try:
-        from mycode.container import is_docker_available
-        docker_available = is_docker_available()
-    except Exception:
-        pass
+    now = time.time()
+    if "result" not in _docker_cache or now - _docker_cache.get("ts", 0) > 300:
+        try:
+            from mycode.container import is_docker_available
+            _docker_cache["result"] = is_docker_available()
+        except Exception:
+            _docker_cache["result"] = False
+        _docker_cache["ts"] = now
+
+    docker_available = bool(_docker_cache.get("result", False))
 
     version = "0.1.2"
     try:

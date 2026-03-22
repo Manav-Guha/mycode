@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -34,7 +33,7 @@ except ImportError:
         "Install with: pip install 'mycode-ai[web]'"
     )
 
-from mycode.web.jobs import store
+from mycode.web.jobs import store, MAX_CONCURRENT_JOBS
 from mycode.web.routes import (
     handle_analyze,
     handle_converse,
@@ -114,17 +113,29 @@ async def preflight(
     file: UploadFile | None = File(default=None),
 ):
     """Run preflight diagnostics (stages 1-4.5)."""
+    # Fast validation — return immediately without touching job store or executor
+    has_url = bool(github_url and github_url.strip())
+    has_file = file is not None and file.size and file.size > 0
+
+    if not has_url and not has_file:
+        return JSONResponse(
+            content={"error": "Provide either a GitHub URL or upload a zip file."},
+        )
+
+    if store.active_count() >= MAX_CONCURRENT_JOBS:
+        return JSONResponse(
+            content={"error": "Server is at capacity. Please try again shortly."},
+        )
+
     file_obj = None
     filename = ""
-    if file is not None:
+    if has_file:
         content = await file.read()
         file_obj = BytesIO(content)
         filename = file.filename or ""
 
-    # Run in thread pool (sync I/O)
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        None, handle_preflight, github_url, file_obj, filename,
+    result = await asyncio.to_thread(
+        handle_preflight, github_url, file_obj, filename,
     )
     return JSONResponse(content=_dataclass_to_dict(result))
 
@@ -136,9 +147,8 @@ async def converse(
     user_response: str = Form(default=""),
 ):
     """Handle one turn of the conversational interface."""
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        None, handle_converse, job_id, turn, user_response,
+    result = await asyncio.to_thread(
+        handle_converse, job_id, turn, user_response,
     )
     return JSONResponse(content=_dataclass_to_dict(result))
 
