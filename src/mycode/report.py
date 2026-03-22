@@ -623,7 +623,7 @@ class DiagnosticReport:
 
         def _finding_dict(f: Finding) -> dict:
             # Lazy import to avoid circular dependency (documents imports report)
-            from mycode.documents import generate_finding_prompt
+            from mycode.documents import generate_finding_prompt, _build_diagnosis
             d: dict = {
                 "title": f.title,
                 "severity": f.severity,
@@ -639,6 +639,7 @@ class DiagnosticReport:
                 "failure_reason": f._failure_reason,
                 "source_file": f.source_file,
                 "source_function": f.source_function,
+                "diagnosis": _build_diagnosis(f),
                 "prompt": generate_finding_prompt(f),
             }
             if f.grouped_findings:

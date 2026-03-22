@@ -521,6 +521,9 @@ function renderFinding(f) {
     if (remainingDetails) {
         html += `<div class="finding-details">${escapeHtml(remainingDetails)}</div>`;
     }
+    if (f.diagnosis) {
+        html += `<div class="finding-diagnosis">${escapeHtml(f.diagnosis)}</div>`;
+    }
     if (f.affected_dependencies && f.affected_dependencies.length) {
         html += `<div class="finding-deps">Dependencies: ${f.affected_dependencies.map(escapeHtml).join(", ")}</div>`;
     }

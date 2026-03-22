@@ -1734,11 +1734,11 @@ class TestConsequenceForUser:
 
 
 class TestBuildRemediation:
-    """Verify _build_remediation returns framework-specific fix guidance."""
+    """Verify diagnosis + fix are framework-specific and separated."""
 
     def test_fastapi_concurrency(self):
-        """FastAPI + concurrency_failure → FastAPI-specific thread pool advice."""
-        from mycode.documents import generate_finding_prompt
+        """FastAPI + concurrency_failure → FastAPI-specific diagnosis + fix."""
+        from mycode.documents import _build_diagnosis, _build_fix, generate_finding_prompt
         f = Finding(
             title="Endpoint /api/preflight degrades under concurrent load",
             severity="critical",
@@ -1747,14 +1747,20 @@ class TestBuildRemediation:
         )
         f.failure_domain = "concurrency_failure"
         f._load_level = 50
+        diagnosis = _build_diagnosis(f)
+        assert "thread pool" in diagnosis
+        assert "50 concurrent" in diagnosis
+        fix = _build_fix(f)
+        assert "ThreadPoolExecutor" in fix
+        assert "async" in fix
+        # Prompt contains both
         prompt = generate_finding_prompt(f)
-        assert "ThreadPoolExecutor" in prompt
-        assert "50 concurrent" in prompt
-        assert "async" in prompt
+        assert "Diagnosis:" in prompt
+        assert "Fix:" in prompt
 
     def test_streamlit_memory(self):
-        """Streamlit + memory_accumulation → Streamlit-specific cache advice."""
-        from mycode.documents import generate_finding_prompt
+        """Streamlit + memory_accumulation → Streamlit-specific diagnosis + fix."""
+        from mycode.documents import _build_diagnosis, _build_fix
         f = Finding(
             title="Memory baseline limits concurrent capacity",
             severity="warning",
@@ -1763,13 +1769,32 @@ class TestBuildRemediation:
             affected_dependencies=["streamlit"],
         )
         f.failure_pattern = "memory_accumulation_over_sessions"
-        prompt = generate_finding_prompt(f)
-        assert "@st.cache_data" in prompt
-        assert "65MB" in prompt
+        diagnosis = _build_diagnosis(f)
+        assert "Streamlit" in diagnosis
+        assert "65MB" in diagnosis
+        fix = _build_fix(f)
+        assert "@st.cache_data" in fix
+
+    def test_streamlit_response_time_unclassified(self):
+        """Streamlit + http + 'response time' in title → matches pattern #4."""
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Response time degradation on your application",
+            severity="warning",
+            category="http_load_testing",
+            affected_dependencies=["streamlit"],
+        )
+        f.failure_domain = "unclassified"
+        f.failure_pattern = None
+        diagnosis = _build_diagnosis(f)
+        assert "Streamlit reruns" in diagnosis
+        fix = _build_fix(f)
+        assert "@st.cache_data" in fix
+        assert "@st.cache_resource" in fix
 
     def test_flask_http_load(self):
-        """Flask + http_load_testing → Flask-specific gunicorn advice."""
-        from mycode.documents import generate_finding_prompt
+        """Flask + http_load_testing → Flask-specific diagnosis + fix."""
+        from mycode.documents import _build_diagnosis, _build_fix
         f = Finding(
             title="Application degrades under concurrent load",
             severity="critical",
@@ -1777,14 +1802,15 @@ class TestBuildRemediation:
             affected_dependencies=["flask"],
         )
         f._load_level = 25
-        prompt = generate_finding_prompt(f)
-        assert "gunicorn" in prompt
-        assert "synchronously" in prompt
-        assert "25 concurrent" in prompt
+        diagnosis = _build_diagnosis(f)
+        assert "synchronously" in diagnosis
+        assert "25 concurrent" in diagnosis
+        fix = _build_fix(f)
+        assert "gunicorn" in fix
 
     def test_memory_baseline_any_framework(self):
-        """Any framework + memory baseline → lazy import advice."""
-        from mycode.documents import generate_finding_prompt
+        """Any framework + memory baseline → diagnosis + fix."""
+        from mycode.documents import _build_diagnosis, _build_fix
         f = Finding(
             title="Memory baseline limits concurrent capacity",
             severity="warning",
@@ -1792,35 +1818,44 @@ class TestBuildRemediation:
             description="Your application uses 54MB per process.",
             affected_dependencies=["fastapi", "uvicorn"],
         )
-        prompt = generate_finding_prompt(f)
-        assert "lazy imports" in prompt
-        assert "54MB" in prompt
-        assert "not a memory leak" in prompt
+        diagnosis = _build_diagnosis(f)
+        assert "54MB" in diagnosis
+        assert "not a memory leak" in diagnosis
+        fix = _build_fix(f)
+        assert "lazy imports" in fix
 
     def test_data_volume_scaling(self):
-        """data_volume_scaling category → chunked processing advice."""
-        from mycode.documents import generate_finding_prompt
+        """data_volume_scaling category → diagnosis + fix."""
+        from mycode.documents import _build_diagnosis, _build_fix
         f = Finding(
             title="Pandas data scaling",
             severity="warning",
             category="data_volume_scaling",
             affected_dependencies=["pandas"],
         )
-        prompt = generate_finding_prompt(f)
-        assert "chunked" in prompt or "streaming" in prompt
-        assert "pagination" in prompt
+        diagnosis = _build_diagnosis(f)
+        assert "execution time grows" in diagnosis
+        fix = _build_fix(f)
+        assert "chunked" in fix or "streaming" in fix
+        assert "pagination" in fix
 
     def test_unknown_framework_falls_back(self):
-        """Unknown framework + HTTP → generic fallback."""
-        from mycode.documents import generate_finding_prompt
+        """Unknown framework + HTTP → empty diagnosis, generic fix."""
+        from mycode.documents import _build_diagnosis, _build_fix, generate_finding_prompt
         f = Finding(
             title="Some HTTP issue",
             severity="warning",
             category="http_load_testing",
             affected_dependencies=["unknown_dep"],
         )
+        diagnosis = _build_diagnosis(f)
+        assert diagnosis == ""
+        fix = _build_fix(f)
+        assert "concurrent HTTP load" in fix
+        # Prompt has Fix but no Diagnosis
         prompt = generate_finding_prompt(f)
-        assert "concurrent HTTP load" in prompt
+        assert "Diagnosis:" not in prompt
+        assert "Fix:" in prompt
 
 
 # ── _finding_severity_for_dp metric-aware matching ──

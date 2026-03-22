@@ -799,6 +799,12 @@ def _render_understanding_finding(lines: list[str], f: Finding) -> None:
         lines.append(f"> {f.details}")
         lines.append("")
 
+    # Architecture-aware diagnosis (why it matters)
+    diagnosis = _build_diagnosis(f)
+    if diagnosis:
+        lines.append(f"**Why this matters:** {diagnosis}")
+        lines.append("")
+
     # INFO findings: description only, no action items
     if f.severity == "info":
         if f.affected_dependencies:
@@ -1005,8 +1011,11 @@ def generate_finding_prompt(f: Finding) -> str:
     if f._load_level is not None:
         parts.append(f"Failed at load level: {f._load_level}")
 
-    # Fix objective — architecture-aware remediation
-    fix_goal = _build_remediation(f)
+    # Architecture-aware diagnosis + fix
+    diagnosis = _build_diagnosis(f)
+    if diagnosis:
+        parts.append(f"Diagnosis: {diagnosis}")
+    fix_goal = _build_fix(f)
     parts.append(f"Fix: {fix_goal}")
 
     parts.append("See attached JSON for full diagnostic data.")
@@ -1077,18 +1086,11 @@ def _extract_mb_from_text(text: str) -> str:
     return m.group(1) if m else ""
 
 
-def _build_remediation(f: Finding) -> str:
-    """Architecture-aware fix guidance based on finding data.
-
-    Derives framework from affected_dependencies, then matches against
-    (framework + failure_pattern/failure_domain/category) for specific
-    remediation. Falls back to category-level guidance.
-    """
-    framework = _detect_framework(f.affected_dependencies)
+def _remediation_fields(f: Finding) -> dict[str, str]:
+    """Extract interpolation fields from a finding for remediation templates."""
     title_lower = f.title.lower()
-    desc_lower = f.description.lower()
 
-    # Load level: use field if set, else extract from description
+    # Load level: use field if set, else "high"
     load = str(f._load_level) if f._load_level else "high"
 
     # Memory: use field if set, else extract from description text
@@ -1100,72 +1102,105 @@ def _build_remediation(f: Finding) -> str:
     # Endpoint label from title
     endpoint = ""
     if "endpoint" in title_lower:
-        # "Endpoint /checkout degrades..." → "/checkout"
         parts = f.title.split("Endpoint ", 1)
         if len(parts) == 2:
             endpoint = parts[1].split(" ")[0]
     if not endpoint:
         endpoint = f.source_function or "endpoint"
 
-    # ── Specific matches (most specific first) ──
+    return {"load": load, "mem": mem, "endpoint": endpoint}
 
-    # 1. FastAPI + concurrency failure
+
+# Each pattern returns (diagnosis, fix) or None if no match.
+# Diagnosis = what's wrong (human-readable). Fix = what to do (actionable).
+_REMEDIATION_PATTERNS: list[
+    tuple[str, "Callable[[Finding, str, dict], tuple[str, str] | None]"]
+] = []
+
+
+def _register_pattern(fn):
+    """Decorator to register a remediation pattern matcher."""
+    _REMEDIATION_PATTERNS.append(fn)
+    return fn
+
+
+@_register_pattern
+def _pat_fastapi_concurrency(f, framework, fields):
     if (
         framework == "fastapi"
         and f.category == "http_load_testing"
         and f.failure_domain == "concurrency_failure"
     ):
         return (
-            f"your FastAPI endpoint delegates blocking work to the default "
-            f"thread pool. At {load} concurrent requests, the pool saturates "
-            f"and requests queue. Create a dedicated ThreadPoolExecutor sized "
-            f"for your expected concurrency, or convert blocking operations "
-            f"to native async (async def + await)."
+            f"Your FastAPI endpoint delegates blocking work to the default "
+            f"thread pool. At {fields['load']} concurrent requests, the pool "
+            f"saturates and requests queue — new requests wait for a thread, "
+            f"causing cascading timeouts.",
+            "Create a dedicated ThreadPoolExecutor sized for your expected "
+            "concurrency, or convert blocking operations to native async "
+            "(async def + await).",
         )
+    return None
 
-    # 2. FastAPI + startup failure
+
+@_register_pattern
+def _pat_fastapi_startup(f, framework, fields):
     if (
         framework == "fastapi"
         and f.category == "http_load_testing"
-        and "could not start" in title_lower
+        and "could not start" in f.title.lower()
     ):
         return (
-            "your FastAPI app failed to start because a required dependency "
-            "is missing. Check that all imports in your main app module are "
-            "installed. Add missing packages to requirements.txt or "
-            "pyproject.toml dependencies (not just dev/optional groups)."
+            "Your FastAPI app failed to start because a required dependency "
+            "is missing.",
+            "Check that all imports in your main app module are installed. "
+            "Add missing packages to requirements.txt or pyproject.toml "
+            "dependencies (not just dev/optional groups).",
         )
+    return None
 
-    # 3. Streamlit + memory per session
+
+@_register_pattern
+def _pat_streamlit_memory(f, framework, fields):
     if (
         framework == "streamlit"
         and f.failure_pattern == "memory_accumulation_over_sessions"
     ):
         return (
             f"Streamlit creates a new Python process per user session. Your "
-            f"app uses {mem}MB per session. At {load} concurrent users, "
-            f"you'll exhaust server memory. Cache shared data with "
-            f"@st.cache_data, move heavy computation to a background "
-            f"service, and avoid loading large models/datasets at module "
-            f"level."
+            f"app uses {fields['mem']}MB per session. At {fields['load']} "
+            f"concurrent users, you'll exhaust server memory.",
+            "Cache shared data with @st.cache_data, move heavy computation "
+            "to a background service, and avoid loading large "
+            "models/datasets at module level.",
         )
+    return None
 
-    # 4. Streamlit + response time / concurrency degradation
+
+@_register_pattern
+def _pat_streamlit_response_time(f, framework, fields):
     if (
         framework == "streamlit"
         and f.category == "http_load_testing"
-        and f.failure_domain in ("concurrency_failure", "scaling_collapse")
+        and (
+            f.failure_domain in ("concurrency_failure", "scaling_collapse")
+            or "response time" in f.title.lower()
+            or "degradation" in f.title.lower()
+        )
     ):
         return (
             "Streamlit reruns the entire script on each user interaction. "
             "Under concurrent load, this compounds because each session "
-            "triggers a full re-execution. Use @st.cache_data for expensive "
-            "computations, @st.cache_resource for database connections and "
-            "ML models, and move heavy initialization outside the main "
-            "script flow."
+            "triggers a full re-execution.",
+            "Use @st.cache_data for expensive computations, "
+            "@st.cache_resource for database connections and ML models, "
+            "and move heavy initialization outside the main script flow.",
         )
+    return None
 
-    # 5. Flask + concurrency / blocking
+
+@_register_pattern
+def _pat_flask_concurrency(f, framework, fields):
     if (
         framework == "flask"
         and f.category in (
@@ -1174,45 +1209,82 @@ def _build_remediation(f: Finding) -> str:
     ):
         return (
             f"Flask handles requests synchronously — each request blocks a "
-            f"worker thread. At {load} concurrent requests, all threads are "
-            f"occupied and new requests queue. Use database connection "
-            f"pooling (SQLAlchemy pool_size), add gunicorn with multiple "
-            f"workers (gunicorn -w 4), or migrate to an async framework "
-            f"for I/O-heavy endpoints."
+            f"worker thread. At {fields['load']} concurrent requests, all "
+            f"threads are occupied and new requests queue.",
+            "Use database connection pooling (SQLAlchemy pool_size), add "
+            "gunicorn with multiple workers (gunicorn -w 4), or migrate "
+            "to an async framework for I/O-heavy endpoints.",
         )
+    return None
 
-    # 6. Any framework + memory baseline too high
-    if "memory baseline" in title_lower:
+
+@_register_pattern
+def _pat_memory_baseline(f, framework, fields):
+    if "memory baseline" in f.title.lower():
         return (
-            f"your application uses {mem}MB per process. This is a baseline "
-            f"issue, not a memory leak — memory stays flat under load. Use "
-            f"lazy imports for heavy modules (import inside functions, not "
-            f"at module level), defer loading large models/data until first "
-            f"request, or increase server memory."
+            f"Your application uses {fields['mem']}MB per process. This is "
+            f"a baseline issue, not a memory leak — memory stays flat "
+            f"under load.",
+            "Use lazy imports for heavy modules (import inside functions, "
+            "not at module level), defer loading large models/data until "
+            "first request, or increase server memory.",
         )
+    return None
 
-    # 7. Any framework + external dependency timeout
+
+@_register_pattern
+def _pat_external_timeout(f, framework, fields):
+    title_lower = f.title.lower()
     if "skipped" in title_lower and "slow response" in title_lower:
         return (
-            f"your {endpoint} took over 10 seconds at 1 concurrent "
-            f"connection — it's waiting on an external service that isn't "
-            f"configured in the test environment. In production: ensure "
-            f"the service is available, add timeout handling (e.g. "
-            f"requests.get(url, timeout=5)), and return a graceful error "
-            f"when the service is down."
+            f"Your {fields['endpoint']} took over 10 seconds at 1 "
+            f"concurrent connection — it's waiting on an external service "
+            f"that isn't configured in the test environment.",
+            "Ensure the service is available in production, add timeout "
+            "handling (e.g. requests.get(url, timeout=5)), and return a "
+            "graceful error when the service is down.",
         )
+    return None
 
-    # 8. Any framework + data volume scaling
+
+@_register_pattern
+def _pat_data_volume(f, framework, fields):
     if f.category == "data_volume_scaling":
         return (
-            "your function's execution time grows with input size. At "
-            "large inputs, this becomes the bottleneck. Use chunked or "
-            "streaming processing instead of loading all data into memory, "
-            "add pagination for large result sets, and consider caching "
-            "intermediate results for repeated queries."
+            "Your function's execution time grows with input size. At "
+            "large inputs, this becomes the bottleneck.",
+            "Use chunked or streaming processing instead of loading all "
+            "data into memory, add pagination for large result sets, and "
+            "consider caching intermediate results for repeated queries.",
         )
+    return None
 
-    # ── Category-level fallback ──
+
+def _match_remediation(f: Finding) -> tuple[str, str] | None:
+    """Try each remediation pattern against a finding.
+
+    Returns (diagnosis, fix) or None if no pattern matches.
+    """
+    framework = _detect_framework(f.affected_dependencies)
+    fields = _remediation_fields(f)
+    for pattern_fn in _REMEDIATION_PATTERNS:
+        result = pattern_fn(f, framework, fields)
+        if result is not None:
+            return result
+    return None
+
+
+def _build_diagnosis(f: Finding) -> str:
+    """Return architecture-aware diagnosis, or empty string if unmatched."""
+    match = _match_remediation(f)
+    return match[0] if match else ""
+
+
+def _build_fix(f: Finding) -> str:
+    """Return architecture-aware fix instruction, or category-level fallback."""
+    match = _match_remediation(f)
+    if match:
+        return match[1]
     return _FIX_OBJECTIVES.get(
         f.category,
         "resolve the issue described above so the function behaves "
@@ -1814,6 +1886,12 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     combined = _integrate_details(f.description or "", f.details or "")
     if combined:
         pdf.body_text(combined)
+
+    # Architecture-aware diagnosis (why it matters)
+    diagnosis = _build_diagnosis(f)
+    if diagnosis:
+        pdf.body_label("Why this matters:")
+        pdf.body_text(diagnosis)
 
     # INFO findings: description only
     if f.severity == "info":
