@@ -410,7 +410,7 @@ class TestHttpResultsToDegradationPoints:
         assert points[0].breaking_point == "5 concurrent"
 
     def test_memory_curve_65mb_app_with_2pct_growth(self):
-        """A 65MB app with ~2% growth (1.5MB) should produce a memory curve."""
+        """A 65MB app with ~2% growth (1.5MB) — flat, produces curve with description."""
         ep = _make_endpoint_result(
             levels=[
                 _make_load_level(concurrency=1, memory_mb=65.0),
@@ -421,9 +421,10 @@ class TestHttpResultsToDegradationPoints:
         points = http_results_to_degradation_points(load_result)
         mem_points = [p for p in points if p.metric == "memory_peak_mb"]
         assert len(mem_points) == 1
+        assert "stays steady" in mem_points[0].description
 
     def test_memory_curve_10mb_app_with_3pct_growth(self):
-        """A 10MB app with 0.3MB range (3%) should produce a memory curve."""
+        """A 10MB app with 0.3MB range (3%) — flat, produces curve with description."""
         ep = _make_endpoint_result(
             levels=[
                 _make_load_level(concurrency=1, memory_mb=10.0),
@@ -434,9 +435,10 @@ class TestHttpResultsToDegradationPoints:
         points = http_results_to_degradation_points(load_result)
         mem_points = [p for p in points if p.metric == "memory_peak_mb"]
         assert len(mem_points) == 1
+        assert "stays steady" in mem_points[0].description
 
-    def test_no_memory_curve_65mb_app_with_0_5mb_noise(self):
-        """A 65MB app with 0.5MB range (0.8%) should NOT produce a curve."""
+    def test_flat_memory_always_emits_curve(self):
+        """A 65MB app with 0.5MB range (0.8%) — previously suppressed, now emitted."""
         ep = _make_endpoint_result(
             levels=[
                 _make_load_level(concurrency=1, memory_mb=65.0),
@@ -446,11 +448,12 @@ class TestHttpResultsToDegradationPoints:
         load_result = HttpLoadResult(framework="streamlit", endpoint_results=[ep])
         points = http_results_to_degradation_points(load_result)
         mem_points = [p for p in points if p.metric == "memory_peak_mb"]
-        assert len(mem_points) == 0
+        assert len(mem_points) == 1
+        assert "stays steady" in mem_points[0].description
+        assert "65MB" in mem_points[0].description
 
-    def test_memory_curve_large_app_old_threshold_would_miss(self):
-        """A 100MB app with 1.8MB range — old 2.0MB absolute threshold would
-        miss this, but 2% relative (2.0MB) catches it at the boundary."""
+    def test_memory_curve_large_app_flat(self):
+        """A 100MB app with 2% range — flat, produces curve with description."""
         ep = _make_endpoint_result(
             levels=[
                 _make_load_level(concurrency=1, memory_mb=100.0),
@@ -462,6 +465,54 @@ class TestHttpResultsToDegradationPoints:
         points = http_results_to_degradation_points(load_result)
         mem_points = [p for p in points if p.metric == "memory_peak_mb"]
         assert len(mem_points) == 1
+        assert "stays steady" in mem_points[0].description
+
+    def test_growing_memory_curve_no_flat_description(self):
+        """Significant memory growth (>15%) gets no flat-curve description."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, memory_mb=50.0),
+                _make_load_level(concurrency=10, memory_mb=150.0),
+            ],
+        )
+        load_result = HttpLoadResult(framework="flask", endpoint_results=[ep])
+        points = http_results_to_degradation_points(load_result)
+        mem_points = [p for p in points if p.metric == "memory_peak_mb"]
+        assert len(mem_points) == 1
+        assert mem_points[0].description == ""
+
+    def test_flat_memory_description_matches_r_app(self):
+        """R's app scenario: 65MB → 70MB across 1–1500 concurrent."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, memory_mb=65.0),
+                _make_load_level(concurrency=500, memory_mb=67.0),
+                _make_load_level(concurrency=1500, memory_mb=70.0),
+            ],
+        )
+        load_result = HttpLoadResult(framework="flask", endpoint_results=[ep])
+        points = http_results_to_degradation_points(load_result)
+        mem_points = [p for p in points if p.metric == "memory_peak_mb"]
+        assert len(mem_points) == 1
+        assert "stays steady" in mem_points[0].description
+        assert "67MB" in mem_points[0].description  # avg of 65, 67, 70
+        assert "baseline memory per process" in mem_points[0].description
+
+    def test_response_time_no_memory_note_when_curve_present(self):
+        """Response time description should not contain memory note when
+        memory curve is emitted (the memory curve speaks for itself)."""
+        ep = _make_endpoint_result(
+            levels=[
+                _make_load_level(concurrency=1, median_ms=20.0, memory_mb=65.0),
+                _make_load_level(concurrency=50, median_ms=200.0, memory_mb=65.5),
+            ],
+            breaking_point=10,
+        )
+        load_result = HttpLoadResult(framework="flask", endpoint_results=[ep])
+        points = http_results_to_degradation_points(load_result)
+        time_points = [p for p in points if p.metric == "response_time_ms"]
+        assert len(time_points) == 1
+        assert "Memory usage stable" not in (time_points[0].description or "")
 
 
 # ═══════════════════════════════════════════════════════════════════════

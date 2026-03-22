@@ -624,34 +624,34 @@ def http_results_to_degradation_points(
             description=_describe_response_curve(ep_result),
         ))
 
-        # Memory curve (if any measurements and not flat)
-        # Use 2% of baseline as threshold — relative to app size so a 65MB
-        # app with 1.3MB growth produces a curve, while 0.5MB noise doesn't.
+        # Memory curve — always emit when measurements exist.
+        # Flat-curve verdict logic (commit 25fa718) handles near-flat
+        # curves by showing "Stable" instead of inheriting finding severity.
         mem_values = [lvl.memory_mb for lvl in ep_result.levels if lvl.memory_mb > 0]
         if mem_values:
-            mem_range = max(mem_values) - min(mem_values)
-            mem_baseline = mem_values[0] if mem_values[0] > 0 else 1.0
-            if mem_range >= mem_baseline * 0.02:
-                # Real growth — show as degradation curve
-                mem_steps = [
-                    (f"{lvl.concurrency} concurrent", lvl.memory_mb)
-                    for lvl in ep_result.levels
-                ]
-                points.append(DegradationPoint(
-                    scenario_name=scenario_name,
-                    metric="memory_peak_mb",
-                    steps=mem_steps,
-                    breaking_point=breaking,
-                ))
+            mem_steps = [
+                (f"{lvl.concurrency} concurrent", lvl.memory_mb)
+                for lvl in ep_result.levels
+            ]
+            # Explanatory description for flat curves
+            first_mb = mem_values[0] if mem_values[0] > 0 else 1.0
+            last_mb = mem_values[-1]
+            avg_mb = sum(mem_values) / len(mem_values)
+            if len(mem_values) >= 2 and first_mb > 0 and last_mb / first_mb < 1.15:
+                mem_desc = (
+                    f"Memory usage stays steady under load at {avg_mb:.0f}MB. "
+                    "The capacity issue is the baseline memory per process, "
+                    "not memory growth."
+                )
             else:
-                # Flat memory — note stability on the response-time point
-                avg_mb = sum(mem_values) / len(mem_values)
-                if points and points[-1].scenario_name == scenario_name:
-                    stable_note = f" Memory usage stable at {avg_mb:.0f}MB under load."
-                    if points[-1].description:
-                        points[-1].description += stable_note
-                    else:
-                        points[-1].description = stable_note.strip()
+                mem_desc = ""
+            points.append(DegradationPoint(
+                scenario_name=scenario_name,
+                metric="memory_peak_mb",
+                steps=mem_steps,
+                breaking_point=breaking,
+                description=mem_desc,
+            ))
 
     return points
 
