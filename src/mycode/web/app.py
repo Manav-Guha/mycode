@@ -12,6 +12,7 @@ import asyncio
 import dataclasses
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from io import BytesIO
 from typing import Any
@@ -59,12 +60,23 @@ def _dataclass_to_dict(obj: Any) -> Any:
     return obj
 
 
+# ── Thread Pool ──
+
+# Dedicated thread pool for asyncio.to_thread() calls. The default pool
+# has ~14 workers (min(32, cpu+4)) which saturates at 50 concurrent
+# requests, causing 15s timeouts. Size this to handle peak HTTP traffic.
+_WEB_POOL_SIZE = int(os.environ.get("MYCODE_WEB_POOL_SIZE", "50"))
+_web_executor = ThreadPoolExecutor(max_workers=_WEB_POOL_SIZE)
+
+
 # ── Lifespan ──
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan — start cleanup task, stop on shutdown."""
+    """Application lifespan — set executor, start cleanup, stop on shutdown."""
+    loop = asyncio.get_event_loop()
+    loop.set_default_executor(_web_executor)
     cleanup_task = asyncio.create_task(_periodic_cleanup())
     yield
     cleanup_task.cancel()
@@ -72,6 +84,7 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+    _web_executor.shutdown(wait=False)
 
 
 async def _periodic_cleanup():
