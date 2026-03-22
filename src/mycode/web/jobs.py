@@ -3,6 +3,11 @@
 Jobs track the lifecycle of a single analysis request from preflight
 through report generation. State is held in memory — swap this module
 for a Redis-backed implementation when Kubernetes scaling is needed.
+
+IMPORTANT: The in-memory store is per-process. Running uvicorn with
+--workers > 1 creates separate stores in each worker. Job state
+(preflight → converse → analyze → report) won't survive cross-worker
+routing. Use workers=1 until a shared backend (Redis) is implemented.
 """
 
 from __future__ import annotations

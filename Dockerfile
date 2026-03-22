@@ -37,4 +37,7 @@ RUN pip install --no-cache-dir "/opt/mycode[web,pdf]"
 # Create workspace directory
 RUN mkdir -p /workspace
 
-CMD ["uvicorn", "mycode.web.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# MYCODE_UVICORN_WORKERS: defaults to 1. The in-memory job store is
+# per-process, so workers > 1 requires a shared backend (Redis).
+# PORT: Railway sets this dynamically; defaults to 8000 for local use.
+CMD ["sh", "-c", "uvicorn mycode.web.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${MYCODE_UVICORN_WORKERS:-1}"]
