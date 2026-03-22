@@ -76,6 +76,14 @@ _HIGH_VARIANCE_RATIO = 1.5
 # Per-request timeout
 _REQUEST_TIMEOUT_SECONDS = 15
 
+# Default time budget for the entire HTTP testing phase (seconds).
+# Applied when no constraints are provided (e.g. batch/non-interactive mode).
+_DEFAULT_HTTP_BUDGET = 120
+
+# Skip endpoint if concurrency=1 response exceeds this (ms).
+# Catches endpoints hanging on unconfigured external APIs (Stripe, DB, etc.).
+_SLOW_BASELINE_MS = 10_000
+
 # Framework → affected dependencies for findings
 _FRAMEWORK_DEPS: dict[str, list[str]] = {
     "fastapi": ["fastapi", "uvicorn"],
@@ -321,6 +329,7 @@ def drive_endpoint(
       - Median response time > 10s
       - Server process crashed
       - Time budget exceeded (*deadline* is a ``time.monotonic()`` timestamp)
+      - Baseline response > 10s (external dependency timeout)
     """
     result = EndpointLoadResult(endpoint=req)
 
@@ -340,6 +349,21 @@ def drive_endpoint(
             req, concurrency, server.process.pid,
         )
         result.levels.append(level_result)
+
+        # Early abort: if concurrency=1 takes >10s, the endpoint is
+        # hanging on an external dependency (Stripe, DB, third-party API).
+        # Skip higher concurrency levels — they'll just waste budget.
+        if (
+            concurrency == levels[0]
+            and level_result.median_response_ms > _SLOW_BASELINE_MS
+        ):
+            result.breaking_point = concurrency
+            result.breaking_reason = "external_dependency_timeout"
+            logger.info(
+                "Endpoint %s took %.0fms at baseline — skipping (external dependency timeout)",
+                req.description, level_result.median_response_ms,
+            )
+            break
 
         # Check stop conditions
         if level_result.error_rate > _MAX_ERROR_RATE:
@@ -449,8 +473,19 @@ def run_http_load_test(
                 logger.info("HTTP budget exceeded — skipping remaining endpoints")
                 break
 
+            # Per-endpoint deadline: recalculate each iteration so fast
+            # endpoints donate unused time to later ones.
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                endpoints_left = len(testable) - i
+                per_ep = remaining / max(endpoints_left, 1)
+                per_ep = max(15.0, min(60.0, per_ep))
+                ep_deadline = min(time.monotonic() + per_ep, deadline)
+            else:
+                ep_deadline = None
+
             _progress(f"Testing endpoint {i + 1}/{len(testable)}: {req.description}")
-            ep_result = drive_endpoint(req, levels, server, deadline=deadline)
+            ep_result = drive_endpoint(req, levels, server, deadline=ep_deadline)
             endpoint_results.append(ep_result)
 
             # If server crashed, stop testing
@@ -787,6 +822,23 @@ def _endpoint_to_finding(
     if ep_result.breaking_reason == "baseline_error":
         return None  # handled by probe findings
 
+    if ep_result.breaking_reason == "external_dependency_timeout":
+        path_desc = f"Your {label} endpoint" if path != "/" else "Your application"
+        return Finding(
+            title=f"Endpoint {label} skipped — slow response",
+            severity="info",
+            category="http_load_testing",
+            description=(
+                f"{path_desc} took over 10 seconds to respond even at "
+                f"1 concurrent connection. This usually means it depends "
+                f"on an external service (payment API, database, third-party "
+                f"API) that isn't configured or is unreachable in this "
+                f"environment. No further load testing was attempted for "
+                f"this endpoint."
+            ),
+            affected_dependencies=list(deps),
+        )
+
     if ep_result.breaking_reason in ("error_rate", "response_time"):
         bp = ep_result.breaking_point
         severity = "critical"
@@ -1034,7 +1086,7 @@ def run_http_testing_phase(
     http_timeout = (
         constraints.timeout_per_scenario
         if constraints and constraints.timeout_per_scenario
-        else None
+        else _DEFAULT_HTTP_BUDGET
     )
     load_result = run_http_load_test(
         session=session,

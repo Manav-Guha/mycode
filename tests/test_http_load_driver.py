@@ -1469,6 +1469,161 @@ class TestHttpTimeoutBudget:
             assert call_kwargs.kwargs.get("deadline") is not None
 
 
+class TestDefaultHttpBudget:
+    """Tests for default HTTP budget and per-endpoint budget."""
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_default_budget_when_no_constraints(self, mock_detect, mock_load):
+        """run_http_testing_phase applies 120s default budget when constraints is None."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="flask", entry_file="app.py",
+        )
+        mock_load.return_value = HttpLoadResult(framework="flask")
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        session.js_deps_installed = None
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+
+        run_http_testing_phase(session, ingestion, execution, "python")
+
+        assert mock_load.called
+        call_kwargs = mock_load.call_args
+        assert call_kwargs.kwargs.get("timeout") == 120
+
+    @patch("mycode.http_load_driver.run_http_load_test")
+    @patch("mycode.http_load_driver.detect_framework_entry")
+    def test_constraint_budget_overrides_default(self, mock_detect, mock_load):
+        """Explicit timeout_per_scenario overrides the 120s default."""
+        mock_detect.return_value = FrameworkDetection(
+            framework="flask", entry_file="app.py",
+        )
+        mock_load.return_value = HttpLoadResult(framework="flask")
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        session.js_deps_installed = None
+        ingestion = IngestionResult(project_path="/tmp/proj")
+        execution = ExecutionEngineResult()
+        constraints = OperationalConstraints(timeout_per_scenario=300)
+
+        run_http_testing_phase(
+            session, ingestion, execution, "python", constraints=constraints,
+        )
+
+        assert mock_load.called
+        call_kwargs = mock_load.call_args
+        assert call_kwargs.kwargs.get("timeout") == 300
+
+
+class TestPerEndpointBudget:
+    """Tests for per-endpoint budget distribution."""
+
+    def test_per_endpoint_deadline_calculated(self):
+        """Each endpoint gets a fair share of remaining budget, recalculated per iteration."""
+        import time
+        from mycode.http_load_driver import run_http_load_test
+
+        session = MagicMock()
+        session.project_copy_dir = Path("/tmp/proj")
+        detection = MagicMock(framework="flask", entry_file="app.py")
+        ingestion = MagicMock(project_path="/tmp/proj")
+
+        with patch("mycode.http_load_driver.start_server") as mock_start, \
+             patch("mycode.http_load_driver.discover_endpoints"), \
+             patch("mycode.http_load_driver.generate_requests") as mock_gen, \
+             patch("mycode.http_load_driver.probe_endpoints") as mock_probe, \
+             patch("mycode.http_load_driver.drive_endpoint") as mock_drive, \
+             patch("mycode.http_load_driver.stop_server"):
+
+            mock_server = MagicMock()
+            mock_server.port = 8000
+            mock_server.startup_time = 1.0
+            mock_server.process.poll.return_value = None
+            mock_start.return_value = MagicMock(
+                success=True, server=mock_server,
+            )
+            reqs = [
+                HttpTestRequest(method="GET", url=f"http://localhost:8000/ep{i}", description=f"GET /ep{i}")
+                for i in range(4)
+            ]
+            mock_gen.return_value = reqs
+            mock_probe.return_value = [MagicMock(testable=True, is_finding=False)] * 4
+            mock_drive.return_value = EndpointLoadResult(endpoint=reqs[0])
+
+            run_http_load_test(
+                session=session, detection=detection,
+                ingestion=ingestion, timeout=60,
+            )
+
+            # Should have been called 4 times with per-endpoint deadlines
+            assert mock_drive.call_count == 4
+            # Each call should have a deadline kwarg
+            for call in mock_drive.call_args_list:
+                assert call.kwargs.get("deadline") is not None
+
+
+class TestEarlyAbortSlowBaseline:
+    """Tests for early abort of slow endpoints at concurrency=1."""
+
+    @patch("mycode.http_load_driver.drive_load_level")
+    def test_slow_baseline_aborts(self, mock_drive):
+        """Endpoint taking >10s at concurrency=1 is skipped."""
+        mock_drive.return_value = _make_load_level(
+            concurrency=1, median_ms=12000,
+        )
+
+        server = MagicMock()
+        server.process.poll.return_value = None
+        server.process.pid = 123
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/checkout")
+        result = drive_endpoint(req, [1, 5, 10, 25], server)
+
+        assert result.breaking_point == 1
+        assert result.breaking_reason == "external_dependency_timeout"
+        assert len(result.levels) == 1
+        # Should NOT have tested higher concurrency levels
+        assert mock_drive.call_count == 1
+
+    @patch("mycode.http_load_driver.drive_load_level")
+    def test_fast_baseline_not_aborted(self, mock_drive):
+        """Endpoint responding in 50ms at concurrency=1 continues normally."""
+        mock_drive.side_effect = [
+            _make_load_level(concurrency=c, median_ms=50)
+            for c in [1, 5, 10]
+        ]
+
+        server = MagicMock()
+        server.process.poll.return_value = None
+        server.process.pid = 123
+
+        req = HttpTestRequest(method="GET", url="http://localhost:8000/api/test")
+        result = drive_endpoint(req, [1, 5, 10], server)
+
+        assert result.breaking_reason == ""
+        assert len(result.levels) == 3
+
+    def test_external_dep_timeout_generates_info_finding(self):
+        """Skipped endpoint produces an INFO finding with explanatory description."""
+        ep = EndpointLoadResult(
+            endpoint=HttpTestRequest(
+                method="GET", url="http://localhost:8000/checkout",
+            ),
+            levels=[_make_load_level(concurrency=1, median_ms=12000)],
+            breaking_point=1,
+            breaking_reason="external_dependency_timeout",
+        )
+        finding = _endpoint_to_finding(ep, ["flask"], user_scale=None)
+        assert finding is not None
+        assert finding.severity == "info"
+        assert "10 seconds" in finding.description
+        assert "external service" in finding.description
+        assert "/checkout" in finding.title
+
+
 # ── npm Install Failure Blocks HTTP Testing ──
 
 
