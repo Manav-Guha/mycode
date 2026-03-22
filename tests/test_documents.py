@@ -1730,6 +1730,99 @@ class TestConsequenceForUser:
         assert _extract_user_scale_from_desc("No user info here.") is None
 
 
+# ── Architecture-aware remediation ──
+
+
+class TestBuildRemediation:
+    """Verify _build_remediation returns framework-specific fix guidance."""
+
+    def test_fastapi_concurrency(self):
+        """FastAPI + concurrency_failure → FastAPI-specific thread pool advice."""
+        from mycode.documents import generate_finding_prompt
+        f = Finding(
+            title="Endpoint /api/preflight degrades under concurrent load",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["fastapi", "uvicorn"],
+        )
+        f.failure_domain = "concurrency_failure"
+        f._load_level = 50
+        prompt = generate_finding_prompt(f)
+        assert "ThreadPoolExecutor" in prompt
+        assert "50 concurrent" in prompt
+        assert "async" in prompt
+
+    def test_streamlit_memory(self):
+        """Streamlit + memory_accumulation → Streamlit-specific cache advice."""
+        from mycode.documents import generate_finding_prompt
+        f = Finding(
+            title="Memory baseline limits concurrent capacity",
+            severity="warning",
+            category="http_load_testing",
+            description="Your application uses 65MB per process.",
+            affected_dependencies=["streamlit"],
+        )
+        f.failure_pattern = "memory_accumulation_over_sessions"
+        prompt = generate_finding_prompt(f)
+        assert "@st.cache_data" in prompt
+        assert "65MB" in prompt
+
+    def test_flask_http_load(self):
+        """Flask + http_load_testing → Flask-specific gunicorn advice."""
+        from mycode.documents import generate_finding_prompt
+        f = Finding(
+            title="Application degrades under concurrent load",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+        )
+        f._load_level = 25
+        prompt = generate_finding_prompt(f)
+        assert "gunicorn" in prompt
+        assert "synchronously" in prompt
+        assert "25 concurrent" in prompt
+
+    def test_memory_baseline_any_framework(self):
+        """Any framework + memory baseline → lazy import advice."""
+        from mycode.documents import generate_finding_prompt
+        f = Finding(
+            title="Memory baseline limits concurrent capacity",
+            severity="warning",
+            category="http_load_testing",
+            description="Your application uses 54MB per process.",
+            affected_dependencies=["fastapi", "uvicorn"],
+        )
+        prompt = generate_finding_prompt(f)
+        assert "lazy imports" in prompt
+        assert "54MB" in prompt
+        assert "not a memory leak" in prompt
+
+    def test_data_volume_scaling(self):
+        """data_volume_scaling category → chunked processing advice."""
+        from mycode.documents import generate_finding_prompt
+        f = Finding(
+            title="Pandas data scaling",
+            severity="warning",
+            category="data_volume_scaling",
+            affected_dependencies=["pandas"],
+        )
+        prompt = generate_finding_prompt(f)
+        assert "chunked" in prompt or "streaming" in prompt
+        assert "pagination" in prompt
+
+    def test_unknown_framework_falls_back(self):
+        """Unknown framework + HTTP → generic fallback."""
+        from mycode.documents import generate_finding_prompt
+        f = Finding(
+            title="Some HTTP issue",
+            severity="warning",
+            category="http_load_testing",
+            affected_dependencies=["unknown_dep"],
+        )
+        prompt = generate_finding_prompt(f)
+        assert "concurrent HTTP load" in prompt
+
+
 # ── _finding_severity_for_dp metric-aware matching ──
 
 

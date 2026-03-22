@@ -1005,8 +1005,8 @@ def generate_finding_prompt(f: Finding) -> str:
     if f._load_level is not None:
         parts.append(f"Failed at load level: {f._load_level}")
 
-    # Fix objective — single actionable sentence
-    fix_goal = _fix_objective(f)
+    # Fix objective — architecture-aware remediation
+    fix_goal = _build_remediation(f)
     parts.append(f"Fix: {fix_goal}")
 
     parts.append("See attached JSON for full diagnostic data.")
@@ -1048,6 +1048,171 @@ _FIX_OBJECTIVES: dict[str, str] = {
 
 def _fix_objective(f: Finding) -> str:
     """Return a one-sentence fix goal based on the finding's category."""
+    return _FIX_OBJECTIVES.get(
+        f.category,
+        "resolve the issue described above so the function behaves "
+        "correctly under the tested conditions.",
+    )
+
+
+# ── Architecture-aware remediation ──
+
+
+def _detect_framework(deps: list[str]) -> str:
+    """Derive the server framework from a finding's affected_dependencies."""
+    for dep in deps:
+        d = dep.lower()
+        if d in ("fastapi", "flask", "streamlit", "django", "express"):
+            return d
+    # uvicorn implies FastAPI
+    if any(d.lower() == "uvicorn" for d in deps):
+        return "fastapi"
+    return ""
+
+
+def _extract_mb_from_text(text: str) -> str:
+    """Extract a memory value like '54MB' or '65MB' from description text."""
+    import re
+    m = re.search(r"(\d+)\s*MB", text, re.IGNORECASE)
+    return m.group(1) if m else ""
+
+
+def _build_remediation(f: Finding) -> str:
+    """Architecture-aware fix guidance based on finding data.
+
+    Derives framework from affected_dependencies, then matches against
+    (framework + failure_pattern/failure_domain/category) for specific
+    remediation. Falls back to category-level guidance.
+    """
+    framework = _detect_framework(f.affected_dependencies)
+    title_lower = f.title.lower()
+    desc_lower = f.description.lower()
+
+    # Load level: use field if set, else extract from description
+    load = str(f._load_level) if f._load_level else "high"
+
+    # Memory: use field if set, else extract from description text
+    if f._peak_memory_mb and f._peak_memory_mb > 0:
+        mem = f"{f._peak_memory_mb:.0f}"
+    else:
+        mem = _extract_mb_from_text(f.description) or "high"
+
+    # Endpoint label from title
+    endpoint = ""
+    if "endpoint" in title_lower:
+        # "Endpoint /checkout degrades..." → "/checkout"
+        parts = f.title.split("Endpoint ", 1)
+        if len(parts) == 2:
+            endpoint = parts[1].split(" ")[0]
+    if not endpoint:
+        endpoint = f.source_function or "endpoint"
+
+    # ── Specific matches (most specific first) ──
+
+    # 1. FastAPI + concurrency failure
+    if (
+        framework == "fastapi"
+        and f.category == "http_load_testing"
+        and f.failure_domain == "concurrency_failure"
+    ):
+        return (
+            f"your FastAPI endpoint delegates blocking work to the default "
+            f"thread pool. At {load} concurrent requests, the pool saturates "
+            f"and requests queue. Create a dedicated ThreadPoolExecutor sized "
+            f"for your expected concurrency, or convert blocking operations "
+            f"to native async (async def + await)."
+        )
+
+    # 2. FastAPI + startup failure
+    if (
+        framework == "fastapi"
+        and f.category == "http_load_testing"
+        and "could not start" in title_lower
+    ):
+        return (
+            "your FastAPI app failed to start because a required dependency "
+            "is missing. Check that all imports in your main app module are "
+            "installed. Add missing packages to requirements.txt or "
+            "pyproject.toml dependencies (not just dev/optional groups)."
+        )
+
+    # 3. Streamlit + memory per session
+    if (
+        framework == "streamlit"
+        and f.failure_pattern == "memory_accumulation_over_sessions"
+    ):
+        return (
+            f"Streamlit creates a new Python process per user session. Your "
+            f"app uses {mem}MB per session. At {load} concurrent users, "
+            f"you'll exhaust server memory. Cache shared data with "
+            f"@st.cache_data, move heavy computation to a background "
+            f"service, and avoid loading large models/datasets at module "
+            f"level."
+        )
+
+    # 4. Streamlit + response time / concurrency degradation
+    if (
+        framework == "streamlit"
+        and f.category == "http_load_testing"
+        and f.failure_domain in ("concurrency_failure", "scaling_collapse")
+    ):
+        return (
+            "Streamlit reruns the entire script on each user interaction. "
+            "Under concurrent load, this compounds because each session "
+            "triggers a full re-execution. Use @st.cache_data for expensive "
+            "computations, @st.cache_resource for database connections and "
+            "ML models, and move heavy initialization outside the main "
+            "script flow."
+        )
+
+    # 5. Flask + concurrency / blocking
+    if (
+        framework == "flask"
+        and f.category in (
+            "http_load_testing", "blocking_io", "concurrent_execution",
+        )
+    ):
+        return (
+            f"Flask handles requests synchronously — each request blocks a "
+            f"worker thread. At {load} concurrent requests, all threads are "
+            f"occupied and new requests queue. Use database connection "
+            f"pooling (SQLAlchemy pool_size), add gunicorn with multiple "
+            f"workers (gunicorn -w 4), or migrate to an async framework "
+            f"for I/O-heavy endpoints."
+        )
+
+    # 6. Any framework + memory baseline too high
+    if "memory baseline" in title_lower:
+        return (
+            f"your application uses {mem}MB per process. This is a baseline "
+            f"issue, not a memory leak — memory stays flat under load. Use "
+            f"lazy imports for heavy modules (import inside functions, not "
+            f"at module level), defer loading large models/data until first "
+            f"request, or increase server memory."
+        )
+
+    # 7. Any framework + external dependency timeout
+    if "skipped" in title_lower and "slow response" in title_lower:
+        return (
+            f"your {endpoint} took over 10 seconds at 1 concurrent "
+            f"connection — it's waiting on an external service that isn't "
+            f"configured in the test environment. In production: ensure "
+            f"the service is available, add timeout handling (e.g. "
+            f"requests.get(url, timeout=5)), and return a graceful error "
+            f"when the service is down."
+        )
+
+    # 8. Any framework + data volume scaling
+    if f.category == "data_volume_scaling":
+        return (
+            "your function's execution time grows with input size. At "
+            "large inputs, this becomes the bottleneck. Use chunked or "
+            "streaming processing instead of loading all data into memory, "
+            "add pagination for large result sets, and consider caching "
+            "intermediate results for repeated queries."
+        )
+
+    # ── Category-level fallback ──
     return _FIX_OBJECTIVES.get(
         f.category,
         "resolve the issue described above so the function behaves "
