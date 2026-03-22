@@ -833,15 +833,20 @@ function _findingSeverityForDp(d, findings) {
 }
 
 function verdictForCurve(d, findings) {
+    const steps = d.steps || [];
+    if (steps.length === 0) return "";
+
+    // Flat-curve override: <15% growth with ≥2 steps → Stable regardless of findings
+    const firstVal = stepValue(steps[0]);
+    const lastVal = stepValue(steps[steps.length - 1]);
+    if (steps.length >= 2 && firstVal > 0 && lastVal / firstVal < 1.15) return "Stable";
+
     // Finding-based verdict takes precedence
     const findingSev = _findingSeverityForDp(d, findings);
     if (findingSev === "critical") return "Critical \u2014 see above";
     if (findingSev === "warning") return "Warning \u2014 see above";
 
     // Threshold-based fallback
-    const steps = d.steps || [];
-    if (steps.length === 0) return "";
-    const lastVal = stepValue(steps[steps.length - 1]) || 0;
     const metric = (d.metric || "").toLowerCase();
     const isTime = metric.includes("time");
     const isMemory = metric.includes("memory");
@@ -872,7 +877,7 @@ function verdictColour(verdict) {
     const v = verdict.toLowerCase();
     if (v.includes("critical") || v.includes("unresponsive") || v.includes("very heavy")) return "var(--red)";
     if (v.includes("warning") || v.includes("slow") || v.includes("heavy") || v.includes("noticeable") || v.includes("errors")) return "var(--amber)";
-    if (v.includes("no issues") || v.includes("fine") || v.includes("no errors")) return "var(--green)";
+    if (v.includes("no issues") || v.includes("fine") || v.includes("no errors") || v.includes("stable")) return "var(--green)";
     return "var(--text-secondary)";
 }
 

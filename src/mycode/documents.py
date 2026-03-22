@@ -145,7 +145,21 @@ def _verdict(
     threshold-based default — a 3ms → 29ms curve might look fine by
     absolute thresholds but the report may contain a WARNING for 9x
     degradation.
+
+    However, if the curve itself is nearly flat (<15% growth from first
+    to last step), the verdict is "Stable" regardless of matched findings.
+    A finding about absolute levels (e.g. high baseline memory) is valid,
+    but the curve shows the problem is static, not load-dependent.
     """
+    if not dp.steps:
+        return ""
+
+    # ── Flat-curve override (need ≥2 steps to assess a trend) ──
+    first_val = dp.steps[0][1]
+    last_val = dp.steps[-1][1]
+    if len(dp.steps) >= 2 and first_val > 0 and last_val / first_val < 1.15:
+        return "Stable"
+
     # ── Finding-based verdict (takes precedence) ──
     if findings:
         severity = _finding_severity_for_dp(dp, findings)
@@ -155,8 +169,6 @@ def _verdict(
             return "Warning -- see above"
 
     # ── Threshold-based verdict ──
-    if not dp.steps:
-        return ""
     last_val = dp.steps[-1][1]
     is_time = dp.metric in ("execution_time_ms", "response_time_ms")
     is_memory = dp.metric in ("memory_peak_mb", "memory_mb", "memory_growth_mb")

@@ -1527,6 +1527,71 @@ class TestVerdictFindingCrossRef:
         assert _verdict_color("Critical -- see above") == _RED
         assert _verdict_color("Warning -- see above") == _AMBER_TEXT
 
+    def test_flat_curve_overrides_critical_finding(self):
+        """A near-flat curve (<15% growth) returns 'Stable' despite CRITICAL finding."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="http_memory_profiling",
+            metric="memory_mb",
+            steps=[("concurrent_1", 65.0), ("concurrent_1500", 70.0)],
+        )
+        findings = [
+            Finding(
+                title="Memory baseline limits concurrent capacity",
+                severity="critical",
+                category="http_load_testing",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert result == "Stable"
+
+    def test_growing_curve_still_gets_finding_severity(self):
+        """A curve with significant growth (>15%) still gets finding severity."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="http_memory_profiling",
+            metric="memory_mb",
+            steps=[("concurrent_1", 65.0), ("concurrent_1500", 130.0)],
+        )
+        findings = [
+            Finding(
+                title="Memory baseline limits concurrent capacity",
+                severity="critical",
+                category="http_load_testing",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert "Critical" in result
+
+    def test_flat_time_curve_stable(self):
+        """A near-flat time curve returns 'Stable' despite WARNING finding."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="flask_concurrent_request_load",
+            metric="execution_time_ms",
+            steps=[("concurrent_10", 50.0), ("concurrent_100", 55.0)],
+        )
+        findings = [
+            Finding(
+                title="Flask concurrent request degradation",
+                severity="warning",
+                category="concurrent_execution",
+            ),
+        ]
+        result = _verdict(dp, findings)
+        assert result == "Stable"
+
+    def test_zero_baseline_skips_flat_check(self):
+        """When first value is 0, flat-curve check is skipped (can't compute ratio)."""
+        from mycode.documents import _verdict
+        dp = DegradationPoint(
+            scenario_name="http_error_rate",
+            metric="error_count",
+            steps=[("concurrent_1", 0.0), ("concurrent_100", 5.0)],
+        )
+        result = _verdict(dp, [])
+        assert result != "Stable"
+
 
 class TestConsequenceForUser:
     """Tests for _consequence_for_user consequence text generation."""
