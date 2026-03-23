@@ -4,12 +4,7 @@ Logs every web job to a local SQLite database for usage tracking.
 The database is created on first access — no migration framework needed.
 
 Configuration:
-    MYCODE_DB_PATH: Path to SQLite database file.
-        Default: /data/mycode_analytics.db
-        NOTE: On Railway, this requires a persistent volume mounted at /data/.
-        Without a volume, the database resets on every deploy. Attach a
-        Railway volume at /data/ before deploying, or set this env var to
-        a path on an attached volume.
+    MYCODE_DB_PATH: Path to SQLite database file (default /data/mycode_analytics.db).
 """
 
 from __future__ import annotations
@@ -26,6 +21,10 @@ logger = logging.getLogger(__name__)
 VALID_SOURCES = frozenset({"internal", "hn", "public", "cli", "test_group"})
 _INTERNAL_SOURCES = frozenset({"internal", "test_group"})
 
+# DEPLOYMENT NOTE: Railway ephemeral storage resets on every deploy.
+# A persistent volume must be mounted at /data/ for analytics data to survive deployments.
+# Railway dashboard: Service → Volumes → Add Volume → mount path /data/, size 1GB.
+# Cost: ~$0.25/month.
 _DB_PATH = os.environ.get("MYCODE_DB_PATH", "/data/mycode_analytics.db")
 
 _CREATE_TABLE = """\
