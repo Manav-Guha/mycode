@@ -21,6 +21,7 @@ from mycode.scenario import LLMConfig
 from mycode.session import SessionManager
 from mycode.viability import ViabilityResult, run_viability_gate
 
+from mycode.web.analytics import log_download, log_job_started
 from mycode.web.jobs import Job, store, MAX_CONCURRENT_JOBS
 from mycode.web.project_fetch import (
     FetchError,
@@ -72,6 +73,7 @@ def handle_preflight(
     github_url: str = "",
     file_obj: Optional[BytesIO] = None,
     filename: str = "",
+    source: str = "public",
 ) -> PreflightResponse:
     """Run preflight diagnostics (stages 1-4.5).
 
@@ -79,6 +81,7 @@ def handle_preflight(
     Returns structured preflight data for the frontend.
     """
     job = store.create()
+    job.source = source
     warnings: list[str] = []
 
     try:
@@ -88,13 +91,18 @@ def handle_preflight(
 
         if github_url:
             job.github_url = github_url
+            repo_url = github_url.strip()
             project_path = clone_github_repo(github_url, temp_dir / "project")
         elif file_obj is not None:
+            repo_url = "zip_upload"
             project_path = extract_zip(file_obj, temp_dir / "project")
         else:
             return PreflightResponse(
                 error="Provide either a GitHub URL or upload a zip file."
             )
+
+        # Log job start to analytics
+        log_job_started(job.id, source, repo_url)
 
         # Stage 1: Language detection
         language = detect_language(project_path)
@@ -588,6 +596,7 @@ def handle_download_pdf(job_id: str, doc_type: str) -> tuple[bytes, str, str]:
     if not pdf_bytes:
         return b"", "", "PDF not available — fpdf2 may not be installed."
 
+    log_download(job_id, "pdf")
     return pdf_bytes, filename, ""
 
 

@@ -27,6 +27,7 @@ from mycode.pipeline import (
 from mycode.report import ReportGenerator
 from mycode.scenario import LLMConfig, ScenarioGenerator
 from mycode.session import SessionManager
+from mycode.web.analytics import log_job_completed
 from mycode.web.jobs import Job
 
 logger = logging.getLogger(__name__)
@@ -177,8 +178,33 @@ def run_analysis(job: Job) -> None:
         job.progress_stage = "done"
         logger.info("Job %s completed successfully", job.id)
 
+        # Log completion to analytics
+        _log_completion(job, "completed")
+
     except Exception as exc:
         job.status = "failed"
         job.error = str(exc)
         job.progress_stage = "failed"
         logger.exception("Job %s failed: %s", job.id, exc)
+
+        # Detect timeout vs generic failure
+        error_lower = str(exc).lower()
+        status = "timeout" if ("timeout" in error_lower or "timed out" in error_lower or "budget_exceeded" in error_lower) else "failed"
+        _log_completion(job, status)
+
+
+def _log_completion(job: Job, status: str) -> None:
+    """Extract finding counts from job result and log to analytics."""
+    critical = warning = info = scenarios_run = 0
+    if job.result and job.result.report:
+        report = job.result.report
+        scenarios_run = report.scenarios_run or 0
+        for f in getattr(report, "findings", []):
+            sev = getattr(f, "severity", "").lower()
+            if sev == "critical":
+                critical += 1
+            elif sev == "warning":
+                warning += 1
+            elif sev == "info":
+                info += 1
+    log_job_completed(job.id, status, critical, warning, info, scenarios_run)

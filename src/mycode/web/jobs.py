@@ -63,6 +63,7 @@ class Job:
     created_at: float = 0.0
     project_path: Optional[Path] = None
     github_url: str = ""
+    source: str = "public"
     language: str = ""
     project_name: str = ""
 

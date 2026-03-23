@@ -10,6 +10,12 @@ let pollTimer = null;
 let elapsedTimer = null;
 let elapsedStart = null;
 
+// Source tagging — read from URL query string (e.g. ?source=hn).
+// When R shares the link with testers, she should use:
+//   https://app.mycode-ai.vercel.app/?source=test_group
+// For HN launch: https://app.mycode-ai.vercel.app/?source=hn
+const _urlSource = new URLSearchParams(window.location.search).get("source") || "public";
+
 // ── Helpers ──
 
 function $(id) { return document.getElementById(id); }
@@ -94,6 +100,7 @@ async function submitUrl() {
     $("go-btn").textContent = "...";
     const fd = new FormData();
     fd.append("github_url", url);
+    fd.append("source", _urlSource);
     await runPreflight(fd);
 }
 
@@ -103,6 +110,7 @@ async function submitFile(input) {
     $("upload-label").textContent = file.name;
     const fd = new FormData();
     fd.append("file", file);
+    fd.append("source", _urlSource);
     await runPreflight(fd);
 }
 
@@ -1140,6 +1148,7 @@ function downloadJSON() {
     if (!data) return;
     const blob = new Blob([data], { type: "application/json" });
     downloadBlob(blob, "mycode-report.json");
+    _logDownload("json");
 }
 
 async function downloadUnderstanding() {
@@ -1151,6 +1160,7 @@ async function downloadUnderstanding() {
             if (res.ok) {
                 const blob = await res.blob();
                 downloadBlob(blob, "mycode-understanding-your-results.pdf");
+                _logDownload("pdf");
                 return;
             }
         } catch (err) {
@@ -1172,5 +1182,13 @@ function downloadBlob(blob, filename) {
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+}
+
+function _logDownload(type) {
+    // Fire-and-forget analytics ping — don't block the download
+    if (!currentJobId) return;
+    const fd = new FormData();
+    fd.append("type", type);
+    fetch(`${API}/api/report/${currentJobId}/download-log`, { method: "POST", body: fd }).catch(() => {});
 }
 

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Check for FastAPI availability before importing
 try:
-    from fastapi import FastAPI, File, Form, UploadFile
+    from fastapi import FastAPI, File, Form, Query, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
 except ImportError:
@@ -35,6 +35,7 @@ except ImportError:
     )
 
 from mycode.web.jobs import store, MAX_CONCURRENT_JOBS
+from mycode.web.analytics import get_admin_stats, log_download, validate_source
 from mycode.web.routes import (
     handle_analyze,
     handle_converse,
@@ -123,6 +124,7 @@ app.add_middleware(
 @app.post("/api/preflight")
 async def preflight(
     github_url: str = Form(default=""),
+    source: str = Form(default="public"),
     file: UploadFile | None = File(default=None),
 ):
     """Run preflight diagnostics (stages 1-4.5)."""
@@ -147,8 +149,9 @@ async def preflight(
         file_obj = BytesIO(content)
         filename = file.filename or ""
 
+    validated_source = validate_source(source)
     result = await asyncio.to_thread(
-        handle_preflight, github_url, file_obj, filename,
+        handle_preflight, github_url, file_obj, filename, validated_source,
     )
     return JSONResponse(content=_dataclass_to_dict(result))
 
@@ -202,6 +205,24 @@ async def download_understanding(job_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.post("/api/report/{job_id}/download-log")
+async def download_log(job_id: str, type: str = Form(default="")):
+    """Log a PDF or JSON download event for analytics."""
+    if type in ("pdf", "json"):
+        log_download(job_id, type)
+    return JSONResponse(content={"ok": True})
+
+
+@app.get("/api/admin/stats")
+async def admin_stats(key: str = Query(default="")):
+    """Return aggregate analytics. Requires MYCODE_ADMIN_KEY."""
+    admin_key = os.environ.get("MYCODE_ADMIN_KEY", "")
+    if not admin_key or key != admin_key:
+        return JSONResponse(content={"error": "Forbidden"}, status_code=403)
+    stats = await asyncio.to_thread(get_admin_stats)
+    return JSONResponse(content=stats)
 
 
 @app.get("/api/health")
