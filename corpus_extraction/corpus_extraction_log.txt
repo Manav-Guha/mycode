@@ -1,59 +1,64 @@
 corpus_extract.py — Extraction Log
 ==================================================
-Total reports read:      171
+Directories scanned:     4
+  - /Users/Manav/Desktop/mycode/results
+  - /Users/Manav/Desktop/mycode/corpus_results
+  - /Users/Manav/Desktop/mycode/corpus_results_retry
+  - /Users/Manav/Desktop/mycode/corpus_results_timeout
+Total reports read:      2081
 Parse errors (skipped):  0
-Total findings extracted: 1563
-Unique patterns found:   148
-Dedup rate:              90.5%
+Total findings extracted: 4056
+Unique patterns found:   271
+Dedup rate:              93.3%
 
 Top 10 patterns by frequency:
 --------------------------------------------------
-   1. [ 154 repos] 47 unrecognized dependencies
-      category=  domain=unclassified
-      severity: info=154
-      deps: @ai-sdk/google, @aws-sdk/client-s3, @aws-sdk/s3-request-presigner, @clerk/clerk-react, @clerk/nextjs
+   1. [1218 repos] Application server could not start
+      category=http_load_testing  domain=unclassified
+      severity: critical=1218
+      deps: express, fastapi, flask, nextjs, npm-start
 
-   2. [ 133 repos] Failure indicators triggered: streamlit_cache_memory_growth
+   2. [ 321 repos] Application handled HTTP load without issues
+      category=http_load_testing  domain=scaling_collapse
+      severity: info=321
+      deps: express, fastapi, flask, npm-start, react
+
+   3. [ 296 repos] Cache Memory Growth (streamlit)
       category=memory_profiling  domain=resource_exhaustion
-      severity: warning=133
+      severity: warning=296
       deps: streamlit
 
-   3. [ 130 repos] 13 missing dependencies
+   4. [ 283 repos] Data Volume Scaling (pandas)
+      category=data_volume_scaling  domain=scaling_collapse
+      severity: critical=251, warning=62
+      deps: pandas
+
+   5. [ 190 repos] 4 missing dependencies
       category=  domain=unclassified
-      severity: warning=130
-      deps: @codemirror/autocomplete, @codemirror/commands, @codemirror/lang-css, @codemirror/lang-html, @codemirror/lang-javascript
+      severity: warning=190
+      deps: ```txt, absl-py, accelerate, aequitas, aif360
 
-   4. [  83 repos] Resource limit hit: pandas_data_volume_scaling
+   6. [ 142 repos] Array Size Scaling (numpy)
       category=data_volume_scaling  domain=scaling_collapse
-      severity: critical=75, warning=41
-      deps: pandas
-
-   5. [  63 repos] Scenario failed: pandas_merge_memory_stress
-      category=data_volume_scaling  domain=resource_exhaustion
-      severity: critical=53, warning=10
-      deps: pandas
-
-   6. [  61 repos] Scenario failed: pandas_iterrows_vs_vectorized
-      category=data_volume_scaling  domain=scaling_collapse
-      severity: critical=61
-      deps: pandas
-
-   7. [  61 repos] Scenario failed: pandas_memory_profiling_over_time
-      category=memory_profiling  domain=resource_exhaustion
-      severity: critical=49, warning=15
-      deps: pandas
-
-   8. [  60 repos] Scenario failed: pandas_edge_case_dtypes
-      category=edge_case_input  domain=input_handling_failure
-      severity: critical=51, warning=17
-      deps: pandas
-
-   9. [  54 repos] Scenario failed: numpy_array_size_scaling
-      category=data_volume_scaling  domain=scaling_collapse
-      severity: critical=83, warning=29
+      severity: critical=152, warning=38
       deps: numpy
 
-  10. [  43 repos] Scenario failed: numpy_repeated_allocation_memory
-      category=memory_profiling  domain=resource_exhaustion
-      severity: critical=34, warning=20
-      deps: numpy
+   7. [ 102 repos] 1 missing dependency
+      category=  domain=unclassified
+      severity: warning=102
+      deps: ```txt, arize-otel, asyncpg, bitsandbytes, crewai
+
+   8. [  92 repos] 9 unrecognized dependencies
+      category=  domain=unclassified
+      severity: info=92
+      deps: @modelcontextprotocol/sdk, absl-py, aiohappyeyeballs, aiohttp, aiosignal
+
+   9. [  82 repos] Response time degradation on your application
+      category=http_load_testing  domain=unclassified
+      severity: warning=82
+      deps: fastapi, flask, nextjs, streamlit, uvicorn
+
+  10. [  75 repos] General Stress Test (unrecognized dependencies)
+      category=data_volume_scaling  domain=scaling_collapse
+      severity: critical=44, warning=33
+      deps: 

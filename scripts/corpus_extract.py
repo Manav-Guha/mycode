@@ -6,6 +6,7 @@ and outputs ranked pattern data for library enrichment.
 
 Usage:
     python scripts/corpus_extract.py --reports-dir corpus_results/ --output-dir corpus_extraction/
+    python scripts/corpus_extract.py --reports-dir results/ --reports-dir corpus_results/ --output-dir corpus_extraction/
 """
 
 import argparse
@@ -108,16 +109,25 @@ def extract_findings(report_path: Path):
         }
 
 
-def discover_reports(reports_dir: Path):
-    """Yield Path objects for every mycode-report.json under reports_dir/*/."""
-    if not reports_dir.is_dir():
-        print(f"ERROR: reports directory not found: {reports_dir}")
-        sys.exit(1)
-    for entry in sorted(reports_dir.iterdir()):
-        if entry.is_dir():
-            rpt = entry / "mycode-report.json"
-            if rpt.is_file():
-                yield rpt
+def discover_reports(reports_dirs: list[Path]):
+    """Yield (Path, repo_folder) for every mycode-report.json, deduped by folder name.
+
+    If the same repo folder appears in multiple directories, the first occurrence wins.
+    """
+    seen_repos = set()
+    for reports_dir in reports_dirs:
+        if not reports_dir.is_dir():
+            print(f"WARNING: reports directory not found, skipping: {reports_dir}")
+            continue
+        for entry in sorted(reports_dir.iterdir()):
+            if entry.is_dir():
+                repo_folder = entry.name
+                if repo_folder in seen_repos:
+                    continue
+                rpt = entry / "mycode-report.json"
+                if rpt.is_file():
+                    seen_repos.add(repo_folder)
+                    yield rpt
 
 
 def get_profiled_deps(project_root: Path) -> set:
@@ -141,8 +151,8 @@ def get_profiled_deps(project_root: Path) -> set:
 # Deduplication & aggregation
 # ---------------------------------------------------------------------------
 
-def aggregate_patterns(reports_dir: Path):
-    """Walk all reports, extract findings, deduplicate, and aggregate."""
+def aggregate_patterns(reports_dirs: list[Path]):
+    """Walk all reports across directories, extract findings, deduplicate, and aggregate."""
     total_reports = 0
     total_findings = 0
     parse_errors = 0
@@ -151,7 +161,7 @@ def aggregate_patterns(reports_dir: Path):
     # pattern_key -> aggregated data
     patterns = {}
 
-    for rpt_path in discover_reports(reports_dir):
+    for rpt_path in discover_reports(reports_dirs):
         total_reports += 1
         repo_had_findings = False
 
@@ -348,10 +358,15 @@ def write_excel(ranked, profiled_deps: set, output_dir: Path):
 # Output: Log
 # ---------------------------------------------------------------------------
 
-def write_log(ranked, stats, output_dir: Path):
+def write_log(ranked, stats, reports_dirs: list[Path], output_dir: Path):
     lines = [
         "corpus_extract.py — Extraction Log",
         "=" * 50,
+        f"Directories scanned:     {len(reports_dirs)}",
+    ]
+    for d in reports_dirs:
+        lines.append(f"  - {d}")
+    lines += [
         f"Total reports read:      {stats['total_reports']}",
         f"Parse errors (skipped):  {stats['parse_errors']}",
         f"Total findings extracted: {stats['total_findings']}",
@@ -386,17 +401,20 @@ def write_log(ranked, stats, output_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Extract failure patterns from corpus reports")
-    parser.add_argument("--reports-dir", default="corpus_results/",
-                        help="Directory containing repo subdirectories with mycode-report.json")
+    parser.add_argument("--reports-dir", action="append", default=None,
+                        help="Directory containing repo subdirectories with mycode-report.json (repeatable)")
     parser.add_argument("--output-dir", default="corpus_extraction/",
                         help="Directory for output files")
     args = parser.parse_args()
 
-    reports_dir = Path(args.reports_dir).resolve()
+    raw_dirs = args.reports_dir or ["corpus_results/"]
+    reports_dirs = [Path(d).resolve() for d in raw_dirs]
     output_dir = Path(args.output_dir).resolve()
     project_root = Path(__file__).resolve().parent.parent
 
-    print(f"Reports dir: {reports_dir}")
+    print(f"Reports dirs ({len(reports_dirs)}):")
+    for d in reports_dirs:
+        print(f"  {d}")
     print(f"Output dir:  {output_dir}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -405,7 +423,7 @@ def main():
     print(f"Profiled dependencies: {len(profiled_deps)}")
 
     t0 = time.time()
-    ranked, stats = aggregate_patterns(reports_dir)
+    ranked, stats = aggregate_patterns(reports_dirs)
     elapsed = time.time() - t0
 
     print(f"\nExtracted {stats['total_findings']} findings from {stats['total_reports']} reports in {elapsed:.1f}s")
@@ -419,7 +437,7 @@ def main():
     f2 = write_excel(ranked, profiled_deps, output_dir)
     print(f"Wrote {f2}")
 
-    f3 = write_log(ranked, stats, output_dir)
+    f3 = write_log(ranked, stats, reports_dirs, output_dir)
     print(f"Wrote {f3}")
 
     print("\nDone.")
