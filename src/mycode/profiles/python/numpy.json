@@ -87,7 +87,8 @@
       "trigger_conditions": "np.zeros((100000, 100000)) or similar large allocations",
       "severity": "high",
       "versions_affected": "all",
-      "detection_hint": "Array creation with computed dimensions, especially from user input"
+      "detection_hint": "Array creation with computed dimensions, especially from user input",
+      "corpus_confirmed": 142
     },
     {
       "name": "floating_point_comparison",
@@ -104,6 +105,15 @@
       "severity": "high",
       "versions_affected": "all",
       "detection_hint": "Operations between arrays of different shapes without explicit shape validation"
+    },
+    {
+      "name": "repeated_allocation_memory_growth",
+      "description": "Repeated array allocation and concatenation in loops causes monotonic memory growth from fragmentation and unreleased intermediate arrays.",
+      "trigger_conditions": "np.concatenate or np.append in loops, repeated large array allocation/deallocation",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "np.append or np.concatenate inside for-loops building arrays incrementally",
+      "corpus_confirmed": 41
     }
   ],
   "edge_case_sensitivities": [

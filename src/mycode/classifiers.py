@@ -170,6 +170,11 @@ _ERROR_DOMAIN_MAP: dict[str, str] = {
 
 # Scenario name keywords → domain
 _NAME_DOMAIN_KEYWORDS: list[tuple[str, str]] = [
+    # Multi-word phrases first (more specific, checked before single keywords)
+    ("could not start", "dependency_failure"),       # 1,218 repos — server start failures
+    ("missing depend", "dependency_failure"),          # 190+102 repos — missing deps
+    ("degradation", "scaling_collapse"),               # 82 repos — response time degradation
+    # Single keywords
     ("memory", "resource_exhaustion"),
     ("cache", "resource_exhaustion"),
     ("oom", "resource_exhaustion"),
@@ -273,7 +278,7 @@ _PATTERN_RULES: list[tuple[str, list[str], str]] = [
 
     # Scaling Collapse
     ("scaling_collapse", ["exponential", "nonlinear", "n_squared"], "linear_to_exponential_transition"),
-    ("scaling_collapse", ["response_time", "latency", "cliff"], "response_time_cliff"),
+    ("scaling_collapse", ["response_time", "latency", "cliff", "degradation"], "response_time_cliff"),
     ("scaling_collapse", ["throughput", "plateau", "bottleneck"], "throughput_plateau"),
     ("scaling_collapse", ["cascade", "chain", "domino"], "cascade_degradation"),
     ("scaling_collapse", ["scaling", "volume", "growth"], "linear_to_exponential_transition"),
@@ -289,6 +294,8 @@ _PATTERN_RULES: list[tuple[str, list[str], str]] = [
     ("input_handling_failure", ["validation", "parsing"], "format_boundary_failure"),
 
     # Dependency Failure
+    ("dependency_failure", ["could not start", "server", "startup"], "missing_server_dependency"),
+    ("dependency_failure", ["missing depend", "unresolvable"], "unresolvable_dependency"),
     ("dependency_failure", ["version", "incompatib"], "version_incompatibility"),
     ("dependency_failure", ["breaking", "api_change", "migration"], "api_breaking_change"),
     ("dependency_failure", ["transitive", "missing_dep"], "missing_transitive_dependency"),

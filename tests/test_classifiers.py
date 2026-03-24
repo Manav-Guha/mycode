@@ -162,6 +162,28 @@ class TestFailureDomainClassifier:
         )
         assert result == "resource_exhaustion"
 
+    def test_server_start_failure_classified_as_dependency_failure(self):
+        """Server start failures should be dependency_failure, not unclassified."""
+        result = failure_domain_classifier(
+            "Application server could not start", "http_load_testing", "", "",
+        )
+        assert result == "dependency_failure"
+
+    def test_response_time_degradation_classified_as_scaling_collapse(self):
+        """Response time degradation should be scaling_collapse."""
+        result = failure_domain_classifier(
+            "Response time degradation on your application",
+            "http_load_testing", "", "",
+        )
+        assert result == "scaling_collapse"
+
+    def test_missing_dependencies_classified_as_dependency_failure(self):
+        """Missing dependencies findings should be dependency_failure."""
+        result = failure_domain_classifier(
+            "4 missing dependencies", "", "", "",
+        )
+        assert result == "dependency_failure"
+
 
 # ══════════════════════════════════════════════════════════════════
 # 2. failure_pattern_classifier
@@ -260,6 +282,30 @@ class TestFailurePatternClassifier:
             "resource_exhaustion", "generic_test", "cache overflow detected",
         )
         assert result == "unbounded_cache_growth"
+
+    def test_server_start_pattern(self):
+        result = failure_pattern_classifier(
+            "dependency_failure",
+            "Application server could not start",
+            "",
+        )
+        assert result == "missing_server_dependency"
+
+    def test_response_time_degradation_pattern(self):
+        result = failure_pattern_classifier(
+            "scaling_collapse",
+            "Response time degradation on your application",
+            "",
+        )
+        assert result == "response_time_cliff"
+
+    def test_missing_dependency_pattern(self):
+        result = failure_pattern_classifier(
+            "dependency_failure",
+            "4 missing dependencies",
+            "",
+        )
+        assert result == "unresolvable_dependency"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -608,6 +654,24 @@ class TestClassifyFinding:
         )
         assert result["failure_domain"] == "concurrency_failure"
         assert result["operational_trigger"] == "concurrent_access"
+
+    def test_server_start_full_classification(self):
+        """End-to-end: server start failure gets correct domain + pattern."""
+        result = classify_finding(
+            "Application server could not start",
+            "http_load_testing", "", "",
+        )
+        assert result["failure_domain"] == "dependency_failure"
+        assert result["failure_pattern"] == "missing_server_dependency"
+
+    def test_response_time_full_classification(self):
+        """End-to-end: response time degradation gets correct domain + pattern."""
+        result = classify_finding(
+            "Response time degradation on your application",
+            "http_load_testing", "", "",
+        )
+        assert result["failure_domain"] == "scaling_collapse"
+        assert result["failure_pattern"] == "response_time_cliff"
 
 
 class TestClassifyProject:

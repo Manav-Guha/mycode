@@ -1,201 +1,207 @@
-# Plan: Analytics instrumentation — server-side job logging with source tagging
+# Plan: Promote Confirmed Corpus Patterns into Library Profiles
 
 ## Overview
 
-Add SQLite-backed job logging to track every web job, with source tagging from URL query params and an admin stats endpoint. No UI, no accounts, no migration framework.
+271 unique patterns extracted from 2,081 repos. 33 patterns appear in 10+ repos. This plan fixes classification gaps, enriches profiles with corpus-confirmed counts, and adds 2 new remediation patterns.
 
 ---
 
-## New file: `src/mycode/web/analytics.py`
+## Step 1: Fix Classification Gaps in `classifiers.py`
 
-Single module for all analytics logic: DB init, log writes, stats queries.
+**File:** `src/mycode/classifiers.py`
 
-### Database
+The root cause: `http_load_testing` is not in `_CATEGORY_DOMAIN_MAP`, and `"missing"` / `"could not start"` / `"degradation"` are not in `_NAME_DOMAIN_KEYWORDS`. So these findings fall through to "unclassified".
 
-- SQLite at `os.environ.get("MYCODE_DB_PATH", "/data/mycode_analytics.db")`
-- Created on first access if missing (including parent dirs)
-- One table `job_log` with columns per spec
-
-### Functions
-
+### Changes to `_NAME_DOMAIN_KEYWORDS` (line ~170):
+Add these entries (order matters — more specific first):
 ```python
-def get_db() -> sqlite3.Connection
-    # Returns connection. Creates DB + table on first call.
-    # Uses threading.local() for per-thread connections (SQLite is not thread-safe).
-
-def log_job_started(job_id: str, source: str, repo_url: str) -> None
-    # INSERT row with status="started", started_at=now
-
-def log_job_completed(job_id: str, status: str, findings_critical: int,
-                      findings_warning: int, findings_info: int,
-                      scenarios_run: int) -> None
-    # UPDATE row: completed_at=now, status, finding counts, scenarios_run
-
-def log_download(job_id: str, download_type: str) -> None
-    # UPDATE pdf_downloaded=true or json_downloaded=true
-
-def get_admin_stats() -> dict
-    # Single function that runs all stat queries and returns the JSON shape from the spec
+("could not start", "dependency_failure"),       # 1,218 repos — server start failures
+("missing depend", "dependency_failure"),          # 190+102 repos — missing deps
+("degradation", "scaling_collapse"),               # 82 repos — response time degradation
 ```
 
-### Schema
+**Why `_NAME_DOMAIN_KEYWORDS` and not `_CATEGORY_DOMAIN_MAP`?**
+`http_load_testing` findings span multiple domains (start failures = dependency_failure, response time = scaling_collapse, concurrency = concurrency_failure). Adding `http_load_testing` to `_CATEGORY_DOMAIN_MAP` would force one domain for all. Title-based keywords are more precise.
 
-```sql
-CREATE TABLE IF NOT EXISTS job_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT 'public',
-    repo_url TEXT NOT NULL DEFAULT '',
-    started_at TIMESTAMP NOT NULL,
-    completed_at TIMESTAMP,
-    status TEXT NOT NULL DEFAULT 'started',
-    findings_critical INTEGER,
-    findings_warning INTEGER,
-    findings_info INTEGER,
-    scenarios_run INTEGER,
-    pdf_downloaded BOOLEAN NOT NULL DEFAULT 0,
-    json_downloaded BOOLEAN NOT NULL DEFAULT 0
-);
-```
-
----
-
-## Changes to existing files
-
-### `src/mycode/web/jobs.py`
-
-- Add `source: str = "public"` field to the `Job` dataclass
-
-### `src/mycode/web/app.py`
-
-- Add `source: str = Query(default="public")` parameter to the `preflight` endpoint
-- Pass `source` through to `handle_preflight`
-- Add new endpoint: `GET /api/admin/stats` with `key` query param
-- Add new endpoint: `GET /api/report/{job_id}/report.json` for JSON download tracking (or track via existing report endpoint — see design note below)
-
-**Design note on JSON download tracking:** The current JSON download is client-side only (`downloadJSON()` in app.js creates a blob from already-fetched report data). Two options:
-
-1. Add a lightweight `POST /api/report/{job_id}/download-log` endpoint that the frontend calls when downloading JSON
-2. Track it on the existing `GET /api/report/{job_id}` call (but this fires on report view, not download)
-
-**Decision: Option 1** — small dedicated endpoint. The frontend calls it fire-and-forget when JSON is downloaded. Same endpoint used for PDF download tracking (called from the PDF download handler).
-
-### `src/mycode/web/routes.py`
-
-- `handle_preflight()`: accept `source` parameter, set `job.source = source`, call `log_job_started(job.id, source, repo_url)`
-- `handle_download_pdf()`: call `log_download(job_id, "pdf")` on successful download
-- New `handle_admin_stats()`: validate admin key, call `get_admin_stats()`, return result
-- New `handle_log_download()`: accept job_id + download_type, call `log_download()`
-
-### `src/mycode/web/worker.py`
-
-- At end of `run_analysis()`: on success, call `log_job_completed(job.id, "completed", critical, warning, info, scenarios_run)`. On failure, call `log_job_completed(job.id, "failed", ...)`. Extract finding counts from `job.result.report`.
-- Detect timeout: if `job.error` contains timeout indicators or job exceeded budget, use status="timeout" instead of "failed"
-
-### `web/app.js`
-
-- Read `?source=` from `window.location.search` on page load
-- Append `source` to the FormData in `submitUrl()` and `submitFile()`
-- In `downloadJSON()`: fire `fetch("/api/report/{jobId}/download-log", {method: "POST", body: ...})` (fire-and-forget, no await needed)
-- In `downloadUnderstanding()`: same fire-and-forget call after successful PDF download
-
----
-
-## New endpoint: `GET /api/admin/stats`
-
+### Changes to `_PATTERN_RULES` (line ~257):
+Add pattern rules so the failure_pattern classifier also fires:
 ```python
-@app.get("/api/admin/stats")
-async def admin_stats(key: str = Query(default="")):
-    admin_key = os.environ.get("MYCODE_ADMIN_KEY", "")
-    if not admin_key or key != admin_key:
-        return JSONResponse(content={"error": "Forbidden"}, status_code=403)
-    stats = get_admin_stats()
-    return JSONResponse(content=stats)
+("dependency_failure", ["could not start", "server", "startup"], "missing_server_dependency"),
+("dependency_failure", ["missing depend", "unresolvable"], "unresolvable_dependency"),
+("scaling_collapse", ["response time", "degradation", "latency"], "response_time_cliff"),
 ```
 
-### Stats queries (all in `get_admin_stats()`)
-
-| Stat | Query |
-|------|-------|
-| `total_jobs` | `SELECT COUNT(*) FROM job_log` |
-| `external_jobs` | `SELECT COUNT(*) FROM job_log WHERE source != 'internal' AND source != 'test_group'` |
-| `by_source` | `SELECT source, COUNT(*) FROM job_log GROUP BY source` |
-| `by_status` | `SELECT status, COUNT(*) FROM job_log WHERE status != 'started' GROUP BY status` |
-| `last_24h.total` | `WHERE started_at > datetime('now', '-1 day')` |
-| `last_24h.external` | Same + `AND source NOT IN ('internal', 'test_group')` |
-| `last_7d` | Same pattern with `-7 days` |
-| `pdf_download_rate` | `SUM(pdf_downloaded) / COUNT(*)` where status='completed' |
-| `json_download_rate` | `SUM(json_downloaded) / COUNT(*)` where status='completed' |
-| `avg_findings_critical` | `AVG(findings_critical)` where status='completed' |
-| `avg_findings_warning` | `AVG(findings_warning)` where status='completed' |
-| `unique_repos` | `SELECT COUNT(DISTINCT repo_url) FROM job_log WHERE repo_url != 'zip_upload'` |
-| `return_repos` | `SELECT COUNT(*) FROM (SELECT repo_url FROM job_log WHERE repo_url != 'zip_upload' GROUP BY repo_url HAVING COUNT(*) > 1)` |
+### No changes to `_CATEGORY_DOMAIN_MAP` — `http_load_testing` intentionally excluded.
 
 ---
 
-## New endpoint: `POST /api/report/{job_id}/download-log`
+## Step 2: Enrich Existing Profiles with `corpus_confirmed`
 
+**Files:** 8 profile JSONs in `src/mycode/profiles/python/`
+
+For each profile, add `corpus_confirmed` to entries in `known_failure_modes` where the corpus extraction has matching patterns. This is a new field — profiles currently have `name`, `description`, `trigger_conditions`, `severity`, `versions_affected`, `detection_hint`.
+
+### pandas.json
+Add `corpus_confirmed` to existing failure modes, and add new entries for patterns confirmed in corpus but missing from profile:
+
+| Pattern | Corpus Count | Action |
+|---------|-------------|--------|
+| data_volume_scaling / scaling_collapse | 283 | Add `corpus_confirmed: 283` to `memory_error_on_operations` (closest match) |
+| silent_data_type_changes / input_handling | 60 | Add `corpus_confirmed: 60` to `silent_dtype_coercion` |
+| memory_profiling_over_time / resource_exhaustion | 52 | New entry: `memory_growth_over_time` |
+| merge_memory_stress / resource_exhaustion | 49 | Add `corpus_confirmed: 49` to `memory_error_on_operations` (merge is covered) |
+| iterrows_vs_vectorized / scaling_collapse | 49 | Add `corpus_confirmed: 49` to `apply_performance_cliff` (same antipattern class) |
+| memory_crash_on_data_ops / resource_exhaustion | 57 | Covered by `memory_error_on_operations`, add count |
+
+### numpy.json
+| Pattern | Corpus Count | Action |
+|---------|-------------|--------|
+| array_size_scaling / scaling_collapse | 142 | Add `corpus_confirmed: 142` to closest existing mode |
+| repeated_allocation_memory / resource_exhaustion | 41 | Add `corpus_confirmed: 41` |
+
+### streamlit.json
+| Pattern | Corpus Count | Action |
+|---------|-------------|--------|
+| cache_memory_growth / resource_exhaustion | 296 | Add `corpus_confirmed: 296` to existing cache mode |
+
+### requests.json
+| Pattern | Corpus Count | Action |
+|---------|-------------|--------|
+| concurrent_request_load / concurrency_failure | 36 | Add `corpus_confirmed: 36` |
+| large_download_memory / resource_exhaustion | 32 | Add `corpus_confirmed: 32` |
+| timeout_behavior / integration_failure | 29 | Add `corpus_confirmed: 29` |
+| session_vs_individual_performance / resource_exhaustion | 27 | Add `corpus_confirmed: 27` |
+
+### httpx.json
+| Pattern | Corpus Count | Action |
+|---------|-------------|--------|
+| async_concurrent_load / concurrency_failure | 19 | Add `corpus_confirmed: 19` |
+
+### pydantic.json
+| Pattern | Corpus Count | Action |
+|---------|-------------|--------|
+| validation_throughput / scaling_collapse | 22 | Add `corpus_confirmed: 22` |
+
+### fastapi.json
+| Pattern | Corpus Count | Action |
+|---------|-------------|--------|
+| server_start_failure / dependency_failure | shared 1,218 | Add `corpus_confirmed: 1218` (shared across frameworks) |
+| response_time_degradation / scaling_collapse | shared 82 | Add `corpus_confirmed: 82` (shared) |
+
+### flask.json
+Same two patterns as fastapi — `corpus_confirmed: 1218` and `corpus_confirmed: 82`.
+
+**Approach:** Read each profile, identify the matching `known_failure_modes` entry, add the `corpus_confirmed` field. If no matching entry exists (e.g., pandas `memory_growth_over_time`), add a new `known_failure_modes` entry with full schema.
+
+---
+
+## Step 3: Add 2 New Remediation Patterns in `documents.py`
+
+**File:** `src/mycode/documents.py` (after line ~1260, before `_match_remediation`)
+
+### Pattern 1: Pandas silent data type changes (60 repos)
 ```python
-@app.post("/api/report/{job_id}/download-log")
-async def log_download_endpoint(job_id: str, type: str = Form(default="")):
-    if type in ("pdf", "json"):
-        log_download(job_id, type)
-    return JSONResponse(content={"ok": True})
+@_register_pattern
+def _pat_pandas_silent_dtypes(f, framework, fields):
+    if "pandas" in (f.affected_dependencies or []) and (
+        f.failure_pattern == "silent_data_type_changes"
+        or ("dtype" in f.title.lower() or "type" in f.title.lower())
+        and f.category == "edge_case_input"
+    ):
+        return (
+            "Pandas silently converts data types when input values don't match "
+            "expected types. A single non-numeric value in an integer column "
+            "converts the entire column to object dtype, increasing memory 10x "
+            "and producing incorrect numeric operations without raising errors.",
+            "Specify dtypes explicitly in read_csv(dtype={...}), use "
+            "pd.to_numeric(errors='coerce') for controlled conversion, and "
+            "validate column dtypes after loading with df.dtypes checks.",
+        )
+    return None
+```
+
+### Pattern 2: Requests concurrent load (36 repos)
+```python
+@_register_pattern
+def _pat_requests_concurrent(f, framework, fields):
+    if "requests" in (f.affected_dependencies or []) and (
+        f.failure_domain == "concurrency_failure"
+        or f.category == "concurrent_execution"
+    ):
+        return (
+            f"The requests library is synchronous — each call blocks its "
+            f"thread until the response arrives. At {fields['load']} concurrent "
+            f"requests, all threads are occupied waiting on I/O and new "
+            f"requests queue.",
+            "Use requests.Session() for connection pooling, switch to "
+            "httpx.AsyncClient or aiohttp for async I/O, or use "
+            "concurrent.futures.ThreadPoolExecutor with a bounded pool size.",
+        )
+    return None
 ```
 
 ---
 
-## Source validation
+## Step 4: New Tests
 
-Valid sources: `"internal"`, `"hn"`, `"public"`, `"cli"`, `"test_group"`. If an unrecognised source is passed, default to `"public"`. Validation in `handle_preflight()`.
+**File:** `tests/test_classifiers.py` (or wherever classifier tests live)
+
+### Test 1: Server start failure gets `dependency_failure`
+```python
+def test_server_start_classified_as_dependency_failure():
+    result = classify_finding(
+        scenario_name="Application server could not start",
+        scenario_category="http_load_testing",
+    )
+    assert result["failure_domain"] == "dependency_failure"
+    assert result["failure_pattern"] == "missing_server_dependency"
+```
+
+### Test 2: Response time degradation gets `scaling_collapse`
+```python
+def test_response_time_degradation_classified_as_scaling_collapse():
+    result = classify_finding(
+        scenario_name="Response time degradation on your application",
+        scenario_category="http_load_testing",
+    )
+    assert result["failure_domain"] == "scaling_collapse"
+    assert result["failure_pattern"] == "response_time_cliff"
+```
+
+### Test 3: Missing dependencies gets `dependency_failure`
+```python
+def test_missing_deps_classified_as_dependency_failure():
+    result = classify_finding(
+        scenario_name="4 missing dependencies",
+        scenario_category="",
+    )
+    assert result["failure_domain"] == "dependency_failure"
+    assert result["failure_pattern"] == "unresolvable_dependency"
+```
 
 ---
 
-## Tests: `tests/test_analytics.py`
+## Step 5: Run Tests
 
-All tests use a temp SQLite DB (tmp file, not `/data/`).
-
-| Test | What it verifies |
-|------|------------------|
-| `test_log_job_started` | Row inserted with correct job_id, source, repo_url, status="started", started_at set, completed_at null |
-| `test_log_job_completed` | Row updated with status, finding counts, completed_at set |
-| `test_log_job_completed_timeout` | status="timeout" stored correctly |
-| `test_log_download_pdf` | pdf_downloaded flipped to true |
-| `test_log_download_json` | json_downloaded flipped to true |
-| `test_source_validation` | Invalid source defaults to "public" |
-| `test_admin_stats_no_key` | Returns 403 when MYCODE_ADMIN_KEY not set |
-| `test_admin_stats_wrong_key` | Returns 403 when key doesn't match |
-| `test_admin_stats_valid` | Returns correct JSON shape with accurate counts |
-| `test_admin_stats_external_excludes_internal` | internal/test_group jobs excluded from external_jobs count |
-| `test_admin_stats_return_repos` | Repos appearing 2+ times counted correctly |
-| `test_admin_stats_download_rates` | pdf/json download rates calculated correctly |
-| `test_db_created_on_first_access` | DB file + table created if path doesn't exist |
-
-Tests for source propagation through the API (using FastAPI TestClient):
-
-| Test | What it verifies |
-|------|------------------|
-| `test_preflight_source_param` | source query param flows to job_log |
-| `test_preflight_default_source` | Missing source defaults to "public" |
+Run the fast test suite to verify nothing breaks:
+```
+pytest tests/ --ignore=tests/test_integration.py --ignore=tests/test_session.py --ignore=tests/test_pipeline.py -k "not (TestPipelineIntegration or TestCLIExitCode)"
+```
 
 ---
 
-## Files modified (summary)
+## What Is NOT Changed
 
-| File | Change |
-|------|--------|
-| `src/mycode/web/analytics.py` | **NEW** — DB init, log writes, stats queries |
-| `src/mycode/web/jobs.py` | Add `source` field to Job |
-| `src/mycode/web/app.py` | Add source param to preflight, add admin stats + download-log endpoints |
-| `src/mycode/web/routes.py` | Wire analytics calls into preflight, PDF download, add admin stats handler |
-| `src/mycode/web/worker.py` | Log completion/failure at end of run_analysis |
-| `web/app.js` | Read source from URL, pass to preflight, fire download-log on PDF/JSON download |
-| `tests/test_analytics.py` | **NEW** — all tests listed above |
+- `scripts/corpus_extract.py` — untouched
+- `corpus_extraction/` output files — untouched
+- Test logic / scenario generation code — untouched
+- Profile JSON schema — only additive (`corpus_confirmed` field added, no restructuring)
 
-## What is NOT changed
+---
 
-- No admin dashboard UI
-- No user accounts or auth beyond admin key
-- No data retention / cleanup policies
-- No migration framework
-- Existing tests untouched (no breaking changes)
+## Risk Assessment
+
+- **Low risk:** Classifier changes only affect _new_ reports. Existing extraction data and reports are unaffected.
+- **Low risk:** Profile `corpus_confirmed` is a new field — nothing reads it yet. It's metadata for human review and future library enrichment.
+- **Low risk:** Remediation patterns are additive — new patterns checked after existing ones, so no change to current behaviour.
+- **Medium risk:** The `"could not start"` keyword in `_NAME_DOMAIN_KEYWORDS` is broad. But it's checked against `name_lower` (the finding title), and this exact phrase only appears in HTTP load testing findings. No false positives expected.

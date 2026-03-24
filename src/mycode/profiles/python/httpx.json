@@ -77,7 +77,8 @@
       "trigger_conditions": "Calling async httpx methods without await or outside async context",
       "severity": "critical",
       "versions_affected": "all",
-      "detection_hint": "AsyncClient used without await, or outside async def function"
+      "detection_hint": "AsyncClient used without await, or outside async def function",
+      "corpus_confirmed": 19
     },
     {
       "name": "no_timeout_set",

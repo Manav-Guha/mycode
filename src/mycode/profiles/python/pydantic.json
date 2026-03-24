@@ -71,7 +71,8 @@
       "trigger_conditions": "Code using Pydantic v1 API with v2 installed",
       "severity": "critical",
       "versions_affected": ">=2.0.0",
-      "detection_hint": ".dict(), .schema(), .parse_obj(), .parse_raw(), class Config:, @validator decorator"
+      "detection_hint": ".dict(), .schema(), .parse_obj(), .parse_raw(), class Config:, @validator decorator",
+      "corpus_confirmed": 22
     },
     {
       "name": "silent_type_coercion",

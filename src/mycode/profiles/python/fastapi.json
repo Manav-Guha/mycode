@@ -105,6 +105,26 @@
       "severity": "high",
       "versions_affected": "all",
       "detection_hint": "uvicorn.run with reload=True"
+    },
+    {
+      "name": "server_start_failure",
+      "description": "Application fails to start due to missing dependencies, import errors, or misconfigured environment. Most common failure across all web frameworks in corpus.",
+      "trigger_conditions": "Missing dependency in requirements, import error at startup, misconfigured env vars",
+      "severity": "critical",
+      "versions_affected": "all",
+      "detection_hint": "ImportError or ModuleNotFoundError at application startup",
+      "corpus_confirmed": 1218,
+      "corpus_confirmed_note": "shared across frameworks"
+    },
+    {
+      "name": "response_time_degradation",
+      "description": "Response times degrade under concurrent load as sync handlers or CPU-bound work blocks the event loop or exhausts the thread pool.",
+      "trigger_conditions": "Concurrent HTTP load exceeding thread pool or event loop capacity",
+      "severity": "warning",
+      "versions_affected": "all",
+      "detection_hint": "Increasing response times under load testing, especially with sync route handlers",
+      "corpus_confirmed": 82,
+      "corpus_confirmed_note": "shared across frameworks"
     }
   ],
   "edge_case_sensitivities": [

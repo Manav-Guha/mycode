@@ -1248,6 +1248,45 @@ def _pat_external_timeout(f, framework, fields):
 
 
 @_register_pattern
+def _pat_pandas_silent_dtypes(f, framework, fields):
+    if "pandas" in (f.affected_dependencies or []) and (
+        f.failure_pattern == "silent_data_type_changes"
+        or (
+            ("dtype" in f.title.lower() or "type" in f.title.lower())
+            and f.category == "edge_case_input"
+        )
+    ):
+        return (
+            "Pandas silently converts data types when input values don't match "
+            "expected types. A single non-numeric value in an integer column "
+            "converts the entire column to object dtype, increasing memory 10x "
+            "and producing incorrect numeric operations without raising errors.",
+            "Specify dtypes explicitly in read_csv(dtype={...}), use "
+            "pd.to_numeric(errors='coerce') for controlled conversion, and "
+            "validate column dtypes after loading with df.dtypes checks.",
+        )
+    return None
+
+
+@_register_pattern
+def _pat_requests_concurrent(f, framework, fields):
+    if "requests" in (f.affected_dependencies or []) and (
+        f.failure_domain == "concurrency_failure"
+        or f.category == "concurrent_execution"
+    ):
+        return (
+            f"The requests library is synchronous — each call blocks its "
+            f"thread until the response arrives. At {fields['load']} concurrent "
+            f"requests, all threads are occupied waiting on I/O and new "
+            f"requests queue.",
+            "Use requests.Session() for connection pooling, switch to "
+            "httpx.AsyncClient or aiohttp for async I/O, or use "
+            "concurrent.futures.ThreadPoolExecutor with a bounded pool size.",
+        )
+    return None
+
+
+@_register_pattern
 def _pat_data_volume(f, framework, fields):
     if f.category == "data_volume_scaling":
         return (

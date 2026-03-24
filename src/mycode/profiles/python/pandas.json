@@ -77,7 +77,8 @@
       "trigger_conditions": "DataFrame using >30% of available RAM, then performing merge, join, or pivot",
       "severity": "critical",
       "versions_affected": "all",
-      "detection_hint": "Large DataFrames followed by merge/concat/pivot operations"
+      "detection_hint": "Large DataFrames followed by merge/concat/pivot operations",
+      "corpus_confirmed": 283
     },
     {
       "name": "silent_dtype_coercion",
@@ -85,7 +86,8 @@
       "trigger_conditions": "CSV with mixed types in a column, or NA values in integer columns",
       "severity": "high",
       "versions_affected": "all",
-      "detection_hint": "read_csv without dtype parameter, columns with mixed content"
+      "detection_hint": "read_csv without dtype parameter, columns with mixed content",
+      "corpus_confirmed": 60
     },
     {
       "name": "settingwithcopy_warning_ignored",
@@ -109,7 +111,17 @@
       "trigger_conditions": "apply(axis=1) on DataFrame with >10K rows",
       "severity": "high",
       "versions_affected": "all",
-      "detection_hint": ".apply() calls with axis=1, especially with lambda functions"
+      "detection_hint": ".apply() calls with axis=1, especially with lambda functions",
+      "corpus_confirmed": 49
+    },
+    {
+      "name": "memory_growth_over_time",
+      "description": "Repeated DataFrame operations in loops or long-running processes cause monotonic memory growth from intermediate copies and fragmentation.",
+      "trigger_conditions": "Long-running data processing with repeated DataFrame transformations",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "DataFrame operations inside loops or periodic tasks without explicit del/gc",
+      "corpus_confirmed": 52
     }
   ],
   "edge_case_sensitivities": [

@@ -54,7 +54,8 @@
         "name": "cache_without_ttl",
         "description": "@st.cache_data without ttl parameter caches results forever. Each unique input creates a new cache entry.",
         "trigger": "Functions with many unique input combinations cached without TTL or max_entries",
-        "versions_affected": ">=1.18.0"
+        "versions_affected": ">=1.18.0",
+        "corpus_confirmed": 296
       },
       {
         "name": "session_state_accumulation",

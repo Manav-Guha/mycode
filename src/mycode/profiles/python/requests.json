@@ -77,7 +77,8 @@
       "trigger_conditions": "requests.get(url) without timeout parameter, target server is slow or unresponsive",
       "severity": "critical",
       "versions_affected": "all",
-      "detection_hint": "requests.get/post/put/delete calls without timeout parameter"
+      "detection_hint": "requests.get/post/put/delete calls without timeout parameter",
+      "corpus_confirmed": 29
     },
     {
       "name": "unhandled_exceptions",
@@ -109,7 +110,26 @@
       "trigger_conditions": "Downloading files >100MB without stream=True",
       "severity": "high",
       "versions_affected": "all",
-      "detection_hint": "requests.get() for URLs that return large files, without stream=True"
+      "detection_hint": "requests.get() for URLs that return large files, without stream=True",
+      "corpus_confirmed": 32
+    },
+    {
+      "name": "concurrent_thread_exhaustion",
+      "description": "Synchronous requests in threaded concurrent code exhaust OS threads. Each blocked request holds a thread stack (~8MB).",
+      "trigger_conditions": "Concurrent HTTP calls via threading with >50 threads",
+      "severity": "high",
+      "versions_affected": "all",
+      "detection_hint": "ThreadPoolExecutor or threading.Thread with requests calls inside",
+      "corpus_confirmed": 36
+    },
+    {
+      "name": "session_connection_leak",
+      "description": "Session objects not closed properly leak connection pool resources. Connection pool grows unbounded across many unique hosts.",
+      "trigger_conditions": "Session used for many different hosts without close(), or Session created per-request",
+      "severity": "medium",
+      "versions_affected": "all",
+      "detection_hint": "requests.Session() without context manager or explicit close()",
+      "corpus_confirmed": 27
     }
   ],
   "edge_case_sensitivities": [
