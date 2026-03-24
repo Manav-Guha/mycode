@@ -1,0 +1,4096 @@
+[
+  {
+    "title": "47 unrecognized dependencies",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "@hookform/resolvers, @monaco-editor/react, @radix-ui/react-accordion, @radix-ui/react-alert-dialog, @radix-ui/react-aspect-ratio, and 42 more — these have no profile in the component library, so gener",
+    "confirmed_count": 154,
+    "severity_distribution": {
+      "info": 154
+    },
+    "affected_dependencies": [
+      "@ai-sdk/google",
+      "@aws-sdk/client-s3",
+      "@aws-sdk/s3-request-presigner",
+      "@clerk/clerk-react",
+      "@clerk/nextjs",
+      "@codemirror/autocomplete",
+      "@codemirror/commands",
+      "@codemirror/lang-css",
+      "@codemirror/lang-html",
+      "@codemirror/lang-javascript",
+      "@codemirror/lang-json",
+      "@codemirror/lang-python",
+      "@codemirror/language",
+      "@codemirror/lint",
+      "@codemirror/search",
+      "@emailjs/browser",
+      "@fingerprintjs/fingerprintjs",
+      "@floating-ui/dom",
+      "@formspree/react",
+      "@genkit-ai/google-genai",
+      "@gsap/react",
+      "@headlessui/react",
+      "@hookform/resolvers",
+      "@inngest/middleware-sentry",
+      "@libsql/client",
+      "@mariozechner/pi-agent-core",
+      "@mariozechner/pi-ai",
+      "@mariozechner/pi-coding-agent",
+      "@mariozechner/pi-tui",
+      "@mendable/firecrawl-js",
+      "@modelcontextprotocol/sdk",
+      "@monaco-editor/react",
+      "@radix-ui/react-accordion",
+      "@radix-ui/react-alert-dialog",
+      "@radix-ui/react-aspect-ratio",
+      "@radix-ui/react-avatar",
+      "@radix-ui/react-checkbox",
+      "@radix-ui/react-collapsible",
+      "@radix-ui/react-context-menu",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@radix-ui/react-label",
+      "@radix-ui/react-select",
+      "@radix-ui/react-separator",
+      "@radix-ui/react-slider",
+      "@radix-ui/react-slot",
+      "@radix-ui/react-switch",
+      "@radix-ui/react-tabs",
+      "@react-spring/parallax",
+      "@sinclair/typebox",
+      "@splinetool/react-spline",
+      "@splinetool/runtime",
+      "@tabler/icons-react",
+      "@tailwindcss/forms",
+      "@tailwindcss/postcss",
+      "@tailwindcss/vite",
+      "@tanstack/react-query",
+      "@testing-library/jest-dom",
+      "@testing-library/react",
+      "@testing-library/user-event",
+      "@xterm/addon-fit",
+      "@xterm/xterm",
+      "absl-py",
+      "agno",
+      "aiohappyeyeballs",
+      "aiohttp",
+      "aiosignal",
+      "ajv",
+      "altair",
+      "annotated-doc",
+      "annotated-types",
+      "anyio",
+      "aos",
+      "apache-airflow",
+      "apscheduler",
+      "asttokens",
+      "asyncpg",
+      "attrs",
+      "bcrypt",
+      "bcryptjs",
+      "beautifulsoup4",
+      "bedrock-agentcore",
+      "bedrock-agentcore-starter-toolkit",
+      "better-sqlite3",
+      "blinker",
+      "boto3",
+      "bottleneck",
+      "branca",
+      "bullmq",
+      "cachetools",
+      "catboost",
+      "certifi",
+      "cffi",
+      "chalk",
+      "charset-normalizer",
+      "chokidar",
+      "class-variance-authority",
+      "click",
+      "cloudinary",
+      "cloudinary-build-url",
+      "clsx",
+      "cmdk",
+      "codemirror",
+      "colorama",
+      "colpali-engine",
+      "compression",
+      "contourpy",
+      "cors",
+      "crawl4ai",
+      "crewai",
+      "crewai-tools",
+      "cycler",
+      "dill",
+      "dotenv",
+      "drizzle-orm",
+      "easyocr",
+      "ejs",
+      "email-validator",
+      "express-rate-limit",
+      "express-session",
+      "express-validator",
+      "faiss-cpu",
+      "faker",
+      "faster-whisper",
+      "feedparser",
+      "ffmpeg-python",
+      "file-type",
+      "filelock",
+      "fiona",
+      "firebase",
+      "firebase-admin",
+      "flask-cors",
+      "folium",
+      "formik",
+      "fpdf2",
+      "framer-motion",
+      "fundamentus",
+      "gdown",
+      "genanki",
+      "geopandas",
+      "git",
+      "gitdb",
+      "gitpython",
+      "glob",
+      "google-api-python-client",
+      "google-auth",
+      "google-auth-httplib2",
+      "google-auth-oauthlib",
+      "google-cloud-tasks",
+      "google-genai",
+      "google-generativeai",
+      "graphviz",
+      "greenlet",
+      "gsap",
+      "gspread",
+      "h11",
+      "h5py",
+      "helmet",
+      "html5lib",
+      "huggingface-hub",
+      "idna",
+      "ioredis",
+      "ipaddress",
+      "ipykernel",
+      "ipython",
+      "jinja2",
+      "joblib",
+      "jose",
+      "js-yaml",
+      "jsonwebtoken",
+      "jszip",
+      "jupyter",
+      "kaleido",
+      "keras",
+      "kneed",
+      "langchain-groq",
+      "langchain-huggingface",
+      "langchain-openai",
+      "langchain-text-splitters",
+      "langdetect",
+      "langfuse",
+      "leaflet",
+      "leafmap",
+      "lenis",
+      "lightgbm",
+      "lightweight-charts",
+      "lingam",
+      "locomotive-scroll",
+      "lru-cache",
+      "lucide-react",
+      "lxml",
+      "mailersend",
+      "matplotlib",
+      "mediapipe",
+      "mhfp",
+      "missingno",
+      "mlflow",
+      "montility",
+      "morgan",
+      "multer",
+      "nanoid",
+      "networkx",
+      "next-seo",
+      "next-themes",
+      "nltk",
+      "nodemailer",
+      "notebook",
+      "openai-whisper",
+      "opencv-python",
+      "opencv-python-headless",
+      "openfoam-residuals",
+      "openlit",
+      "openpyxl",
+      "otpauth",
+      "owslib",
+      "pandas_datareader",
+      "passlib",
+      "pdfplumber",
+      "pickle-mixin",
+      "pillow",
+      "pino",
+      "pino-pretty",
+      "playwright",
+      "plotly",
+      "potracer",
+      "prompts",
+      "prophet",
+      "protobuf",
+      "psutil",
+      "psycopg",
+      "psycopg2-binary",
+      "pyarrow",
+      "pyautogui",
+      "pycoingecko",
+      "pydeck",
+      "pydot",
+      "pygam",
+      "pymannkendall",
+      "pymongo",
+      "pymupdf",
+      "pyodbc",
+      "pyogrio",
+      "pyotp",
+      "pypdf",
+      "pypdf2",
+      "pyproj",
+      "pysqlite3-binary",
+      "pytesseract",
+      "pytest",
+      "pytest-cov",
+      "pytest-html",
+      "pytest-timeout",
+      "python-binance",
+      "python-dateutil",
+      "python-docx",
+      "python-dotenv",
+      "python-magic",
+      "python-telegram-bot",
+      "pyttsx3",
+      "pytz",
+      "pyvis",
+      "pyyaml",
+      "qrcode",
+      "quantstats",
+      "query-string",
+      "rdkit",
+      "react-avatar",
+      "react-hot-toast",
+      "react-intersection-observer",
+      "react-markdown",
+      "react-particles",
+      "react-router-dom",
+      "react-scripts",
+      "recharts",
+      "rembg",
+      "reportlab",
+      "rich",
+      "robin_stocks",
+      "rsconnect-python",
+      "rtree",
+      "s3pathlib",
+      "sanitize-filename",
+      "scienceplots",
+      "scikit-image",
+      "scikit-learn",
+      "scikit_learn",
+      "scipy",
+      "seaborn",
+      "selenium",
+      "sentence-transformers",
+      "sentencepiece",
+      "shap",
+      "shapely",
+      "shell-quote",
+      "shodan",
+      "sigfig",
+      "sound-play",
+      "spacy",
+      "sqlite-vec",
+      "st-gsheets-connection",
+      "statsmodels",
+      "strands-agents",
+      "streamlit-aggrid",
+      "streamlit-autorefresh",
+      "streamlit-drawable-canvas",
+      "streamlit-echarts",
+      "streamlit-folium",
+      "streamlit-jodit",
+      "streamlit-lightweight-charts",
+      "streamlit-lottie",
+      "streamlit-option-menu",
+      "tabulate",
+      "tailwind-merge",
+      "tensorflow",
+      "tensorflow-cpu",
+      "textblob",
+      "thefuzz",
+      "tmap-viz",
+      "topojson-client",
+      "torch",
+      "tqdm",
+      "transformers",
+      "trimesh",
+      "tsparticles",
+      "turndown",
+      "typescript",
+      "typst",
+      "unpdf",
+      "unstructured",
+      "urllib3",
+      "uvicorn",
+      "validators",
+      "vanilla-tilt",
+      "vscode-jsonrpc",
+      "wbgapi",
+      "webdriver-manager",
+      "world-atlas",
+      "ws",
+      "xgboost",
+      "xlsxwriter",
+      "y-indexeddb",
+      "y-monaco",
+      "y-protocols",
+      "y-websocket",
+      "yfinance",
+      "yjs",
+      "yt-dlp",
+      "zustand"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "2vivien__NoteMate",
+      "Aadarsh-Sharma-7197__Kreovix",
+      "Adithya-vinayak-saji__climate-anomaly-dashboard"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: streamlit_cache_memory_growth",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "unbounded_cache_growth",
+    "description": "Triggered: memory_growth_unbounded",
+    "confirmed_count": 133,
+    "severity_distribution": {
+      "warning": 133
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "AdrienDBe__streamlit_app",
+      "Alienistaxxx__My-project"
+    ]
+  },
+  {
+    "title": "13 missing dependencies",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "@emailjs/browser, @react-spring/parallax, @tailwindcss/vite, axios, framer-motion, and 8 more are declared in requirements but not installed. This may cause import failures under certain code paths.",
+    "confirmed_count": 130,
+    "severity_distribution": {
+      "warning": 130
+    },
+    "affected_dependencies": [
+      "@codemirror/autocomplete",
+      "@codemirror/commands",
+      "@codemirror/lang-css",
+      "@codemirror/lang-html",
+      "@codemirror/lang-javascript",
+      "@codemirror/lang-json",
+      "@codemirror/lang-python",
+      "@codemirror/language",
+      "@codemirror/lint",
+      "@codemirror/search",
+      "@emailjs/browser",
+      "@react-spring/parallax",
+      "@tailwindcss/vite",
+      "absl-py",
+      "agno",
+      "aiohappyeyeballs",
+      "aiohttp",
+      "aiosignal",
+      "anthropic",
+      "apache-airflow",
+      "apscheduler",
+      "asttokens",
+      "asyncpg",
+      "axios",
+      "bcrypt",
+      "beautifulsoup4",
+      "bedrock-agentcore",
+      "bedrock-agentcore-starter-toolkit",
+      "boto3",
+      "bottleneck",
+      "branca",
+      "catboost",
+      "cffi",
+      "chardet",
+      "chromadb",
+      "cloudscraper",
+      "colorama",
+      "colpali-engine",
+      "comm",
+      "contourpy",
+      "crawl4ai",
+      "crewai",
+      "crewai-tools",
+      "cryptography",
+      "cycler",
+      "dash-core-components",
+      "dash-html-components",
+      "dash-table",
+      "dataclasses-json",
+      "decorator",
+      "defusedxml",
+      "dill",
+      "distro",
+      "dnspython",
+      "docstring_parser",
+      "docx",
+      "dotenv",
+      "duckdb",
+      "easyocr",
+      "email-validator",
+      "entrypoints",
+      "et-xmlfile",
+      "exception",
+      "faiss-cpu",
+      "faker",
+      "faster-whisper",
+      "feedparser",
+      "ffmpeg-python",
+      "fiona",
+      "firebase-admin",
+      "flask-cors",
+      "flatbuffers",
+      "folium",
+      "fonttools",
+      "fpdf2",
+      "framer-motion",
+      "fsspec",
+      "fundamentus",
+      "gdown",
+      "genanki",
+      "geopandas",
+      "git",
+      "google-ai-generativelanguage",
+      "google-api-core",
+      "google-api-python-client",
+      "google-auth",
+      "google-auth-httplib2",
+      "google-auth-oauthlib",
+      "google-cloud-tasks",
+      "google-genai",
+      "google-generativeai",
+      "googleapis-common-protos",
+      "graphviz",
+      "greenlet",
+      "gspread",
+      "gunicorn",
+      "h11",
+      "h5py",
+      "html5lib",
+      "httpcore",
+      "httpx",
+      "huggingface-hub",
+      "importlib_metadata",
+      "ipaddress",
+      "ipykernel",
+      "ipython",
+      "jax",
+      "jaxlib",
+      "jiter",
+      "joblib",
+      "jupyter",
+      "kaleido",
+      "keras",
+      "kiwisolver",
+      "kneed",
+      "langchain",
+      "langchain-community",
+      "langchain-core",
+      "langchain-groq",
+      "langchain-huggingface",
+      "langchain-openai",
+      "langchain-text-splitters",
+      "langdetect",
+      "langfuse",
+      "leafmap",
+      "lenis",
+      "lightgbm",
+      "lingam",
+      "lucide-react",
+      "lxml",
+      "mailjet_rest",
+      "matplotlib",
+      "mediapipe",
+      "mhfp",
+      "missingno",
+      "mlflow",
+      "montility",
+      "mpmath",
+      "networkx",
+      "nltk",
+      "notebook",
+      "openai",
+      "openai-whisper",
+      "opencv-python",
+      "opencv-python-headless",
+      "openfoam-residuals",
+      "openlit",
+      "openpyxl",
+      "owslib",
+      "pandas_datareader",
+      "passlib",
+      "pdfplumber",
+      "pickle-mixin",
+      "pip-audit",
+      "playwright",
+      "plotly",
+      "potracer",
+      "prophet",
+      "proto-plus",
+      "psutil",
+      "psycopg",
+      "psycopg2-binary",
+      "pyasn1",
+      "pyautogui",
+      "pycoingecko",
+      "pyd",
+      "pydot",
+      "pygam",
+      "pygithub",
+      "pymannkendall",
+      "pymongo",
+      "pymupdf",
+      "pyodbc",
+      "pyogrio",
+      "pyotp",
+      "pypdf",
+      "pypdf2",
+      "pyproj",
+      "pysqlite3-binary",
+      "pytesseract",
+      "pytest-cov",
+      "pytest-html",
+      "pytest-timeout",
+      "python-binance",
+      "python-docx",
+      "python-dotenv",
+      "python-jose",
+      "python-magic",
+      "python-telegram-bot",
+      "pyttsx3",
+      "pyvis",
+      "pyyaml",
+      "qrcode",
+      "quantstats",
+      "rdkit",
+      "react",
+      "react-dom",
+      "react-intersection-observer",
+      "rembg",
+      "reportlab",
+      "robin_stocks",
+      "rsconnect-python",
+      "rtree",
+      "ruff",
+      "s3pathlib",
+      "scienceplots",
+      "scikit-image",
+      "scikit-learn",
+      "scikit_learn",
+      "scipy",
+      "seaborn",
+      "selenium",
+      "sentence-transformers",
+      "sentencepiece",
+      "shap",
+      "shapely",
+      "shodan",
+      "sigfig",
+      "sniffio",
+      "soupsieve",
+      "spacy",
+      "sqlalchemy",
+      "st-gsheets-connection",
+      "statsmodels",
+      "strands-agents",
+      "streamlit-aggrid",
+      "streamlit-autorefresh",
+      "streamlit-drawable-canvas",
+      "streamlit-echarts",
+      "streamlit-folium",
+      "streamlit-jodit",
+      "streamlit-lightweight-charts",
+      "streamlit-lottie",
+      "streamlit-option-menu",
+      "supabase",
+      "tabulate",
+      "tensorflow",
+      "tensorflow-cpu",
+      "textblob",
+      "thefuzz",
+      "threadpoolctl",
+      "tmap-viz",
+      "torch",
+      "tqdm",
+      "transformers",
+      "trimesh",
+      "typst",
+      "uvicorn",
+      "validators",
+      "watchdog",
+      "wbgapi",
+      "webdriver-manager",
+      "webencodings",
+      "xgboost",
+      "xlsxwriter",
+      "yfinance",
+      "yt-dlp"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "Aadarsh-Sharma-7197__Kreovix",
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "AdrienDBe__streamlit_app"
+    ]
+  },
+  {
+    "title": "Resource limit hit: pandas_data_volume_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "The test hit a resource cap during pandas_data_volume_scaling. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 83,
+    "severity_distribution": {
+      "critical": 75,
+      "warning": 41
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "Alienistaxxx__My-project",
+      "AlisAleksanyan__BI_reporting"
+    ]
+  },
+  {
+    "title": "Scenario failed: pandas_merge_memory_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "3 steps executed. 6 errors recorded. peak memory 173.6 MB.",
+    "confirmed_count": 63,
+    "severity_distribution": {
+      "critical": 53,
+      "warning": 10
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "Alienistaxxx__My-project",
+      "AlisAleksanyan__BI_reporting"
+    ]
+  },
+  {
+    "title": "Scenario failed: pandas_iterrows_vs_vectorized",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "4 steps executed. 8 errors recorded. peak memory 177.0 MB.",
+    "confirmed_count": 61,
+    "severity_distribution": {
+      "critical": 61
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "Alienistaxxx__My-project",
+      "AlisAleksanyan__BI_reporting"
+    ]
+  },
+  {
+    "title": "Scenario failed: pandas_memory_profiling_over_time",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 200 errors recorded. peak memory 173.3 MB.",
+    "confirmed_count": 61,
+    "severity_distribution": {
+      "critical": 49,
+      "warning": 15
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "AlisAleksanyan__BI_reporting",
+      "Ashmitcodez__gpa-predictor-web-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: pandas_edge_case_dtypes",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "unvalidated_type_crash",
+    "description": "11 steps executed. 22 errors recorded. peak memory 175.2 MB.",
+    "confirmed_count": 60,
+    "severity_distribution": {
+      "critical": 51,
+      "warning": 17
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "Alienistaxxx__My-project",
+      "AlisAleksanyan__BI_reporting"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_array_size_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "5 steps executed. 10 errors recorded. peak memory 554.7 MB. Memory usage increased 3.2x from start (173.24) to end (554.67).",
+    "confirmed_count": 54,
+    "severity_distribution": {
+      "critical": 83,
+      "warning": 29
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [
+      10,
+      1000
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "AlisAleksanyan__BI_reporting",
+      "Ashmitcodez__gpa-predictor-web-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_repeated_allocation_memory",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 2000 errors recorded. peak memory 173.9 MB.",
+    "confirmed_count": 43,
+    "severity_distribution": {
+      "critical": 34,
+      "warning": 20
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "AlisAleksanyan__BI_reporting",
+      "Ashmitcodez__gpa-predictor-web-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "51 steps executed. 59 errors recorded. peak memory 135.6 MB.",
+    "confirmed_count": 38,
+    "severity_distribution": {
+      "critical": 38
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "2vivien__NoteMate",
+      "CyborgX-hash__Genai_Midterm",
+      "Darvin-V__AI_Study_Buddy"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: pandas_memory_error_on_operations_check",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "Triggered: memory_error_on_operations",
+    "confirmed_count": 35,
+    "severity_distribution": {
+      "warning": 33,
+      "critical": 5
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "Barto1994__AI-Personal-Study-Tracker",
+      "CeeJay1241__Movie-Recomendation-System"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_large_download_memory",
+    "category": "data_volume_scaling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "large_payload_oom",
+    "description": "6 steps executed. 26 errors recorded. peak memory 47.5 MB.",
+    "confirmed_count": 30,
+    "severity_distribution": {
+      "critical": 30,
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "AlisAleksanyan__BI_reporting",
+      "CeeJay1241__Movie-Recomendation-System",
+      "PeteHass94__parkrun-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_timeout_behavior",
+    "category": "blocking_io",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "cascading_timeout",
+    "description": "4 steps executed. 10 errors recorded. peak memory 44.0 MB.",
+    "confirmed_count": 27,
+    "severity_distribution": {
+      "critical": 24,
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1000
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "AlisAleksanyan__BI_reporting",
+      "CeeJay1241__Movie-Recomendation-System",
+      "MalkAle__German-Cars-Price-Prediction"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_session_vs_individual_performance",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "11 steps executed. 31 errors recorded. peak memory 43.7 MB.",
+    "confirmed_count": 25,
+    "severity_distribution": {
+      "critical": 23,
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "AlisAleksanyan__BI_reporting",
+      "CeeJay1241__Movie-Recomendation-System",
+      "PeteHass94__parkrun-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_dtype_edge_cases",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "unvalidated_type_crash",
+    "description": "12 steps executed. 56 errors recorded. peak memory 45.7 MB.",
+    "confirmed_count": 25,
+    "severity_distribution": {
+      "critical": 25,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "AlisAleksanyan__BI_reporting",
+      "Deepakr136__Real-time-finger-counter-application",
+      "Dhusyanth-R-S__Digit_Recognizer_Machine_Learning"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_numpy_2_breaking_changes_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "11 steps executed. 11 errors recorded. peak memory 113.8 MB.",
+    "confirmed_count": 20,
+    "severity_distribution": {
+      "critical": 3,
+      "warning": 18
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Dhusyanth-R-S__Digit_Recognizer_Machine_Learning",
+      "Drake9098__FFmpeg_web_app",
+      "FurkAlb__Global-Power-Plant-Analysis"
+    ]
+  },
+  {
+    "title": "Scenario failed: pandas_concurrent_dataframe_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 steps executed. 16 errors recorded. peak memory 173.3 MB.",
+    "confirmed_count": 19,
+    "severity_distribution": {
+      "critical": 19
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "Barto1994__AI-Personal-Study-Tracker",
+      "DevByAsfiya__Voyage-Analytics-Integrating-MLOps-in-Travel"
+    ]
+  },
+  {
+    "title": "Errors during: pandas_concurrent_dataframe_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 17,
+    "severity_distribution": {
+      "warning": 17
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Ashmitcodez__gpa-predictor-web-app",
+      "Bh1v1niG__Hackathon_DQ-Elevare",
+      "CodeoC-ai__pilot-stats-app"
+    ]
+  },
+  {
+    "title": "1 unrecognized dependency",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "boto3 — this dependency has no profile in the component library, so generic stress testing was applied. Results may be less targeted.",
+    "confirmed_count": 13,
+    "severity_distribution": {
+      "info": 13
+    },
+    "affected_dependencies": [
+      "boto3",
+      "cloudscraper",
+      "google-generativeai",
+      "openpyxl",
+      "plotly",
+      "pyarrow",
+      "pytest",
+      "python-dotenv",
+      "reportlab"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "CodeoC-ai__pilot-stats-app",
+      "Nolhan42789__AI-Studio",
+      "OXHILALI1__Semantic-Keyword-Builder"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_error_handling_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "12 steps executed. 12 errors recorded. peak memory 80.8 MB.",
+    "confirmed_count": 13,
+    "severity_distribution": {
+      "critical": 13
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "PeteHass94__parkrun-app",
+      "SiddharthanSingaravel__bpl-cron",
+      "SirinBaba92__sportwetten-analyse"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "Triggered: crash, memory_growth_unbounded, timeout",
+    "confirmed_count": 11,
+    "severity_distribution": {
+      "warning": 11
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "2vivien__NoteMate",
+      "Anuththara99__ai-dev-portfolio",
+      "Lostovayne__Complete-Cursor-Clone-Next16"
+    ]
+  },
+  {
+    "title": "Errors during: pandas_iterrows_vs_vectorized",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 11,
+    "severity_distribution": {
+      "warning": 11
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Ashmitcodez__gpa-predictor-web-app",
+      "Bh1v1niG__Hackathon_DQ-Elevare",
+      "CodeoC-ai__pilot-stats-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_concurrent_array_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "4 steps executed. 17 errors recorded. peak memory 44.0 MB.",
+    "confirmed_count": 10,
+    "severity_distribution": {
+      "critical": 10
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "AlisAleksanyan__BI_reporting",
+      "Deepakr136__Real-time-finger-counter-application",
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Errors during: requests_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 10,
+    "severity_distribution": {
+      "warning": 10
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "PeteHass94__parkrun-app",
+      "SirinBaba92__sportwetten-analyse",
+      "Vinayak-Bajoria__israel-iran-war-crude-tracker"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "6 steps executed. 92 errors recorded. peak memory 44.4 MB.",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "critical": 9
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "AlisAleksanyan__BI_reporting",
+      "SiddharthanSingaravel__bpl-cron",
+      "Vansh7206__ecommerce-rfm-analysis"
+    ]
+  },
+  {
+    "title": "Errors during: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "2 error(s) occurred during this test.",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "warning": 9
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model",
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Anil-sai0418__portfolio",
+      "IanSkelskey__collab-code",
+      "Shiwang12369__Streamlit-Webmap-app"
+    ]
+  },
+  {
+    "title": "Errors during: nextjs_page_render_memory",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "warning": 3,
+      "critical": 6
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Anuththara99__ai-dev-portfolio",
+      "Lostovayne__Complete-Cursor-Clone-Next16",
+      "Muh-BenitoDwiki27__crypto-dashboard-app"
+    ]
+  },
+  {
+    "title": "Errors during: nextjs_edge_case_routes",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "format_boundary_failure",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "warning": 4,
+      "critical": 5
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Anuththara99__ai-dev-portfolio",
+      "DukeDeSouth__OpenLoom",
+      "Lostovayne__Complete-Cursor-Clone-Next16"
+    ]
+  },
+  {
+    "title": "1 missing dependency",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "boto3 is declared in requirements but not installed. This may cause import failures under certain code paths.",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "warning": 9
+    },
+    "affected_dependencies": [
+      "boto3",
+      "google-generativeai",
+      "openpyxl",
+      "plotly",
+      "python-dotenv",
+      "reportlab"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "CodeoC-ai__pilot-stats-app",
+      "OXHILALI1__Semantic-Keyword-Builder",
+      "Rushit-Mehta__kuyan"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "Triggered: crash",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "warning": 9
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "Drake9098__FFmpeg_web_app",
+      "IanSkelskey__collab-code",
+      "MalkAle__German-Cars-Price-Prediction"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_no_timeout_set_check",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "cascading_timeout",
+    "description": "Triggered: no_timeout_set",
+    "confirmed_count": 8,
+    "severity_distribution": {
+      "warning": 8,
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "SirinBaba92__sportwetten-analyse",
+      "asd526__ShowImageWeb",
+      "fatikani__project-st"
+    ]
+  },
+  {
+    "title": "Errors during: express_memory_under_load",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "7 error(s) occurred during this test.",
+    "confirmed_count": 6,
+    "severity_distribution": {
+      "warning": 4,
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "express"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Developers-LLC__collab-code-editor",
+      "PossumXI__possum-ai-tutor",
+      "Zerbo505__security_with_file_uploads"
+    ]
+  },
+  {
+    "title": "Scenario failed: nextjs_ssr_concurrent_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 29 errors recorded. peak memory 164.9 MB.",
+    "confirmed_count": 6,
+    "severity_distribution": {
+      "critical": 6
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Lostovayne__Complete-Cursor-Clone-Next16",
+      "Muh-BenitoDwiki27__crypto-dashboard-app",
+      "ThimiraSadeesha__my-portfolio"
+    ]
+  },
+  {
+    "title": "Scenario failed: nextjs_bundle_size_analysis",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "11 steps executed. 29 errors recorded. peak memory 165.1 MB.",
+    "confirmed_count": 6,
+    "severity_distribution": {
+      "critical": 6
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Lostovayne__Complete-Cursor-Clone-Next16",
+      "Muh-BenitoDwiki27__crypto-dashboard-app",
+      "ThimiraSadeesha__my-portfolio"
+    ]
+  },
+  {
+    "title": "Errors during: axios_timeout_behavior",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "cascading_timeout",
+    "description": "2 error(s) occurred during this test.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "warning": 3,
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Aadarsh-Sharma-7197__Kreovix",
+      "Developers-LLC__collab-code-editor",
+      "PossumXI__possum-ai-tutor"
+    ]
+  },
+  {
+    "title": "Errors during: sqlalchemy_session_memory_growth",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "8 error(s) occurred during this test.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "warning": 2,
+      "critical": 4
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "api_service",
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Bh1v1niG__Hackathon_DQ-Elevare",
+      "CeeJay1241__Movie-Recomendation-System",
+      "ImSudhakar07__RivalReview-Evals"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_conversation_memory_growth",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 50 errors recorded. peak memory 41.4 MB.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "critical": 5
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Nolhan42789__AI-Studio",
+      "asd526__ShowImageWeb",
+      "cwilharm__pdf-to-anki-cards"
+    ]
+  },
+  {
+    "title": "Scenario failed: dotenv_env_parsing_edge_cases",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "format_boundary_failure",
+    "description": "11 steps executed. 52 errors recorded. peak memory 65.8 MB.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "critical": 2,
+      "warning": 4
+    },
+    "affected_dependencies": [
+      "dotenv"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "PossumXI__possum-ai-tutor",
+      "RohanMuppa__brightspace-mcp-server",
+      "Zerbo505__security_with_file_uploads"
+    ]
+  },
+  {
+    "title": "Errors during: axios_large_response_memory",
+    "category": "data_volume_scaling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "large_payload_oom",
+    "description": "2 error(s) occurred during this test.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "warning": 2,
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Aadarsh-Sharma-7197__Kreovix",
+      "Developers-LLC__collab-code-editor",
+      "PossumXI__possum-ai-tutor"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_connection_pool_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "connection_pool_depletion",
+    "description": "5 steps executed. 86 errors recorded. peak memory 132.8 MB.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "critical": 3,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "api_service",
+      "dashboard",
+      "web_app"
+    ],
+    "example_repos": [
+      "Barto1994__AI-Personal-Study-Tracker",
+      "ImSudhakar07__RivalReview-Evals",
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_concurrent_write_conflict",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "4 steps executed. 15 errors recorded. peak memory 132.4 MB.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "critical": 4
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      2
+    ],
+    "verticals": [
+      "api_service",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Barto1994__AI-Personal-Study-Tracker",
+      "ImSudhakar07__RivalReview-Evals",
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Resource limit hit: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during unrecognized_deps_generic_stress. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "critical": 4
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model",
+      "web_app"
+    ],
+    "example_repos": [
+      "IanSkelskey__collab-code",
+      "Shiwang12369__Streamlit-Webmap-app",
+      "darylalim__embedding-pipeline"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_large_response_streaming",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "5 steps executed. 25 errors recorded. peak memory 36.8 MB. Memory usage increased 2.1x from start (17.79) to end (36.84).",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "critical": 4
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      1000
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals",
+      "Strikezor__SDMaker",
+      "samshad__rag-app-frontend"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "warning": 4
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "SirinBaba92__sportwetten-analyse",
+      "Vansh7206__ecommerce-rfm-analysis",
+      "Vinayak-Bajoria__israel-iran-war-crude-tracker"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_context_window_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "3 steps executed. 12 errors recorded. peak memory 49.4 MB.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "critical": 4
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "asd526__ShowImageWeb",
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Errors during: axios_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "2 error(s) occurred during this test.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Aadarsh-Sharma-7197__Kreovix",
+      "Developers-LLC__collab-code-editor",
+      "mosmduali__cv-website"
+    ]
+  },
+  {
+    "title": "Errors during: nextjs_ssr_concurrent_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Anuththara99__ai-dev-portfolio",
+      "TechBloom-ai__swaggbot",
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "Errors during: nextjs_bundle_size_analysis",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Anuththara99__ai-dev-portfolio",
+      "TechBloom-ai__swaggbot",
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_n_plus_one_detection",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "4 steps executed. 16 errors recorded. peak memory 132.7 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Barto1994__AI-Personal-Study-Tracker",
+      "ImSudhakar07__RivalReview-Evals",
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_bulk_operation_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "5 steps executed. 21 errors recorded. peak memory 136.1 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Barto1994__AI-Personal-Study-Tracker",
+      "ImSudhakar07__RivalReview-Evals",
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: coupling_compute_clearTimeout",
+    "category": "data_volume_scaling",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "cascading_timeout",
+    "description": "Triggered: timeout Memory usage increased 4.8x from start (3.50) to end (16.74).",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "IanSkelskey__collab-code",
+      "RohanMuppa__brightspace-mcp-server",
+      "qianwan__mono-pilot"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: openai_v0_to_v1_migration_break_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "Triggered: v0_to_v1_migration_break",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Nolhan42789__AI-Studio",
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Resource limit hit: requests_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during requests_concurrent_request_load. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "SirinBaba92__sportwetten-analyse",
+      "Vinayak-Bajoria__israel-iran-war-crude-tracker",
+      "witharyank__news-summarizer"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_error_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 49 errors recorded. peak memory 67.0 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker",
+      "samshad__rag-app-frontend",
+      "vmegea__OLAP"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: pandas_iterrows_vs_vectorized",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model"
+    ],
+    "example_repos": [
+      "VoidRay-X__Heart-Attack-prediction",
+      "rohithtr284-lgtm__credit-card-default-prediction-app",
+      "yojovane__smart-threshold-fraud-detection"
+    ]
+  },
+  {
+    "title": "Scenario failed: supabase_large_result_memory",
+    "category": "data_volume_scaling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "large_payload_oom",
+    "description": "5 steps executed. 26 errors recorded. peak memory 116.0 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "WILSON220374__TECNIC",
+      "jakubjanb__fragrantica-app",
+      "marcosbarbosa__NotaFacil-App"
+    ]
+  },
+  {
+    "title": "Errors during: supabase_query_throughput",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "throughput_plateau",
+    "description": "6 error(s) occurred during this test.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 1,
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "WILSON220374__TECNIC",
+      "raulsedano2410__ai-coding-agents-next",
+      "vanessa-chc__LingoBuddy"
+    ]
+  },
+  {
+    "title": "Errors during: supabase_realtime_subscription_load",
+    "category": "memory_profiling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "6 error(s) occurred during this test.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "WILSON220374__TECNIC",
+      "fisher2132__therapeutic-trigger-tracker",
+      "kmfxea__kmfx-empire-dashboard-2026"
+    ]
+  },
+  {
+    "title": "Scenario failed: pydantic_dynamic_model_creation_stress",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 150 errors recorded. peak memory 97.3 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "blacktalenthubs__oya-ai-workflows",
+      "chiranjibsahoo29__Insurance_Premium_Prediction",
+      "mohd-abdul-razzaque__streamlit-bedrock-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: zod_validation_throughput",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "throughput_plateau",
+    "description": "11 steps executed. 19 errors recorded. peak memory 135.7 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "zod"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "utility"
+    ],
+    "example_repos": [
+      "2vivien__NoteMate",
+      "RohanMuppa__brightspace-mcp-server"
+    ]
+  },
+  {
+    "title": "Scenario failed: zod_error_handling_coverage",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 19 errors recorded. peak memory 135.7 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "zod"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "2vivien__NoteMate",
+      "Lostovayne__Complete-Cursor-Clone-Next16"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: nextjs_pages_vs_app_router_confusion_check",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "",
+    "description": "Triggered: pages_vs_app_router_confusion",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Anuththara99__ai-dev-portfolio",
+      "Lostovayne__Complete-Cursor-Clone-Next16"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_silent_overflow_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "12 steps executed. 56 errors recorded. peak memory 54.5 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Deepakr136__Real-time-finger-counter-application",
+      "facusabino__power-analysis-app"
+    ]
+  },
+  {
+    "title": "Errors during: prisma_connection_pool_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "connection_pool_depletion",
+    "description": "17 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "prisma"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "DukeDeSouth__OpenLoom",
+      "numlauf-dev__cursor-stock-demo"
+    ]
+  },
+  {
+    "title": "Errors during: prisma_query_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "17 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "prisma"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "DukeDeSouth__OpenLoom",
+      "numlauf-dev__cursor-stock-demo"
+    ]
+  },
+  {
+    "title": "Errors during: prisma_client_instantiation_stress",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "",
+    "description": "17 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "prisma"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "DukeDeSouth__OpenLoom",
+      "numlauf-dev__cursor-stock-demo"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_long_running_memory_profile",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 200 errors recorded. peak memory 17.8 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals",
+      "Strikezor__SDMaker"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: openai_api_key_exposure_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: api_key_exposure",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Nolhan42789__AI-Studio",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: pandas_settingwithcopy_warning_ignored_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: settingwithcopy_warning_ignored",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "OXHILALI1__Semantic-Keyword-Builder",
+      "PeteHass94__parkrun-app"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_large_download_oom_check",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "large_payload_oom",
+    "description": "Triggered: large_download_oom",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "OmamaHassan__Weather-App---Streamlit",
+      "SirinBaba92__sportwetten-analyse"
+    ]
+  },
+  {
+    "title": "Scenario failed: axios_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 52 errors recorded. peak memory 45.6 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "PossumXI__possum-ai-tutor",
+      "vraj2010__CodeSync"
+    ]
+  },
+  {
+    "title": "Scenario failed: langchain_chain_length_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "cascade_degradation",
+    "description": "4 steps executed. 20 errors recorded. peak memory 65.0 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2,
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [
+      1,
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker",
+      "sogeki-o__whisper-youtube-summarizer-groq"
+    ]
+  },
+  {
+    "title": "Scenario failed: langchain_conversation_memory_growth",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 50 errors recorded. peak memory 65.0 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker",
+      "sogeki-o__whisper-youtube-summarizer-groq"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: httpx_async_client_sync_context_check",
+    "category": "edge_case_input",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: async_client_sync_context",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker",
+      "vmegea__OLAP"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_unhandled_exceptions_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: unhandled_exceptions",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "YsnJbr__HazSnap",
+      "asd526__ShowImageWeb"
+    ]
+  },
+  {
+    "title": "Errors during: express_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "express"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Zerbo505__security_with_file_uploads",
+      "mosmduali__cv-website"
+    ]
+  },
+  {
+    "title": "Errors during: express_middleware_chain_overhead",
+    "category": "data_volume_scaling",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "express"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Zerbo505__security_with_file_uploads",
+      "mosmduali__cv-website"
+    ]
+  },
+  {
+    "title": "Errors during: express_large_payload_handling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "express"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Zerbo505__security_with_file_uploads",
+      "mosmduali__cv-website"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_conversation_turn_growth",
+    "category": "memory_profiling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "10 steps executed. 100 errors recorded. peak memory 39.7 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper",
+      "parthreddy123__oil-dashboard"
+    ]
+  },
+  {
+    "title": "Resource limit hit: openai_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during openai_rate_limit_stress. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_streaming_reliability",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 45 errors recorded. peak memory 215.6 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_error_handling_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 45 errors recorded. peak memory 215.6 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Errors during: openai_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: openai_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: supabase_realtime_subscription_load",
+    "category": "memory_profiling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "11 steps executed. 64 errors recorded. peak memory 45.4 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "jakubjanb__fragrantica-app",
+      "marcosbarbosa__NotaFacil-App"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_ssl_verification_disabled_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: ssl_verification_disabled",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "kitswas__fdroid-metrics-dashboard",
+      "nileshipad4-dotcom__crypto-streamlit-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: supabase_js_realtime_subscription_load",
+    "category": "memory_profiling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "Harness did not produce structured output. Exit code: 1.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "raulsedano2410__ai-coding-agents-next",
+      "vanessa-chc__LingoBuddy"
+    ]
+  },
+  {
+    "title": "Scenario failed: supabase_js_auth_flow_reliability",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Harness did not produce structured output. Exit code: 1.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "raulsedano2410__ai-coding-agents-next",
+      "vanessa-chc__LingoBuddy"
+    ]
+  },
+  {
+    "title": "Scenario failed: supabase_js_large_result_handling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "Harness did not produce structured output. Exit code: 1.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "raulsedano2410__ai-coding-agents-next",
+      "vanessa-chc__LingoBuddy"
+    ]
+  },
+  {
+    "title": "Scenario failed: zod_schema_complexity_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "11 steps executed. 19 errors recorded. peak memory 135.9 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "zod"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio"
+    ],
+    "example_repos": [
+      "2vivien__NoteMate"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: sqlalchemy_n_plus_one_performance_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: n_plus_one_performance",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Barto1994__AI-Personal-Study-Tracker"
+    ]
+  },
+  {
+    "title": "Errors during: nextjs_caching_surprises_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "17 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "DukeDeSouth__OpenLoom"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_async_concurrent_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "5 steps executed. 1660 errors recorded. peak memory 25.0 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_sync_vs_async_comparison",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 steps executed. 16 errors recorded. peak memory 18.0 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals"
+    ]
+  },
+  {
+    "title": "Errors during: httpx_error_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "31 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals"
+    ]
+  },
+  {
+    "title": "Errors during: httpx_redirect_behavior_change_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "31 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_pool_timeout_check",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "connection_pool_depletion",
+    "description": "12 steps executed. 58 errors recorded. peak memory 110.6 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: sqlalchemy_v1_to_v2_migration_breakage_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "Triggered: v1_to_v2_migration_breakage",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: zod_parse_vs_safeParse_confusion_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: parse_vs_safeParse_confusion",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "zod"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Lostovayne__Complete-Cursor-Clone-Next16"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: openai_rate_limit_no_retry_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: rate_limit_no_retry",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Nolhan42789__AI-Studio"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: openai_context_window_overflow_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: context_window_overflow",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Nolhan42789__AI-Studio"
+    ]
+  },
+  {
+    "title": "Scenario failed: express_middleware_chain_overhead",
+    "category": "data_volume_scaling",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 52 errors recorded. peak memory 63.9 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "express"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "PossumXI__possum-ai-tutor"
+    ]
+  },
+  {
+    "title": "Scenario failed: langchain_agent_iteration_limit",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 49 errors recorded. peak memory 67.0 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: langchain_api_key_exposure_in_chain_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: api_key_exposure_in_chain",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker"
+    ]
+  },
+  {
+    "title": "Errors during: zod_error_handling_coverage",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "18 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "zod"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "TechBloom-ai__swaggbot"
+    ]
+  },
+  {
+    "title": "Scenario failed: supabase_network_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "12 steps executed. 54 errors recorded. peak memory 117.7 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "WILSON220374__TECNIC"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: supabase_missing_or_invalid_credentials_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "empty_input_crash",
+    "description": "Triggered: missing_or_invalid_credentials",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "WILSON220374__TECNIC"
+    ]
+  },
+  {
+    "title": "Errors during: dotenv_env_file_not_found_check",
+    "category": "edge_case_input",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "dotenv"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Zerbo505__security_with_file_uploads"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 steps executed. 16 errors recorded. peak memory 39.2 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_context_window_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "3 steps executed. 12 errors recorded. peak memory 39.9 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_tool_use_stress",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 42 errors recorded. peak memory 41.8 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_streaming_reliability",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 42 errors recorded. peak memory 41.8 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: anthropic_completions_to_messages_migration_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "Triggered: completions_to_messages_migration",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 steps executed. 16 errors recorded. peak memory 49.2 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "asd526__ShowImageWeb"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: numpy_memory_error_on_allocation_check",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "Triggered: memory_error_on_allocation",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards"
+    ]
+  },
+  {
+    "title": "Scenario failed: nextjs_api_route_throughput",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "throughput_plateau",
+    "description": "10 steps executed. 10 errors recorded. peak memory 120.7 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "diegoprudencios__portfolio-tracker-study"
+    ]
+  },
+  {
+    "title": "Scenario failed: nextjs_pages_vs_app_router_confusion_check",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "",
+    "description": "10 steps executed. 10 errors recorded. peak memory 120.2 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "diegoprudencios__portfolio-tracker-study"
+    ]
+  },
+  {
+    "title": "Scenario failed: pandas_apply_performance_cliff_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 55 errors recorded. peak memory 57.6 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "dzakaiem__harmony-energy-data-pipeline"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: numpy_silent_overflow_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: silent_overflow",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "facusabino__power-analysis-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_api_key_exposure_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 44 errors recorded. peak memory 75.8 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_rate_limit_no_retry_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 44 errors recorded. peak memory 77.4 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Errors during: numpy_concurrent_array_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "ingo-stallknecht__swiss-commute-housing"
+    ]
+  },
+  {
+    "title": "Errors during: pydantic_validation_throughput",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "throughput_plateau",
+    "description": "13 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "jhoanvasquez__back-fastapi-hardcoregames"
+    ]
+  },
+  {
+    "title": "Errors during: pydantic_nested_model_depth",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "13 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "jhoanvasquez__back-fastapi-hardcoregames"
+    ]
+  },
+  {
+    "title": "Errors during: pydantic_dynamic_model_creation_stress",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "",
+    "description": "13 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "jhoanvasquez__back-fastapi-hardcoregames"
+    ]
+  },
+  {
+    "title": "Errors during: pydantic_edge_case_validation",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "format_boundary_failure",
+    "description": "13 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "jhoanvasquez__back-fastapi-hardcoregames"
+    ]
+  },
+  {
+    "title": "Errors during: sqlalchemy_concurrent_write_conflict",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "13 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "jhoanvasquez__back-fastapi-hardcoregames"
+    ]
+  },
+  {
+    "title": "Scenario failed: pydantic_v1_to_v2_migration_break_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "12 steps executed. 36 errors recorded. peak memory 149.3 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "mohd-abdul-razzaque__streamlit-bedrock-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_unchecked_status_codes_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "12 steps executed. 36 errors recorded. peak memory 149.3 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "mohd-abdul-razzaque__streamlit-bedrock-app"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_unchecked_status_codes_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: unchecked_status_codes",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "mohd-abdul-razzaque__streamlit-bedrock-app"
+    ]
+  },
+  {
+    "title": "Errors during: express_async_error_handling",
+    "category": "edge_case_input",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "4 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "express"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "mosmduali__cv-website"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: coupling_api_admin_script_loadExperience",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "mosmduali__cv-website"
+    ]
+  },
+  {
+    "title": "Scenario failed: node_core_file_io_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "11 steps executed. 68 errors recorded. peak memory 10.1 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "node"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "naveenpoddar__CursorScript"
+    ]
+  },
+  {
+    "title": "Scenario failed: node_core_event_listener_accumulation",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "11 steps executed. 68 errors recorded. peak memory 10.1 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "node"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "naveenpoddar__CursorScript"
+    ]
+  },
+  {
+    "title": "Scenario failed: node_core_concurrent_http_connections",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 68 errors recorded. peak memory 10.1 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "node"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "naveenpoddar__CursorScript"
+    ]
+  },
+  {
+    "title": "Scenario failed: node_core_error_handling_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 68 errors recorded. peak memory 10.2 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "node"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "naveenpoddar__CursorScript"
+    ]
+  },
+  {
+    "title": "Scenario failed: node_core_path_traversal_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 68 errors recorded. peak memory 10.1 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "node"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "naveenpoddar__CursorScript"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: coupling_api_src_cursorx_downloadAndExtract",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "naveenpoddar__CursorScript"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: prisma_multiple_client_instances_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: multiple_client_instances",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "prisma"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "numlauf-dev__cursor-stock-demo"
+    ]
+  },
+  {
+    "title": "Errors during: coupling_api_src_gmail_oauth_get_credentials",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "picc-ai__ar-email-automation"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: coupling_api_src_gmail_oauth_get_credentials",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: timeout, cascade_failure",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "picc-ai__ar-email-automation"
+    ]
+  },
+  {
+    "title": "Errors during: react_version_discrepancy",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "version_incompatibility",
+    "description": "10 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "react"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio"
+    ],
+    "example_repos": [
+      "raqibzzz__AudioVisual"
+    ]
+  },
+  {
+    "title": "Errors during: react-dom_version_discrepancy",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "version_incompatibility",
+    "description": "10 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "react-dom"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio"
+    ],
+    "example_repos": [
+      "raqibzzz__AudioVisual"
+    ]
+  },
+  {
+    "title": "Errors during: langchain_agent_iteration_limit",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "ml_model"
+    ],
+    "example_repos": [
+      "sogeki-o__whisper-youtube-summarizer-groq"
+    ]
+  },
+  {
+    "title": "Errors during: langchain_concurrent_chain_execution",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "ml_model"
+    ],
+    "example_repos": [
+      "sogeki-o__whisper-youtube-summarizer-groq"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: langchain_package_split_import_errors_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: package_split_import_errors",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "ml_model"
+    ],
+    "example_repos": [
+      "sogeki-o__whisper-youtube-summarizer-groq"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_broadcasting_shape_mismatch_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 48 errors recorded. peak memory 102.5 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "x04z__WhoisApp"
+    ]
+  }
+]
