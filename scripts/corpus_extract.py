@@ -5,8 +5,8 @@ Reads mycode-report.json files from corpus results, deduplicates failure pattern
 and outputs ranked pattern data for library enrichment.
 
 Usage:
-    python scripts/corpus_extract.py --reports-dir corpus_results/ --output-dir corpus_extraction/
-    python scripts/corpus_extract.py --reports-dir results/ --reports-dir corpus_results/ --output-dir corpus_extraction/
+    python scripts/corpus_extract.py
+    python scripts/corpus_extract.py --reports-dir corpus/reports/ --output-dir corpus/extraction/
 """
 
 import argparse
@@ -403,11 +403,11 @@ def main():
     parser = argparse.ArgumentParser(description="Extract failure patterns from corpus reports")
     parser.add_argument("--reports-dir", action="append", default=None,
                         help="Directory containing repo subdirectories with mycode-report.json (repeatable)")
-    parser.add_argument("--output-dir", default="corpus_extraction/",
+    parser.add_argument("--output-dir", default="corpus/extraction/",
                         help="Directory for output files")
     args = parser.parse_args()
 
-    raw_dirs = args.reports_dir or ["corpus_results/"]
+    raw_dirs = args.reports_dir or ["corpus/reports/"]
     reports_dirs = [Path(d).resolve() for d in raw_dirs]
     output_dir = Path(args.output_dir).resolve()
     project_root = Path(__file__).resolve().parent.parent
