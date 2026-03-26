@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Check for FastAPI availability before importing
 try:
-    from fastapi import FastAPI, File, Form, Query, UploadFile
+    from fastapi import FastAPI, File, Form, Query, Request, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
 except ImportError:
@@ -35,7 +35,13 @@ except ImportError:
     )
 
 from mycode.web.jobs import store, MAX_CONCURRENT_JOBS
-from mycode.web.analytics import get_admin_stats, log_download, validate_source
+from mycode.web.analytics import (
+    get_admin_stats,
+    log_download,
+    log_survey,
+    validate_source,
+    validate_survey,
+)
 from mycode.web.routes import (
     handle_analyze,
     handle_converse,
@@ -212,6 +218,23 @@ async def download_log(job_id: str, type: str = Form(default="")):
     """Log a PDF or JSON download event for analytics."""
     if type in ("pdf", "json"):
         log_download(job_id, type)
+    return JSONResponse(content={"ok": True})
+
+
+@app.post("/api/report/{job_id}/survey")
+async def survey(job_id: str, request: Request):
+    """Store a post-report survey response."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Invalid JSON"}, status_code=400)
+    q1 = body.get("q1", "")
+    q2 = body.get("q2", "")
+    q3 = body.get("q3", "")
+    error = validate_survey(q1, q2, q3)
+    if error:
+        return JSONResponse(content={"error": error}, status_code=400)
+    log_survey(job_id, q1, q2, q3)
     return JSONResponse(content={"ok": True})
 
 

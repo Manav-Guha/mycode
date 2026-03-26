@@ -479,10 +479,20 @@ function renderReport(report, summary, understandingMd, fixesMd, edition, hasPdf
         <button class="btn btn-secondary btn-sm" onclick="downloadJSON()" style="border:2px solid var(--border)">Download for Coding Agent (JSON)</button>
     </div>`;
 
+    // Post-report survey — only for public source (default when no ?source= param)
+    if (_urlSource === "public") {
+        html += _renderSurvey();
+    }
+
     content.innerHTML = html;
 
     // Store report data for downloads
     content.dataset.report = JSON.stringify(report);
+
+    // Bind survey pill click handlers
+    if (_urlSource === "public") {
+        _bindSurveyHandlers();
+    }
 }
 
 function _integrateDetails(description, details) {
@@ -1190,5 +1200,76 @@ function _logDownload(type) {
     const fd = new FormData();
     fd.append("type", type);
     fetch(`${API}/api/report/${currentJobId}/download-log`, { method: "POST", body: fd }).catch(() => {});
+}
+
+// ── Post-Report Survey ──
+
+const _surveyAnswers = { q1: null, q2: null, q3: null };
+let _surveySubmitted = false;
+
+function _renderSurvey() {
+    return `<div class="survey-section" id="survey-section">
+        <div class="survey-title">Quick feedback (optional)</div>
+        <div class="survey-q">
+            <span class="survey-label">Did you expect your code to have these issues?</span>
+            <div class="survey-pills" data-q="q1">
+                <button class="pill" data-val="yes">Yes</button>
+                <button class="pill" data-val="no">No</button>
+                <button class="pill" data-val="some">Some of them</button>
+            </div>
+        </div>
+        <div class="survey-q">
+            <span class="survey-label">Was this report useful?</span>
+            <div class="survey-pills" data-q="q2">
+                <button class="pill" data-val="yes">Yes</button>
+                <button class="pill" data-val="somewhat">Somewhat</button>
+                <button class="pill" data-val="no">No</button>
+            </div>
+        </div>
+        <div class="survey-q">
+            <span class="survey-label">Will you fix these issues and retest?</span>
+            <div class="survey-pills" data-q="q3">
+                <button class="pill" data-val="yes">Yes</button>
+                <button class="pill" data-val="maybe">Maybe</button>
+                <button class="pill" data-val="no">No</button>
+            </div>
+        </div>
+        <div class="survey-thanks hidden" id="survey-thanks">Thanks for your feedback!</div>
+    </div>`;
+}
+
+function _bindSurveyHandlers() {
+    document.querySelectorAll(".survey-pills .pill").forEach(btn => {
+        btn.addEventListener("click", () => {
+            if (_surveySubmitted) return;
+            const group = btn.closest(".survey-pills");
+            const q = group.dataset.q;
+            const val = btn.dataset.val;
+            // Deselect siblings, select this one
+            group.querySelectorAll(".pill").forEach(b => b.classList.remove("pill-selected"));
+            btn.classList.add("pill-selected");
+            _surveyAnswers[q] = val;
+            // Auto-submit when all answered
+            if (_surveyAnswers.q1 && _surveyAnswers.q2 && _surveyAnswers.q3) {
+                _submitSurvey();
+            }
+        });
+    });
+}
+
+function _submitSurvey() {
+    if (_surveySubmitted || !currentJobId) return;
+    _surveySubmitted = true;
+    // Show thanks immediately — don't wait for network
+    const questions = document.querySelectorAll("#survey-section .survey-q");
+    questions.forEach(q => q.classList.add("hidden"));
+    const thanks = document.getElementById("survey-thanks");
+    if (thanks) thanks.classList.remove("hidden");
+    // Fire-and-forget POST
+    fetch(`${API}/api/report/${currentJobId}/survey`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(_surveyAnswers),
+    }).catch(() => {});
 }
 

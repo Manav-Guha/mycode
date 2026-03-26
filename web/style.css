@@ -813,3 +813,59 @@ footer {
         text-align: center;
     }
 }
+
+/* ── Post-Report Survey ── */
+
+.survey-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.survey-title {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+}
+
+.survey-q {
+    margin-bottom: 0.75rem;
+}
+
+.survey-label {
+    display: block;
+    font-size: 0.85rem;
+    margin-bottom: 0.35rem;
+}
+
+.survey-pills {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.pill {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.3rem 0.7rem;
+    border-radius: 1rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.pill:hover {
+    border-color: var(--accent);
+}
+
+.pill-selected {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+}
+
+.survey-thanks {
+    font-size: 0.85rem;
+    color: var(--green);
+    margin-top: 0.5rem;
+}

@@ -45,6 +45,22 @@ CREATE TABLE IF NOT EXISTS job_log (
 );
 """
 
+_CREATE_SURVEY_TABLE = """\
+CREATE TABLE IF NOT EXISTS survey_responses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL UNIQUE,
+    q1 TEXT NOT NULL,
+    q2 TEXT NOT NULL,
+    q3 TEXT NOT NULL,
+    submitted_at TIMESTAMP NOT NULL
+);
+"""
+
+# Valid answer values per question
+_VALID_Q1 = frozenset({"yes", "no", "some"})
+_VALID_Q2 = frozenset({"yes", "somewhat", "no"})
+_VALID_Q3 = frozenset({"yes", "maybe", "no"})
+
 # Per-thread connections — SQLite connections are not thread-safe.
 _local = threading.local()
 
@@ -63,6 +79,7 @@ def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(_CREATE_TABLE)
+    conn.execute(_CREATE_SURVEY_TABLE)
     conn.commit()
     _local.conn = conn
     return conn
@@ -126,8 +143,38 @@ def log_download(job_id: str, download_type: str) -> None:
         logger.warning("Analytics: failed to log download for %s: %s", job_id, exc)
 
 
+def validate_survey(q1: str, q2: str, q3: str) -> str | None:
+    """Return an error message if any answer is invalid, else None."""
+    if q1 not in _VALID_Q1:
+        return f"Invalid q1 value: {q1!r}"
+    if q2 not in _VALID_Q2:
+        return f"Invalid q2 value: {q2!r}"
+    if q3 not in _VALID_Q3:
+        return f"Invalid q3 value: {q3!r}"
+    return None
+
+
+def log_survey(job_id: str, q1: str, q2: str, q3: str) -> bool:
+    """Store a survey response. Returns True if inserted, False if duplicate."""
+    try:
+        db = get_db()
+        db.execute(
+            "INSERT INTO survey_responses (job_id, q1, q2, q3, submitted_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (job_id, q1, q2, q3, _now_iso()),
+        )
+        db.commit()
+        return True
+    except sqlite3.IntegrityError:
+        # Duplicate job_id — UNIQUE constraint
+        return False
+    except Exception as exc:
+        logger.warning("Analytics: failed to log survey for %s: %s", job_id, exc)
+        return False
+
+
 def get_admin_stats() -> dict:
-    """Compute all admin stats from the job_log table."""
+    """Compute all admin stats from the job_log and survey_responses tables."""
     db = get_db()
 
     def scalar(sql: str, params: tuple = ()) -> int | float | None:
@@ -210,6 +257,18 @@ def get_admin_stats() -> dict:
         ")"
     )
 
+    # Survey responses
+    survey_total = scalar("SELECT COUNT(*) FROM survey_responses")
+    survey_q1: dict[str, int] = {}
+    for row in db.execute("SELECT q1, COUNT(*) FROM survey_responses GROUP BY q1"):
+        survey_q1[row[0]] = row[1]
+    survey_q2: dict[str, int] = {}
+    for row in db.execute("SELECT q2, COUNT(*) FROM survey_responses GROUP BY q2"):
+        survey_q2[row[0]] = row[1]
+    survey_q3: dict[str, int] = {}
+    for row in db.execute("SELECT q3, COUNT(*) FROM survey_responses GROUP BY q3"):
+        survey_q3[row[0]] = row[1]
+
     return {
         "total_jobs": total_jobs,
         "external_jobs": external_jobs,
@@ -223,6 +282,12 @@ def get_admin_stats() -> dict:
         "avg_findings_warning": avg_warning,
         "unique_repos": unique_repos,
         "return_repos": return_repos,
+        "survey": {
+            "total_responses": survey_total,
+            "q1_expected": survey_q1,
+            "q2_useful": survey_q2,
+            "q3_retest": survey_q3,
+        },
     }
 
 

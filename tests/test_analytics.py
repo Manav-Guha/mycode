@@ -15,7 +15,9 @@ from mycode.web.analytics import (
     log_download,
     log_job_completed,
     log_job_started,
+    log_survey,
     validate_source,
+    validate_survey,
     _local,
 )
 
@@ -295,3 +297,105 @@ def test_download_log_endpoint(client):
         "SELECT json_downloaded FROM job_log WHERE job_id='j_dlep'"
     ).fetchone()
     assert row[0] == 1
+
+
+# ── Survey ──
+
+
+def test_log_survey_stores_response():
+    """Survey response is stored with correct values."""
+    result = log_survey("j_surv1", "yes", "somewhat", "maybe")
+    assert result is True
+    db = get_db()
+    row = db.execute(
+        "SELECT job_id, q1, q2, q3 FROM survey_responses WHERE job_id='j_surv1'"
+    ).fetchone()
+    assert row == ("j_surv1", "yes", "somewhat", "maybe")
+
+
+def test_log_survey_duplicate_rejected():
+    """Second survey for same job_id returns False, DB has only 1 row."""
+    log_survey("j_surv2", "no", "yes", "no")
+    result = log_survey("j_surv2", "yes", "no", "yes")
+    assert result is False
+    db = get_db()
+    count = db.execute(
+        "SELECT COUNT(*) FROM survey_responses WHERE job_id='j_surv2'"
+    ).fetchone()[0]
+    assert count == 1
+    # Original values preserved
+    row = db.execute(
+        "SELECT q1, q2, q3 FROM survey_responses WHERE job_id='j_surv2'"
+    ).fetchone()
+    assert row == ("no", "yes", "no")
+
+
+def test_validate_survey_valid():
+    assert validate_survey("yes", "yes", "yes") is None
+    assert validate_survey("no", "somewhat", "maybe") is None
+    assert validate_survey("some", "no", "no") is None
+
+
+def test_validate_survey_invalid():
+    assert validate_survey("bad", "yes", "yes") is not None
+    assert validate_survey("yes", "bad", "yes") is not None
+    assert validate_survey("yes", "yes", "bad") is not None
+    assert validate_survey("", "", "") is not None
+
+
+def test_admin_stats_includes_survey():
+    """Admin stats include survey summary with per-question distributions."""
+    log_survey("j_s1", "yes", "yes", "yes")
+    log_survey("j_s2", "no", "somewhat", "maybe")
+    log_survey("j_s3", "some", "no", "no")
+    stats = get_admin_stats()
+    survey = stats["survey"]
+    assert survey["total_responses"] == 3
+    assert survey["q1_expected"] == {"yes": 1, "no": 1, "some": 1}
+    assert survey["q2_useful"] == {"yes": 1, "somewhat": 1, "no": 1}
+    assert survey["q3_retest"] == {"yes": 1, "maybe": 1, "no": 1}
+
+
+def test_admin_stats_empty_survey():
+    """Admin stats return empty survey when no responses."""
+    stats = get_admin_stats()
+    assert stats["survey"]["total_responses"] == 0
+    assert stats["survey"]["q1_expected"] == {}
+
+
+def test_survey_endpoint_valid(client):
+    """POST /api/report/{job_id}/survey with valid JSON returns 200."""
+    resp = client.post(
+        "/api/report/j_ep_surv/survey",
+        json={"q1": "yes", "q2": "somewhat", "q3": "maybe"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    db = get_db()
+    row = db.execute(
+        "SELECT q1, q2, q3 FROM survey_responses WHERE job_id='j_ep_surv'"
+    ).fetchone()
+    assert row == ("yes", "somewhat", "maybe")
+
+
+def test_survey_endpoint_duplicate(client):
+    """Second POST to same job_id returns 200 (idempotent)."""
+    client.post(
+        "/api/report/j_ep_dup/survey",
+        json={"q1": "no", "q2": "no", "q3": "no"},
+    )
+    resp = client.post(
+        "/api/report/j_ep_dup/survey",
+        json={"q1": "yes", "q2": "yes", "q3": "yes"},
+    )
+    assert resp.status_code == 200
+
+
+def test_survey_endpoint_invalid_values(client):
+    """POST with invalid answer values returns 400."""
+    resp = client.post(
+        "/api/report/j_ep_bad/survey",
+        json={"q1": "invalid", "q2": "yes", "q3": "yes"},
+    )
+    assert resp.status_code == 400
+    assert "q1" in resp.json()["error"]
