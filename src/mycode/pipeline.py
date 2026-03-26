@@ -34,6 +34,7 @@ from mycode.constraints import OperationalConstraints
 from mycode.discovery import DiscoveryEngine
 from mycode.engine import ExecutionEngine, ExecutionEngineResult
 from mycode.http_load_driver import run_http_testing_phase
+from mycode.hysteresis import load_prior_state
 from mycode.ingester import IngestionResult, ProjectIngester
 from mycode.interface import (
     ConversationalInterface,
@@ -345,6 +346,9 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
     result = PipelineResult()
     pipeline_start = time.monotonic()
 
+    # Load prior run state for severity hysteresis
+    prior_state = load_prior_state(project_path)
+
     # Initialize recorder (always created; consent checked internally)
     recorder = InteractionRecorder(
         consent=config.consent,
@@ -485,6 +489,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                             config.io.display(msg)
                             if config.io else None
                         ),
+                        prior_state=prior_state,
                     )
                 except Exception as exc:
                     logger.warning("HTTP testing failed: %s", exc)
@@ -508,6 +513,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                     result.execution, ingestion, matches, intent,
                     project_name, config, result,
                     constraints=constraints,
+                    prior_state=prior_state,
                 )
 
                 # Record report
@@ -1005,6 +1011,7 @@ def _run_report_generation(
     config: PipelineConfig,
     result: PipelineResult,
     constraints: Optional[OperationalConstraints] = None,
+    prior_state=None,
 ) -> None:
     """Stage 9: Generate the diagnostic report."""
     stage_start = time.monotonic()
@@ -1020,6 +1027,7 @@ def _run_report_generation(
             operational_intent=intent,
             project_name=project_name,
             constraints=constraints,
+            prior_state=prior_state,
         )
         result.report = report
 

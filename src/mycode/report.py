@@ -27,6 +27,13 @@ from typing import Optional
 from mycode.classifiers import classify_finding, classify_project
 from mycode.constraints import OperationalConstraints
 from mycode.engine import ExecutionEngineResult, ScenarioResult, StepResult
+from mycode.hysteresis import (
+    PriorRunState,
+    classify_with_hysteresis,
+    degradation_key,
+    degradation_threshold_with_hysteresis,
+    finding_key,
+)
 from mycode.ingester import DependencyInfo, IngestionResult
 from mycode.library.loader import ProfileMatch
 from mycode.scenario import LLMBackend, LLMConfig, LLMError, LLMResponse
@@ -963,6 +970,7 @@ class ReportGenerator:
         self._llm_config = llm_config or LLMConfig()
         self._offline = offline
         self._backend: Optional[LLMBackend] = None
+        self._prior_state: Optional[PriorRunState] = None
 
         if not offline:
             try:
@@ -981,6 +989,7 @@ class ReportGenerator:
         operational_intent: str = "",
         project_name: str = "",
         constraints: Optional[OperationalConstraints] = None,
+        prior_state: Optional["PriorRunState"] = None,
     ) -> DiagnosticReport:
         """Generate a diagnostic report.
 
@@ -994,10 +1003,16 @@ class ReportGenerator:
             constraints: Structured constraints for intent-contextualised
                 reporting.  When provided, findings are classified relative
                 to user-stated capacity.
+            prior_state: Severity classifications from a previous run.
+                When provided, hysteresis margins prevent near-threshold
+                flicker.  ``None`` means first run.
 
         Returns:
             DiagnosticReport with findings, degradation curves, and flags.
         """
+        # Store prior state for hysteresis (used by instance methods)
+        self._prior_state = prior_state
+
         report = DiagnosticReport(
             operational_context=operational_intent,
             scenarios_run=len(execution.scenario_results),
@@ -1553,42 +1568,40 @@ class ReportGenerator:
         if len(sr.steps) < 2:
             return
 
-        # Check time degradation
-        time_steps = [
-            (s.step_name, s.execution_time_ms)
-            for s in sr.steps
-            if s.execution_time_ms > 0
+        metrics = [
+            ("execution_time_ms", [
+                (s.step_name, s.execution_time_ms)
+                for s in sr.steps if s.execution_time_ms > 0
+            ]),
+            ("memory_peak_mb", [
+                (s.step_name, s.memory_peak_mb)
+                for s in sr.steps if s.memory_peak_mb > 0
+            ]),
+            ("error_count", [
+                (s.step_name, float(s.error_count))
+                for s in sr.steps
+            ]),
         ]
-        if len(time_steps) >= 2:
-            dp = self._analyze_curve(
-                sr.scenario_name, "execution_time_ms", time_steps,
-            )
-            if dp:
-                self._annotate_non_monotonic(dp)
-                report.degradation_points.append(dp)
 
-        # Check memory degradation
-        mem_steps = [
-            (s.step_name, s.memory_peak_mb)
-            for s in sr.steps
-            if s.memory_peak_mb > 0
-        ]
-        if len(mem_steps) >= 2:
-            dp = self._analyze_curve(
-                sr.scenario_name, "memory_peak_mb", mem_steps,
-            )
-            if dp:
-                self._annotate_non_monotonic(dp)
-                report.degradation_points.append(dp)
+        for metric, steps in metrics:
+            if metric == "error_count" and not any(v > 0 for _, v in steps):
+                continue
+            if len(steps) < 2:
+                continue
 
-        # Check error accumulation
-        error_steps = [
-            (s.step_name, float(s.error_count))
-            for s in sr.steps
-        ]
-        if any(v > 0 for _, v in error_steps) and len(error_steps) >= 2:
+            # Compute hysteresis-adjusted thresholds
+            dk = degradation_key(sr.scenario_name, metric)
+            if self._prior_state is not None:
+                existed = dk in self._prior_state.degradation_keys
+            else:
+                existed = None  # first run
+            ratio_thr = degradation_threshold_with_hysteresis(2.0, existed)
+            spike_thr = degradation_threshold_with_hysteresis(3.0, existed)
+
             dp = self._analyze_curve(
-                sr.scenario_name, "error_count", error_steps,
+                sr.scenario_name, metric, steps,
+                ratio_threshold=ratio_thr,
+                spike_threshold=spike_thr,
             )
             if dp:
                 self._annotate_non_monotonic(dp)
@@ -1608,12 +1621,15 @@ class ReportGenerator:
         scenario_name: str,
         metric: str,
         steps: list[tuple[str, float]],
+        ratio_threshold: float = 2.0,
+        spike_threshold: float = 3.0,
     ) -> Optional[DegradationPoint]:
         """Analyze a sequence of measurements for degradation.
 
         Returns a DegradationPoint if degradation is detected, else None.
-        Degradation is detected when the final value is >2x the first value,
-        or any step shows a >3x jump from the previous step.
+        Degradation is detected when the final value exceeds *ratio_threshold*
+        times the first value, or any step shows a jump exceeding
+        *spike_threshold* from the previous step.
 
         Returns None (no degradation) when the data is essentially flat —
         i.e. the coefficient of variation is below 10 % — or when the
@@ -1669,8 +1685,8 @@ class ReportGenerator:
                     max_jump_ratio = jump
                     breaking_point = steps[i][0]
 
-        # Overall 2x+ degradation
-        if ratio >= 2.0:
+        # Overall ratio threshold degradation
+        if ratio >= ratio_threshold:
             return DegradationPoint(
                 scenario_name=scenario_name,
                 metric=metric,
@@ -1682,8 +1698,8 @@ class ReportGenerator:
                 ),
             )
 
-        # Single step 3x+ spike
-        if max_jump_ratio >= 3.0:
+        # Single step spike threshold
+        if max_jump_ratio >= spike_threshold:
             return DegradationPoint(
                 scenario_name=scenario_name,
                 metric=metric,
@@ -1735,8 +1751,8 @@ class ReportGenerator:
 
     # ── Constraint-Driven Contextualisation ──
 
-    @staticmethod
     def _contextualise_findings(
+        self,
         report: DiagnosticReport,
         constraints: OperationalConstraints,
         profile_matches: Optional[list[ProfileMatch]] = None,
@@ -1784,9 +1800,21 @@ class ReportGenerator:
                 # Concurrency metric — compare against user-stated scale
                 ratio = load_level / user_scale if user_scale > 0 else float("inf")
 
-                if ratio <= 1.0:
-                    # Within stated capacity → CRITICAL
-                    finding.severity = "critical"
+                # Look up prior severity for hysteresis
+                fkey = finding_key(finding.title, finding.category)
+                prior_sev = (
+                    self._prior_state.finding_severities.get(fkey)
+                    if self._prior_state else None
+                )
+                severity = classify_with_hysteresis(
+                    measurement=ratio,
+                    thresholds=[(1.0, "critical"), (3.0, "warning")],
+                    default_severity="info",
+                    prior_severity=prior_sev,
+                )
+
+                finding.severity = severity
+                if severity == "critical":
                     if load_level < user_scale:
                         finding.description = (
                             f"You said {user_scale:,} users. "
@@ -1797,7 +1825,7 @@ class ReportGenerator:
                             f"{finding.description}"
                         )
                     else:
-                        # Breaks at exactly user's stated capacity
+                        # Breaks at or near user's stated capacity
                         finding.description = (
                             f"You said {user_scale:,} users. "
                             f"This breaks at exactly {load_level:,} "
@@ -1805,9 +1833,7 @@ class ReportGenerator:
                             f"capacity. You have no safety margin. "
                             f"{finding.description}"
                         )
-                elif ratio <= 3.0:
-                    # Beyond but ≤3x → WARNING
-                    finding.severity = "warning"
+                elif severity == "warning":
                     finding.description = (
                         f"You said {user_scale:,} users. "
                         f"This breaks at {load_level:,} concurrent users "
@@ -1817,8 +1843,7 @@ class ReportGenerator:
                         f"{finding.description}"
                     )
                 else:
-                    # Far beyond → INFORMATIONAL
-                    finding.severity = "info"
+                    # info
                     finding.description = (
                         f"You said {user_scale:,} users. "
                         f"This breaks at {load_level:,} concurrent users "

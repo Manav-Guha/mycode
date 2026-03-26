@@ -35,6 +35,11 @@ from mycode.engine import (
     ScenarioResult,
     StepResult,
 )
+from mycode.hysteresis import (
+    PriorRunState,
+    classify_with_hysteresis,
+    finding_key,
+)
 from mycode.ingester import IngestionResult
 from mycode.report import DegradationPoint, Finding
 from mycode.server_manager import (
@@ -719,6 +724,7 @@ def http_results_to_findings(
     load_result: HttpLoadResult,
     constraints: Optional[OperationalConstraints] = None,
     probe_results: Optional[list[ProbeResult]] = None,
+    prior_state: Optional[PriorRunState] = None,
 ) -> list[Finding]:
     """Convert HTTP load results to Finding objects for the report."""
     findings: list[Finding] = []
@@ -750,7 +756,7 @@ def http_results_to_findings(
 
     has_high_variance = False
     for ep_result in load_result.endpoint_results:
-        finding = _endpoint_to_finding(ep_result, deps, user_scale)
+        finding = _endpoint_to_finding(ep_result, deps, user_scale, prior_state)
         if finding:
             findings.append(finding)
         if any(lvl.high_variance for lvl in ep_result.levels):
@@ -768,7 +774,9 @@ def http_results_to_findings(
 
     # Memory capacity finding — independent of per-endpoint response/error findings
     if user_scale:
-        mem_finding = _memory_capacity_finding(load_result, deps, user_scale)
+        mem_finding = _memory_capacity_finding(
+            load_result, deps, user_scale, prior_state,
+        )
         if mem_finding:
             findings.append(mem_finding)
 
@@ -808,6 +816,7 @@ def _endpoint_to_finding(
     ep_result: EndpointLoadResult,
     deps: list[str],
     user_scale: Optional[int],
+    prior_state: Optional[PriorRunState] = None,
 ) -> Optional[Finding]:
     """Convert a single endpoint load result to a Finding, or None if it passed."""
     req = ep_result.endpoint
@@ -846,30 +855,45 @@ def _endpoint_to_finding(
             "becomes unresponsive" if ep_result.breaking_reason == "response_time"
             else "fails with errors"
         )
+        title = (
+            "Application degrades under concurrent load" if path == "/"
+            else f"Endpoint {label} degrades under concurrent load"
+        )
         if path == "/":
             desc = f"Your application {verb} at {_conns(bp)}."
         else:
             desc = f"Your {label} endpoint {verb} at {_conns(bp)}."
         if user_scale:
-            if bp <= user_scale:
+            ratio = bp / user_scale if user_scale > 0 else float("inf")
+            # Look up prior severity for hysteresis
+            fkey = finding_key(title, "http_load_testing")
+            prior_sev = (
+                prior_state.finding_severities.get(fkey)
+                if prior_state else None
+            )
+            severity = classify_with_hysteresis(
+                measurement=ratio,
+                thresholds=[(1.0, "critical"), (2.0, "warning")],
+                default_severity="info",
+                prior_severity=prior_sev,
+            )
+            if severity == "critical":
                 desc += (
                     f" This is at or below your expected {user_scale} concurrent users — "
                     f"your users will experience failures."
                 )
-            elif bp <= user_scale * 2:
+            elif severity == "warning":
                 desc += (
-                    f" This is {bp / user_scale:.1f}x your expected {user_scale} users — "
+                    f" This is {ratio:.1f}x your expected {user_scale} users — "
                     f"limited headroom for traffic spikes."
                 )
-                severity = "warning"
             else:
                 desc += (
-                    f" This is {bp / user_scale:.1f}x your expected {user_scale} users — "
+                    f" This is {ratio:.1f}x your expected {user_scale} users — "
                     f"comfortable headroom."
                 )
-                severity = "info"
         return Finding(
-            title=f"Application degrades under concurrent load" if path == "/" else f"Endpoint {label} degrades under concurrent load",
+            title=title,
             severity=severity,
             category="http_load_testing",
             description=desc,
@@ -980,6 +1004,7 @@ def _memory_capacity_finding(
     load_result: HttpLoadResult,
     deps: list[str],
     user_scale: int,
+    prior_state: Optional[PriorRunState] = None,
 ) -> Optional[Finding]:
     """Generate a finding when per-process memory limits capacity below user_scale.
 
@@ -1003,15 +1028,23 @@ def _memory_capacity_finding(
     available_mb = 2048 - 512
     estimated_capacity = int(available_mb / baseline_mem)
 
-    if estimated_capacity >= user_scale:
-        return None  # capacity meets or exceeds stated scale
+    title = "Memory baseline limits concurrent capacity"
+    ratio = estimated_capacity / user_scale if user_scale > 0 else float("inf")
 
-    if estimated_capacity < user_scale * 0.25:
-        severity = "critical"
-    elif estimated_capacity < user_scale * 0.75:
-        severity = "warning"
-    else:
-        return None  # close enough — no finding
+    # Look up prior severity for hysteresis
+    fkey = finding_key(title, "http_load_testing")
+    prior_sev = (
+        prior_state.finding_severities.get(fkey)
+        if prior_state else None
+    )
+    severity = classify_with_hysteresis(
+        measurement=ratio,
+        thresholds=[(0.25, "critical"), (0.75, "warning")],
+        default_severity=None,  # no finding when above 0.75
+        prior_severity=prior_sev,
+    )
+    if severity is None:
+        return None
 
     desc = (
         f"Your application uses {baseline_mem:.0f}MB per process. "
@@ -1042,6 +1075,7 @@ def run_http_testing_phase(
     language: str,
     constraints: Optional[OperationalConstraints] = None,
     on_progress: Optional[Callable[[str], None]] = None,
+    prior_state: Optional[PriorRunState] = None,
 ) -> ExecutionEngineResult:
     """Run HTTP testing and merge results into the existing execution result.
 
@@ -1151,7 +1185,7 @@ def run_http_testing_phase(
 
     # Generate HTTP-specific findings and degradation points
     execution.http_findings = http_results_to_findings(
-        load_result, constraints,
+        load_result, constraints, prior_state=prior_state,
     )
     execution.http_degradation_points = http_results_to_degradation_points(
         load_result,
