@@ -542,7 +542,7 @@ class SessionManager:
                 )
             per_call_timeout = min(per_call_timeout, max(5, int(remaining)))
 
-        cmd = [str(self.venv_python), "-m", "pip", "install", "--quiet"] + args
+        cmd = [str(self.venv_python), "-m", "pip", "install", "--quiet", "--disable-pip-version-check"] + args
         logger.info("[PY-DEPS] pip install: %s", " ".join(args)[:200])
         try:
             result = subprocess.run(
