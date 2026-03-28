@@ -1,303 +1,155 @@
-# Plan: Replace JS/TS Regex Ingester with TypeScript Compiler API Parser
+# Readability Refactor Plan
 
-## Problem
-
-The JS ingester (`src/mycode/js_ingester.py`, class `_JsFileAnalyzer`) uses 12+ regex patterns to extract functions, imports, classes, and dependency usage from JS/TS files. This misses:
-
-- **Nested functions** — regex only finds top-level and class methods; inner functions/closures invisible
-- **Dynamic imports** — `import(variable)` partially handled but `import(template literal)` missed
-- **TypeScript specifics** — generics with nested angle brackets break regex, complex type annotations confuse function extraction, interface/type/enum declarations ignored
-- **Complex module patterns** — `export default class {}`, re-exports with renaming, `export =`, barrel files with `export * from`
-- **JSX/TSX** — JSX expressions containing `{` confuse brace-depth tracking used for scope detection
-- **Decorators** — TypeScript/experimental decorators not captured
-- **Arrow functions without parens** — `x => x + 1` not matched by `_JS_ARROW_FUNC_RE` (requires `(`)
-
-The Python ingester uses `ast.parse()` and gets full-fidelity results. The JS path needs parity.
+**Constraint:** No behaviour changes. All 2,294 tests must pass. No new files, no deleted files, no test changes.
 
 ---
 
-## Current Architecture
+## 1. engine.py (3,925 lines)
 
-### JS File Parsing (what we're replacing)
-- `_JsFileAnalyzer.analyze(source)` in `js_ingester.py:422-456`
-- Steps: strip comments → compute brace depths → extract classes → extract functions → extract imports → extract global vars
-- Returns `FileAnalysis` (shared dataclass from `ingester.py:146`)
-- Called by `JsProjectIngester._parse_file()` at line 858
+### 1a. Consolidate duplicate budget/timeout-capping logic
+- `_execute_scenario` (lines 917–1174) applies `hit_user_cap` / `hit_budget` / `failure_reason = "budget_exceeded"` logic twice — once for the callable JS harness path (lines 1031–1047) and once for the standard path (lines 1146–1159). Extract a helper `_apply_timeout_labels(result, hit_user_cap, hit_budget)` to eliminate the duplication (~20 duplicated lines).
 
-### Existing Node.js Subprocess Pattern (what we're replicating)
-- `js_module_loader.js` — Node.js script, reads JSON from stdin, writes JSON to stdout
-- `js_module_loader.py` — Python wrapper: `_check_node_available()`, `subprocess.run()`, JSON parse, timeout handling, dataclass results
-- Pattern: `task = json.dumps({...})` → `subprocess.run([node_path, script], input=task, ...)` → parse stdout JSON
+### 1b. Extract harness cleanup into a helper
+- Harness file cleanup (`for path in (harness_path, config_path): try: path.unlink(...)`) appears at lines 1073–1078 and 1134–1139. Extract `_cleanup_harness_files(*paths)`.
 
-### Data Structures (must match exactly)
-The parser output must populate these existing dataclasses:
-- `FunctionInfo(name, file_path, lineno, end_lineno, args, decorators, calls, is_method, class_name, is_async, globals_accessed)`
-- `ClassInfo(name, file_path, lineno, end_lineno, methods, bases, decorators)`
-- `ImportInfo(module, names, alias, is_from_import, lineno)`
-- `GlobalVarInfo(name, file_path, lineno)`
-- `FileAnalysis(file_path, functions, classes, imports, global_vars, parse_error, lines_of_code)`
+### 1c. Break up `_execute_scenario` (~250 lines)
+- Currently one monolithic method. Split into:
+  - `_prepare_harness(scenario)` → returns (harness_content, harness_config, runner, is_js, src_files, src_funcs)
+  - `_run_and_parse_harness(scenario, harness_content, harness_config, runner, timeout)` → returns ScenarioResult
+  - Keep `_execute_scenario` as the orchestrator calling these two helpers.
+- Each piece is ~80 lines — well within the 80-line guideline.
 
-### Export info (what `_JsFileAnalyzer` does NOT currently track)
-- Whether a function/class is exported — not in the current dataclasses
-- We won't add an `exported` field to `FunctionInfo`/`ClassInfo` yet, because nothing downstream consumes it and the acceptance criteria says "do not change report output format". We can capture it in the JSON output from the parser for future use, but silently drop it in the Python wrapper.
+### 1d. Add docstrings to undocumented methods
+- `_build_harness_config` (line 1398) — add a one-liner.
+- `_get_target_modules` (line 1777) — add a one-liner (currently has a docstring already ✓).
+- `_write_harness` (line 1506) — has docstring ✓.
 
-**Decision needed:** The acceptance criteria say "Outputs JSON with: ... export statements, ... dependency usage patterns (which imported modules are called where)." These are not in the current dataclasses. Options:
-1. Include them in the parser JSON output but don't wire into dataclasses (future-proof, no downstream change)
-2. Skip them entirely
+### 1e. Unused imports check
+- All imports confirmed used. No removals.
 
-**Recommendation:** Option 1 — the parser outputs them, the Python wrapper ignores them for now.
+### 1f. Do NOT touch harness template strings
+- Per spec: "Do not refactor the harness body templates — they're ugly by nature."
+- Lines 1892–3925 are template strings and their dicts. Leave them alone.
 
 ---
 
-## Design
+## 2. report.py (4,512 lines)
 
-### New Files
+### 2a. Consolidate `_FAILURE_REASON_EXPLANATIONS` and `_FAILURE_REASON_HEADERS`
+- Lines 713–779: Two parallel dicts keyed by the same failure reasons. Merge into a single `_FAILURE_REASON_INFO: dict[str, tuple[str, str]]` mapping `reason → (header, explanation)`. Update `_render_incomplete_text` and `_render_incomplete_markdown` to use the merged dict. This removes the risk of the two dicts getting out of sync.
 
-#### 1. `src/mycode/js_parser.js` — TypeScript Compiler API parser
+### 2b. Extract shared logic from `_render_incomplete_text` and `_render_incomplete_markdown`
+- Lines 793–882: Nearly identical structure. Extract common logic into a shared helper that returns structured data (header, explanation, formatted items list, is_summarised), then have each renderer just format for its output medium.
 
-Single Node.js script. One dependency: `typescript` (via npm).
+### 2c. Consolidate duplicate severity-filtering pattern
+- The pattern `criticals = [f for f in findings if f.severity == "critical"]` / `warnings = [...]` / `infos = [...]` appears 4 times. Extract `_partition_by_severity(findings) → (criticals, warnings, infos)`.
 
-**Input** (JSON on stdin):
-```json
-{
-  "command": "parse",
-  "file_path": "/absolute/path/to/file.tsx",
-  "source": "...optional, if provided parse this instead of reading file..."
-}
-```
+### 2d. Refactor `_describe_step` (lines 3809–3943, ~134 lines) to data-driven table
+- This is a chain of 25+ `re.match` + `if m: return ...` blocks all following the same pattern. Refactor into a list of `(compiled_pattern, format_function)` tuples with a single loop. Cuts ~80 lines of repetitive code. Keep the special cases (literal step names like `"render_memory_growth"`, `"api_timeout_handling"`) in a simple dict lookup before the regex table.
 
-**Output** (JSON on stdout):
-```json
-{
-  "status": "ok",
-  "functions": [
-    {
-      "name": "handleClick",
-      "lineno": 10,
-      "end_lineno": 25,
-      "args": ["event", "options"],
-      "is_async": false,
-      "is_method": false,
-      "class_name": null,
-      "decorators": [],
-      "calls": ["console.log", "setState", "fetchData"],
-      "exported": false
-    }
-  ],
-  "classes": [
-    {
-      "name": "UserService",
-      "lineno": 30,
-      "end_lineno": 80,
-      "bases": ["BaseService"],
-      "methods": ["getUser", "saveUser"],
-      "decorators": ["Injectable"],
-      "exported": true
-    }
-  ],
-  "imports": [
-    {
-      "module": "react",
-      "names": ["useState", "useEffect"],
-      "alias": null,
-      "is_from_import": true,
-      "lineno": 1
-    }
-  ],
-  "global_vars": [
-    {"name": "API_URL", "lineno": 5}
-  ],
-  "exports": ["handleClick", "UserService", "API_URL"],
-  "lines_of_code": 95
-}
-```
+### 2e. Extract concurrency contextualisation from `_contextualise_findings`
+- `_contextualise_findings` (lines 1754–1901, ~147 lines) has three distinct branches: concurrency findings (76 lines), data-size findings, and corpus stats enrichment. Extract the concurrency branch into `_contextualise_concurrency_finding(finding, user_scale, ratio, prior_state)` — this is a natural split since it has its own severity classification logic.
 
-**Error output:**
-```json
-{
-  "status": "error",
-  "error": "description",
-  "error_type": "ParseError"
-}
-```
+### 2f. Deduplicate `_COUPLING_PREFIXES`
+- Defined as a local tuple in both `_describe_scenario()` (line 3525) and `_humanize_scenario_name()` (line 3755). Move to a single module-level constant.
 
-**Implementation approach:**
-- `ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true)` — parses any JS/TS/JSX/TSX without needing tsconfig
-- Walk the AST with `ts.forEachChild` recursively
-- Track scope (class context, nesting) via a visitor stack
-- For call extraction within function bodies: walk function body node, collect `ts.SyntaxKind.CallExpression` identifiers
-- For decorators: check `ts.canHaveDecorators(node)` → `ts.getDecorators(node)`
-- Line numbers: `sourceFile.getLineAndCharacterOfPosition(node.getStart())`
+### 2g. Clarifying comments on the three `_humanize_*` functions
+- `_humanize_title_name`, `_humanize_scenario_name`, `_humanize_identifier` serve different purposes. Add a one-line "When to use" comment to each.
 
-**Key design decisions:**
-- Parse with `setParentNodes: true` so we can walk up to determine class membership
-- Use `ts.ScriptTarget.Latest` + `ts.ScriptKind` auto-detected from extension to handle all four file types
-- For syntax errors: TypeScript parser is error-recovering — it still produces an AST. We parse what we can and report diagnostics as warnings, not failures.
-- The script does NOT require project-level `tsconfig.json` or `node_modules`. It's pure syntactic parsing, no type checking.
-- Timeout: 10s per file (same as module loader)
-
-#### 2. Python wrapper — modifications to `js_ingester.py`
-
-**New function: `_parse_file_with_ts_parser()`**
-
-```python
-def _parse_file_with_ts_parser(
-    file_path: str,
-    rel_path: str,
-    source: str,
-    node_path: str = "node",
-    timeout: int = 10,
-) -> FileAnalysis | None:
-    """Try to parse a JS/TS file using the TypeScript compiler API.
-
-    Returns FileAnalysis on success, None on failure (caller falls back to regex).
-    """
-```
-
-- Locates `js_parser.js` via `Path(__file__).parent / "js_parser.js"` (same pattern as `js_module_loader.py`)
-- Checks Node.js availability (cache result for session — don't re-check per file)
-- Checks `typescript` npm package availability (single check: `node -e "require('typescript')"`)
-- Sends source via stdin JSON, reads stdout JSON
-- Converts JSON output → `FileAnalysis` with proper `FunctionInfo`, `ClassInfo`, `ImportInfo`, `GlobalVarInfo`
-- On any failure (Node not available, typescript not installed, parse error, timeout, bad JSON): returns `None`
-
-**Modification to `JsProjectIngester._parse_file()`** (line 840-868):
-
-```python
-def _parse_file(self, file_path: Path, rel_path: str) -> FileAnalysis:
-    # Read source (same as now)
-    source = ...
-
-    # Try AST parser first
-    if self._use_ast_parser:
-        ast_result = _parse_file_with_ts_parser(
-            str(file_path), rel_path, source
-        )
-        if ast_result is not None:
-            return ast_result
-
-    # Fallback: existing regex analysis (unchanged)
-    analyzer = _JsFileAnalyzer(rel_path)
-    result = analyzer.analyze(source)
-    ...
-```
-
-**New `__init__` parameter:** `use_ast_parser: bool = True` — allows disabling AST parser in tests or if Node.js unavailable. Auto-set to `False` on first failure to avoid repeated subprocess spawns.
-
-**Caching strategy:**
-- `_node_available: bool | None = None` — checked once per ingester instance
-- `_ts_available: bool | None = None` — checked once per ingester instance
-- If either is False, skip AST parser for all files (fall back to regex silently)
-
-### npm Dependency: `typescript`
-
-- The `typescript` package is needed at runtime when parsing JS/TS files
-- It should be installed in myCode's own environment, NOT in the user's project
-- Location: `src/mycode/node_modules/typescript` — installed during myCode's own setup
-- Add to project's `package.json` (create one at `src/mycode/package.json` if needed) or document as a prerequisite
-- **Alternative**: bundle with myCode's pip package — but npm packages can't go in pip wheels. Better: check on first use, log clear warning if missing, fall back to regex.
-
-**Decision needed:** Where should `typescript` be installed?
-- Option A: `src/mycode/package.json` with `npm install` as build step
-- Option B: Expect it globally (`npm install -g typescript`) — fragile
-- Option C: Auto-install into a known location on first use — magic, risky
-
-**Recommendation:** Option A. Add `src/mycode/package.json` with `{"dependencies": {"typescript": "^5.x"}}`. Document `npm install` in setup. The parser script resolves `typescript` from its own `__dirname/node_modules`.
+### 2h. Unused imports check
+- All imports confirmed used.
 
 ---
 
-## Fallback Behavior
+## 3. documents.py (2,065 lines)
 
-The regex ingester is **never deleted**. Fallback chain:
+### 3a. Remove dead colour aliases
+- Lines 1519–1522: `_DARK_BLUE = _BRAND`, `_BODY_GREY = _BODY`, `_LIGHT_GREY = _SUBTLE`. **Confirmed unused** — grep across all `.py` files shows only the definitions, no usage. Remove along with the "Keep old names" comment.
 
-1. Check Node.js available → if no, use regex for all files, log once
-2. Check `typescript` importable → if no, use regex for all files, log once
-3. Per file: call `js_parser.js` → if it fails (timeout, bad output, crash), use regex for that file, log warning
-4. If AST parser succeeds: use its result, skip regex entirely for that file
+### 3b. Extract shared finding-card data preparation
+- `_render_understanding_finding` (markdown, line 779) and `_render_pdf_finding` (PDF, line 1897) both follow the same 5-part structure: title → what we found → diagnosis → consequence → prompt → after you fix it. Extract a shared helper `_finding_card_data(f) → dict` that computes all the display fields once, then have each renderer just format the dict for its medium. Reduces risk of the two renderers diverging.
 
-No user-visible change in behavior when fallback activates. The report looks the same — just with less accurate analysis.
+### 3c. Remove redundant local `import re` in `_extract_mb_from_text`
+- Line 1084: `import re` — `re` is already imported at module level (line 14). Remove the local import.
 
----
+### 3d. Remove redundant local `import re as _re` in `_short_step`
+- Line 95: `import re as _re` — same issue. Use the module-level `re`. Remove local import.
 
-## File Changes Summary
-
-| File | Change |
-|------|--------|
-| `src/mycode/js_parser.js` | **NEW** — TypeScript Compiler API parser script |
-| `src/mycode/package.json` | **NEW** — declares `typescript` dependency |
-| `src/mycode/js_ingester.py` | **MODIFY** — add `_parse_file_with_ts_parser()`, modify `_parse_file()` and `__init__()` |
-| `tests/test_js_parser.py` | **NEW** — tests for the AST parser (10+ tests) |
-| `tests/test_js_ingester.py` | **MODIFY** — add tests for fallback behavior |
-
-Files NOT modified:
-- `ingester.py` (Python ingester — untouched)
-- `report.py`, `documents.py` (report output — untouched)
-- `js_module_loader.js/.py` (separate concern — untouched)
-- Any existing test files (except `test_js_ingester.py` for fallback tests)
+### 3e. Merge `_fmt_cell` and `_fmt_cell_short`
+- Lines 123–134: Identical except for which step-label formatter they call. Merge into `_fmt_cell(value, label, metric, short=False)`.
 
 ---
 
-## Test Plan
+## 4. js_ingester.py (1,523 lines)
 
-### `tests/test_js_parser.py` — New (10+ tests)
+### 4a. Add section comment before regex fallback class
+- Add `# ── Regex Fallback Parser ──` comment before `class _JsFileAnalyzer` (line 574) to clearly delineate the AST path from the regex fallback path.
 
-1. **Plain JS function declarations** — function, arrow, expression, methods → correct name/args/lineno/calls
-2. **TypeScript with type annotations** — generics, return types, parameter types don't break extraction
-3. **JSX component** — React component with JSX return parsed correctly, not confused by `{` in JSX
-4. **TSX component** — TypeScript + JSX combination
-5. **ES6 imports** — default, named, namespace, side-effect, re-exports
-6. **CommonJS require** — const, destructured, bare, dynamic
-7. **Class declarations** — with extends, methods, decorators, static members
-8. **Nested functions** — inner functions captured (improvement over regex)
-9. **Empty file** — returns empty FileAnalysis, no crash
-10. **Syntax errors** — malformed JS still produces partial results (TS parser is error-recovering)
-11. **Dynamic imports** — `import()` with literal and variable arguments
-12. **Export detection** — exported vs non-exported functions/classes distinguished in parser JSON
-13. **Global variables** — module-level const/let/var captured
-14. **Async functions** — async flag correctly set for async functions, async arrows, async methods
+### 4b. Document the AST-first-then-regex fallback strategy
+- In `JsProjectIngester.ingest()` (line 933), the comments are minimal. Add a 2-line comment block explaining: "Phase 1: batch AST parse all files via Node.js subprocess. Phase 2: for any file where AST failed, fall back to regex analysis."
 
-### `tests/test_js_ingester.py` — Additions
+### 4c. Remove dead regex `_ES6_REEXPORT_RE`
+- Line 132: `_ES6_REEXPORT_RE` — **confirmed unused** (only defined, never referenced). Remove.
 
-15. **Fallback when Node.js unavailable** — mock `shutil.which` to return None, verify regex path used
-16. **Fallback when typescript not installed** — mock subprocess to fail on ts check, verify regex path used
-17. **Fallback when parser crashes** — mock subprocess to return bad JSON, verify regex path used for that file
-18. **AST parser caching** — verify Node/TS availability checked only once per ingester instance
-
-### Existing tests
-- All existing `test_js_ingester.py` tests must pass unchanged (they test regex behavior which remains as fallback)
-- All 2,152+ fast tests must pass
+### 4d. Remove unused import `shutil`
+- Line 15: `import shutil` — **confirmed unused** (`shutil.` never called in this file). Remove.
 
 ---
 
-## Execution Order
+## 5. ingester.py (1,124 lines)
 
-1. Create `src/mycode/package.json` and `npm install typescript`
-2. Write `src/mycode/js_parser.js` — the Node.js parser script
-3. Manually test parser script: `echo '{"command":"parse","file_path":"test.js"}' | node src/mycode/js_parser.js`
-4. Write `_parse_file_with_ts_parser()` in `js_ingester.py`
-5. Modify `JsProjectIngester.__init__()` and `_parse_file()` for AST-first-with-fallback
-6. Write `tests/test_js_parser.py`
-7. Add fallback tests to `tests/test_js_ingester.py`
-8. Run full fast test suite, fix any failures
-9. Test against a real JS project to verify end-to-end
+### 5a. Verify no dead code
+- All methods in `PythonProjectIngester` are called from `ingest()`. Confirmed no dead methods.
+- All module-level helpers (`_get_static_call_name`, `_extract_string_list`, `_normalize_package_name`, `_is_version_outdated`, `_read_text_safe`) are used. No removals.
 
----
+### 5b. Unused imports check
+- All imports confirmed used. No changes needed.
 
-## Risks and Mitigations
-
-| Risk | Mitigation |
-|------|-----------|
-| `typescript` npm package adds ~40MB | It's a dev/analysis dependency, not shipped to user. Only needed on myCode's machine. |
-| Subprocess spawn per file is slow | TypeScript parser is fast (~10ms per file). Total overhead for typical project (20-50 files) is ~1-2s. Acceptable. Could batch multiple files in one subprocess call if needed later. |
-| Node.js not available on user's machine | Graceful fallback to regex. Log once. No crash. |
-| TS compiler API changes between versions | Pin `typescript` version. TS compiler API is stable for basic AST walking. |
-| Parser output doesn't match regex output exactly | Tests compare both paths on same input. Differences are improvements (nested functions found), not regressions. |
+**Verdict:** ingester.py is already clean. No changes.
 
 ---
 
-## Open Questions for Review
+## 6. scenario.py (1,833 lines)
 
-1. **Batch mode?** Should `js_parser.js` accept multiple files per invocation (JSONL) to reduce subprocess overhead? Adds complexity but could matter for large projects.
-2. **`package.json` location** — `src/mycode/package.json` or project root? Root already has Python tooling; a nested one is cleaner but requires `npm install` in that directory.
-3. **Export tracking** — capture in parser JSON and ignore in Python wrapper, or skip entirely?
-4. **`call` extraction depth** — should nested calls inside callbacks/closures within a function body be attributed to the outer function? (Regex currently does this via brace range; AST can be more precise.)
+### 6a. Verify module-level constants are used
+- `_DATA_TYPE_BOOST`, `_DATA_TYPE_LOW`, `_DATA_TYPE_KEEP`, `_MAX_COUPLING_SCENARIOS_FILTERED` — **all confirmed used** in `_generate_offline`. No removals.
+
+### 6b. Check `depth_to_coupling_cap` import
+- **Confirmed used** at line 1349. No change needed.
+
+### 6c. Check for dead code in `_generate_offline`
+- This is a long function but generates scenarios from templates — it's inherently verbose. Verify no unreachable branches from previous iterations.
+
+---
+
+## Cross-File
+
+### C1. Deduplicate `_COUPLING_PREFIXES` within report.py
+- Two local definitions in different functions within report.py. Move to a single module-level tuple constant `_COUPLING_PREFIXES`.
+
+---
+
+## Execution Plan
+
+1. **Verify baseline:** `pytest tests/ --ignore=tests/test_integration.py --ignore=tests/test_session.py --ignore=tests/test_pipeline.py -k "not (TestPipelineIntegration or TestCLIExitCode)"` — all must pass.
+2. **engine.py** (1a, 1b, 1c, 1d) — highest priority, most-patched file.
+3. **report.py** (2a, 2b, 2c, 2d, 2e, 2f, 2g) — most helper cleanup.
+4. **documents.py** (3a, 3b, 3c, 3d, 3e) — reduce duplication.
+5. **js_ingester.py** (4a, 4b, 4c, 4d) — section comments and dead code removal.
+6. **scenario.py** (6a, 6b, 6c) — verify and minor cleanup.
+7. **ingester.py** — no changes needed.
+8. **Re-run full test suite** after each file.
+
+---
+
+## What I Will NOT Do
+
+- Change test files
+- Change profile JSON files
+- Change web frontend (app.js, style.css, index.html)
+- Change API endpoints or response formats
+- Rename files
+- Change public interfaces (function signatures, class names, module exports)
+- Add dependencies
+- Touch harness body template strings (lines 1892–3925 in engine.py)
+- Create or delete files (except this plan.md)

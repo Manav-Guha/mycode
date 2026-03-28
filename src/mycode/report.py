@@ -55,6 +55,17 @@ _CONCURRENCY_CATEGORIES = frozenset({
 })
 
 
+
+def _partition_by_severity(
+    findings: list["Finding"],
+) -> tuple[list["Finding"], list["Finding"], list["Finding"]]:
+    """Split findings into (critical, warning, info) lists."""
+    criticals = [f for f in findings if f.severity == "critical"]
+    warnings = [f for f in findings if f.severity == "warning"]
+    infos = [f for f in findings if f.severity == "info"]
+    return criticals, warnings, infos
+
+
 # ── Exceptions ──
 
 
@@ -255,9 +266,7 @@ class DiagnosticReport:
             )
 
         # Findings — split by severity context
-        criticals = [f for f in self.findings if f.severity == "critical"]
-        warnings = [f for f in self.findings if f.severity == "warning"]
-        infos = [f for f in self.findings if f.severity == "info"]
+        criticals, warnings, infos = _partition_by_severity(self.findings)
 
         # Header changes when no constraints were provided
         critical_header = (
@@ -497,9 +506,7 @@ class DiagnosticReport:
 
         # Findings grouped by severity with constraint context
         if self.findings:
-            criticals = [f for f in self.findings if f.severity == "critical"]
-            warnings = [f for f in self.findings if f.severity == "warning"]
-            infos = [f for f in self.findings if f.severity == "info"]
+            criticals, warnings, infos = _partition_by_severity(self.findings)
 
             if criticals:
                 if self.has_user_constraints:
@@ -708,45 +715,74 @@ class DiagnosticReport:
         }
 
 
-# ── Plain-language explanations for harness failure reasons ──
+# ── Failure reason metadata (header, explanation) ──
+#
+# Single source of truth for incomplete-test rendering.  Each entry
+# maps a failure_reason string to (section_header, explanation_text).
 
-_FAILURE_REASON_EXPLANATIONS: dict[str, str] = {
+_FAILURE_REASON_INFO: dict[str, tuple[str, str]] = {
     "unsupported_framework": (
+        "Unsupported Framework",
         "myCode does not yet support this framework. "
-        "This is a myCode limitation, not a problem with your code."
+        "This is a myCode limitation, not a problem with your code.",
     ),
     "dependency_unavailable": (
+        "Missing Dependencies",
         "These tests could not run because dependencies were not installed "
-        "in the test environment. Use --containerised for better dependency support."
+        "in the test environment. Use --containerised for better dependency support.",
     ),
     "harness_generation_error": (
+        "Test Script Generation Issue",
         "myCode could not generate valid test scripts for these scenarios. "
-        "This is a myCode limitation."
+        "This is a myCode limitation.",
     ),
     "browser_framework": (
+        "Browser Framework",
         "These scenarios target a frontend framework that requires a browser "
         "environment (DOM, JSX). myCode tests these projects via HTTP load "
-        "testing instead of callable harnesses."
+        "testing instead of callable harnesses.",
     ),
     "module_import_failure": (
+        "Module Import Issue",
         "myCode could not import your project's modules for these tests. "
-        "This can happen with non-standard project structures or monorepos."
+        "This can happen with non-standard project structures or monorepos.",
     ),
-    "timeout": "These tests exceeded the time limit.",
+    "timeout": (
+        "Timed Out",
+        "These tests exceeded the time limit.",
+    ),
     "user_timeout": (
+        "Reached Your Time Limit",
         "These tests reached your time limit. Re-run with a longer "
-        "limit for deeper testing."
+        "limit for deeper testing.",
     ),
     "runtime_context_required": (
+        "Requires Runtime Context",
         "These functions require runtime context (e.g. a running Streamlit "
         "server, database connection, or live API) that myCode cannot "
-        "simulate in isolation."
+        "simulate in isolation.",
     ),
     "http_tested": (
+        "Tested via HTTP",
         "These scenarios target a server framework that myCode tested "
-        "via HTTP load testing instead — see HTTP findings in this report."
+        "via HTTP load testing instead — see HTTP findings in this report.",
     ),
-    "unknown": "These tests could not run due to unexpected issues.",
+    "unknown": (
+        "Other Issues",
+        "These tests could not run due to unexpected issues.",
+    ),
+    "": (
+        "Environment Issues",
+        "These tests could not run fully due to environment issues.",
+    ),
+}
+
+# Convenience accessors for code that needs just headers or explanations
+_FAILURE_REASON_HEADERS: dict[str, str] = {
+    k: v[0] for k, v in _FAILURE_REASON_INFO.items()
+}
+_FAILURE_REASON_EXPLANATIONS: dict[str, str] = {
+    k: v[1] for k, v in _FAILURE_REASON_INFO.items()
 }
 
 
@@ -763,20 +799,6 @@ def _runtime_ctx_explanation(http_ran: bool) -> str:
         "server, database connection, or live API) that myCode cannot "
         "simulate in isolation."
     )
-
-_FAILURE_REASON_HEADERS: dict[str, str] = {
-    "unsupported_framework": "Unsupported Framework",
-    "dependency_unavailable": "Missing Dependencies",
-    "harness_generation_error": "Test Script Generation Issue",
-    "browser_framework": "Browser Framework",
-    "module_import_failure": "Module Import Issue",
-    "timeout": "Timed Out",
-    "user_timeout": "Reached Your Time Limit",
-    "runtime_context_required": "Requires Runtime Context",
-    "http_tested": "Tested via HTTP",
-    "unknown": "Other Issues",
-    "": "Environment Issues",
-}
 
 
 def _group_by_failure_reason(
@@ -2112,8 +2134,7 @@ class ReportGenerator:
         short_ref = _short_project_ref(report.vertical)
 
         # ── Overall assessment ──
-        critical = [f for f in report.findings if f.severity == "critical"]
-        warnings = [f for f in report.findings if f.severity == "warning"]
+        critical, warnings, _ = _partition_by_severity(report.findings)
         completed = report.scenarios_run - len(report.incomplete_tests)
 
         if completed == 0 and report.incomplete_tests:
@@ -2470,8 +2491,7 @@ class ReportGenerator:
         parts: list[str] = []
 
         # Overall assessment
-        critical = [f for f in report.findings if f.severity == "critical"]
-        warnings = [f for f in report.findings if f.severity == "warning"]
+        critical, warnings, _ = _partition_by_severity(report.findings)
 
         if not report.scenarios_run:
             return "No stress test scenarios were executed."
@@ -3391,6 +3411,23 @@ def _human_metric(metric: str) -> str:
 
 # Maps profile template names to user-meaningful activity descriptions.
 # Scenario names follow the pattern {dep}_{template_name}.
+# Coupling scenario name prefixes, ordered specific-to-general.
+# Used by _describe_scenario() and _humanize_scenario_name() to strip
+# the prefix and produce a human-readable label.
+_COUPLING_PREFIXES = (
+    "coupling_compute_", "coupling_api_", "coupling_render_",
+    "coupling_state_", "coupling_errorhandler_", "coupling_behavior_",
+    "coupling_",
+)
+
+# Subset without the catch-all "coupling_" — used when the caller needs
+# only the specific typed prefixes (not the generic fallback).
+_COUPLING_TYPED_PREFIXES = (
+    "coupling_compute_", "coupling_state_", "coupling_api_",
+    "coupling_render_", "coupling_errorhandler_",
+)
+
+
 _TEMPLATE_DESCRIPTIONS: dict[str, str] = {
     "concurrent_request_load": "handling multiple users at once",
     "concurrent_session_load": "handling multiple users at once",
@@ -3522,11 +3559,6 @@ def _describe_scenario(scenario_name: str) -> str:
 
     # Last resort: strip known prefixes so raw identifiers don't leak.
     # coupling_compute_MyModule_foo → "running calculations (MyModule foo)"
-    _COUPLING_PREFIXES = (
-        "coupling_compute_", "coupling_api_", "coupling_render_",
-        "coupling_state_", "coupling_errorhandler_", "coupling_behavior_",
-        "coupling_",
-    )
     for prefix in _COUPLING_PREFIXES:
         if name.startswith(prefix):
             remainder = scenario_name[len(prefix):]
@@ -3680,6 +3712,8 @@ def _build_timeout_description(
 def _humanize_title_name(scenario_name: str) -> str:
     """Convert a scenario name to a title-friendly label for finding headers.
 
+    Use for: Finding.title values shown as section headings in reports.
+
     Checks ``_CURATED_TITLE_MAP`` first for hand-written labels, then
     falls back to mechanical conversion.
 
@@ -3744,6 +3778,9 @@ def _humanize_title_name(scenario_name: str) -> str:
 def _humanize_scenario_name(scenario_name: str) -> str:
     """Translate an internal scenario name to a readable label for "Also:" lines.
 
+    Use for: grouped finding/degradation "Also:" lists where each entry
+    needs a unique per-scenario label.
+
     Strips known prefixes (coupling_compute_, coupling_state_, etc.) and
     converts the remainder to readable text. Designed to give unique
     per-scenario labels, unlike ``_describe_scenario`` which returns
@@ -3752,11 +3789,7 @@ def _humanize_scenario_name(scenario_name: str) -> str:
     name_lower = scenario_name.lower()
 
     # Strip known coupling prefixes (preserve original case for remainder)
-    _COUPLING_PREFIXES = (
-        "coupling_compute_", "coupling_state_", "coupling_api_",
-        "coupling_render_", "coupling_errorhandler_",
-    )
-    for prefix in _COUPLING_PREFIXES:
+    for prefix in _COUPLING_TYPED_PREFIXES:
         if name_lower.startswith(prefix):
             remainder = scenario_name[len(prefix):]
             return _humanize_identifier(remainder)
@@ -3775,6 +3808,9 @@ def _humanize_scenario_name(scenario_name: str) -> str:
 
 def _humanize_identifier(name: str) -> str:
     """Convert a snake_case or camelCase identifier to readable text.
+
+    Use for: low-level identifier conversion (called by the other
+    _humanize_* functions, not typically used directly).
 
     ``uuid_uuid4`` → ``UUID generation``,
     ``getattr`` → ``attribute access``,

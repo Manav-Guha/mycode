@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import subprocess
 import urllib.error
 import urllib.parse
@@ -126,11 +125,6 @@ _ES6_IMPORT_NAMESPACE_RE = re.compile(
 # import 'module'  (side-effect)
 _ES6_IMPORT_SIDE_EFFECT_RE = re.compile(
     r"""^\s*import\s+['"]([^'"]+)['"]""", re.MULTILINE
-)
-
-# export { ... } from 'module'  (re-export)
-_ES6_REEXPORT_RE = re.compile(
-    r"""export\s+\{[^}]*\}\s+from\s+['"]([^'"]+)['"]""", re.DOTALL
 )
 
 # const x = require('module')
@@ -568,11 +562,15 @@ def _ast_result_to_file_analysis(result: dict, rel_path: str) -> FileAnalysis | 
     )
 
 
-# ── File Analyzer ──
+# ── Regex Fallback Parser ──
+#
+# Used when the TypeScript Compiler API parser (above) is unavailable
+# (Node.js not installed, typescript package missing) or fails for a
+# specific file.  The AST parser is preferred; this is the fallback.
 
 
 class _JsFileAnalyzer:
-    """Regex-based JavaScript/TypeScript file analyzer."""
+    """Regex-based JavaScript/TypeScript file analyzer (fallback)."""
 
     def __init__(self, file_path: str):
         self.file_path = file_path
@@ -940,7 +938,12 @@ class JsProjectIngester:
             result.warnings.append("No JavaScript/TypeScript files found in project")
             return result
 
-        # 2. Parse files — batch AST first, regex fallback per-file
+        # 2. Parse files — two-pass strategy:
+        #    Pass 1: batch all files through the TypeScript Compiler API
+        #            parser (Node.js subprocess).  Fast and high-fidelity.
+        #    Pass 2: for any file where AST parsing returned None (Node.js
+        #            unavailable, typescript missing, or per-file error),
+        #            fall back to the regex-based _JsFileAnalyzer.
         ast_results = self._batch_ast_parse(js_files)
 
         for i, file_path in enumerate(js_files):

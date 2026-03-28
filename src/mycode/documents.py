@@ -92,11 +92,10 @@ def _short_step(label: str) -> str:
     '100,000 items' → '100K', '25,000 items of data' → '25K',
     '50 simultaneous users' → '50 users', '1 concurrent connection' → '1 conn'.
     """
-    import re as _re
     desc = _describe_step(label) or label
 
     # Shorten large numbers: "100,000 items" → "100K"
-    m = _re.match(r"([\d,]+)\s+(items?|rows?|items? of data|rows? of data)", desc)
+    m = re.match(r"([\d,]+)\s+(items?|rows?|items? of data|rows? of data)", desc)
     if m:
         n = int(m.group(1).replace(",", ""))
         if n >= 1_000_000:
@@ -106,13 +105,13 @@ def _short_step(label: str) -> str:
         return str(n)
 
     # Shorten user/connection counts
-    m = _re.match(r"([\d,]+)\s+simultaneous\s+users?", desc)
+    m = re.match(r"([\d,]+)\s+simultaneous\s+users?", desc)
     if m:
         return f"{m.group(1)} users"
-    m = _re.match(r"([\d,]+)\s+concurrent\s+connections?", desc)
+    m = re.match(r"([\d,]+)\s+concurrent\s+connections?", desc)
     if m:
         return f"{m.group(1)} conn"
-    m = _re.match(r"([\d,]+)\s+concurrent\s+", desc)
+    m = re.match(r"([\d,]+)\s+concurrent\s+", desc)
     if m:
         return desc  # already short enough
 
@@ -120,17 +119,13 @@ def _short_step(label: str) -> str:
     return desc
 
 
-def _fmt_cell(value: float, label: str, metric: str) -> str:
-    """Format a table cell: value (context)."""
-    val = _fmt_val(value, metric)
-    ctx = _describe_step(label) or label
-    return f"{val} ({ctx})"
+def _fmt_cell(value: float, label: str, metric: str, short: bool = False) -> str:
+    """Format a table cell: value (context).
 
-
-def _fmt_cell_short(value: float, label: str, metric: str) -> str:
-    """Format a table cell with abbreviated context for PDF."""
+    When *short* is True, uses abbreviated step labels for tight PDF cells.
+    """
     val = _fmt_val(value, metric)
-    ctx = _short_step(label)
+    ctx = _short_step(label) if short else (_describe_step(label) or label)
     return f"{val} ({ctx})"
 
 
@@ -379,21 +374,23 @@ def _row_cells(
     """
     label = _perf_row_label(dp)
     steps = dp.steps
-    fmt = _fmt_cell_short if short else _fmt_cell
+
+    def fmt(value: float, step_label: str) -> str:
+        return _fmt_cell(value, step_label, dp.metric, short=short)
 
     low_label, low_val = steps[0]
-    low = fmt(low_val, low_label, dp.metric)
+    low = fmt(low_val, low_label)
 
     if len(steps) >= 3:
         mid_idx = len(steps) // 2
         mid_label, mid_val = steps[mid_idx]
-        mid = fmt(mid_val, mid_label, dp.metric)
+        mid = fmt(mid_val, mid_label)
     else:
         mid = "\u2014"
 
     if len(steps) >= 2:
         high_label, high_val = steps[-1]
-        high = fmt(high_val, high_label, dp.metric)
+        high = fmt(high_val, high_label)
     else:
         high = "\u2014"
 
@@ -1081,7 +1078,6 @@ def _detect_framework(deps: list[str]) -> str:
 
 def _extract_mb_from_text(text: str) -> str:
     """Extract a memory value like '54MB' or '65MB' from description text."""
-    import re
     m = re.search(r"(\d+)\s*MB", text, re.IGNORECASE)
     return m.group(1) if m else ""
 
@@ -1515,11 +1511,6 @@ _CODE_BORDER = (221, 221, 221)   # #dddddd
 _TABLE_ALT = (249, 249, 249)     # #f9f9f9
 _WHITE = (255, 255, 255)
 _BLACK = (0, 0, 0)
-
-# Keep old names as aliases for any external references
-_DARK_BLUE = _BRAND
-_BODY_GREY = _BODY
-_LIGHT_GREY = _SUBTLE
 
 _SEVERITY_COLORS: dict[str, tuple[tuple, tuple]] = {
     # (background, text)

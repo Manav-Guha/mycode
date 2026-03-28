@@ -1028,16 +1028,9 @@ class ExecutionEngine:
                         ),
                     )
                 )
-                if hit_user_cap and callable_result.failure_reason == "timeout":
-                    callable_result.hit_user_timeout = True
-                if (hit_budget and not hit_user_cap
-                        and callable_result.failure_reason == "timeout"):
-                    callable_result.failure_reason = "budget_exceeded"
-                    n = len(callable_result.steps)
-                    callable_result.summary = (
-                        f"Completed {n} step{'s' if n != 1 else ''} "
-                        f"within its time allocation."
-                    )
+                self._apply_timeout_labels(
+                    callable_result, hit_user_cap, hit_budget,
+                )
                 logger.info(
                     "Scenario '%s' %s (callable): %d steps, %d errors, %.0f ms",
                     scenario.name, callable_result.status,
@@ -1070,12 +1063,7 @@ class ExecutionEngine:
         validation_error = _validate_harness(harness_content, runner)
         if validation_error:
             total_ms = (time.perf_counter() - start) * 1000
-            # Clean up harness files
-            for path in (harness_path, config_path):
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+            self._cleanup_harness_files(harness_path, config_path)
             return ScenarioResult(
                 scenario_name=scenario.name,
                 scenario_category=scenario.category,
@@ -1131,31 +1119,14 @@ class ExecutionEngine:
             scenario, result.steps, session_result,
         )
 
-        # Clean up harness files
-        for path in (harness_path, config_path):
-            try:
-                path.unlink(missing_ok=True)
-            except OSError:
-                pass
+        self._cleanup_harness_files(harness_path, config_path)
 
         # Attach source file/function info for document generation
         result.source_files = _src_files
         result.source_functions = _src_funcs
 
-        # Mark when scenario was capped by the user's timeout
-        if hit_user_cap and result.failure_reason == "timeout":
-            result.hit_user_timeout = True
-
-        # Mark when scenario was capped by the per-scenario budget
-        # (not the user's explicit timeout — the time-distribution mechanism)
-        if (hit_budget and not hit_user_cap
-                and result.failure_reason == "timeout"):
-            result.failure_reason = "budget_exceeded"
-            n_steps = len(result.steps)
-            result.summary = (
-                f"Completed {n_steps} step{'s' if n_steps != 1 else ''} "
-                f"within its time allocation."
-            )
+        # Reclassify timeout based on which cap was hit
+        self._apply_timeout_labels(result, hit_user_cap, hit_budget)
 
         logger.info(
             "Scenario '%s' %s: %d steps, %d errors, %.0f ms",
@@ -1172,6 +1143,38 @@ class ExecutionEngine:
                 )
 
         return result
+
+    @staticmethod
+    def _cleanup_harness_files(*paths: Path) -> None:
+        """Remove temporary harness script and config files."""
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _apply_timeout_labels(
+        result: "ScenarioResult",
+        hit_user_cap: bool,
+        hit_budget: bool,
+    ) -> None:
+        """Reclassify timeout failures based on which cap was hit.
+
+        Modifies *result* in place: sets ``hit_user_timeout`` or converts
+        ``failure_reason`` from ``"timeout"`` to ``"budget_exceeded"``
+        depending on which time cap caused the timeout.
+        """
+        if hit_user_cap and result.failure_reason == "timeout":
+            result.hit_user_timeout = True
+        if (hit_budget and not hit_user_cap
+                and result.failure_reason == "timeout"):
+            result.failure_reason = "budget_exceeded"
+            n = len(result.steps)
+            result.summary = (
+                f"Completed {n} step{'s' if n != 1 else ''} "
+                f"within its time allocation."
+            )
 
     # ── Track B: function-level JS stress testing via callable harness ──
 
@@ -1396,7 +1399,11 @@ class ExecutionEngine:
                 pass
 
     def _build_harness_config(self, scenario: StressTestScenario) -> dict:
-        """Build the configuration dict passed to the harness script."""
+        """Build the configuration dict passed to the harness script.
+
+        Resolves target modules and functions from the ingestion result,
+        applies dedup overrides, and attaches coupling metadata when present.
+        """
         config = scenario.test_config
         behavior = config.get("behavior", "")
         skip_imports = config.get("skip_imports", False)
