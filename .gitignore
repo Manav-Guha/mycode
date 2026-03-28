@@ -209,6 +209,7 @@ __marimo__/
 .env
 .DS_Store
 .claude/
+node_modules/
 simulation_results.*
 token_simulation.py
 corpus_results/

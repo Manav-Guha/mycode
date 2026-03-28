@@ -3,14 +3,15 @@
 Covers: comment stripping, import extraction (ES6 + CommonJS), function
 extraction (declarations, arrows, expressions, methods), class extraction,
 file discovery, package.json parsing, dependency tree resolution, npm version
-checking, function flow mapping, coupling points, partial parsing, and full
-end-to-end ingestion.
+checking, function flow mapping, coupling points, partial parsing, full
+end-to-end ingestion, and AST parser fallback behaviour.
 """
 
 import json
+import subprocess
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -23,6 +24,8 @@ from mycode.js_ingester import (
     _find_brace_range,
     _parse_js_args,
     _strip_js_comments,
+    _check_node_available,
+    _check_typescript_available,
 )
 from mycode.ingester import (
     CouplingPoint,
@@ -1139,3 +1142,88 @@ class TestDepFileDirJsIngester:
         names = [d.name for d in deps]
         assert "express" in names
         assert "cors" in names
+
+
+# ── AST Parser Fallback Tests ──
+
+
+class TestASTParserFallback:
+    """Tests that the ingester falls back to regex when AST parser is unavailable."""
+
+    def _make_project(self, tmp_path):
+        (tmp_path / "index.js").write_text(
+            "const express = require('express');\nfunction handler(req, res) { res.send('ok'); }\n"
+        )
+        (tmp_path / "package.json").write_text(json.dumps({
+            "name": "test", "version": "1.0.0",
+            "dependencies": {"express": "^4.18.0"},
+        }))
+        return tmp_path
+
+    def test_fallback_when_node_unavailable(self, tmp_path):
+        """When Node.js is not found, ingester falls back to regex and still works."""
+        project = self._make_project(tmp_path)
+        with patch("mycode.js_ingester._check_node_available", return_value=False):
+            ingester = JsProjectIngester(project, skip_npm_check=True)
+            result = ingester.ingest()
+        assert result.files_analyzed >= 1
+        fn_names = [f.name for a in result.file_analyses for f in a.functions]
+        assert "handler" in fn_names
+
+    def test_fallback_when_typescript_unavailable(self, tmp_path):
+        """When typescript is not installed, ingester falls back to regex."""
+        project = self._make_project(tmp_path)
+        with patch("mycode.js_ingester._check_node_available", return_value=True), \
+             patch("mycode.js_ingester._check_typescript_available", return_value=False):
+            ingester = JsProjectIngester(project, skip_npm_check=True)
+            result = ingester.ingest()
+        assert result.files_analyzed >= 1
+        fn_names = [f.name for a in result.file_analyses for f in a.functions]
+        assert "handler" in fn_names
+
+    def test_fallback_when_parser_crashes(self, tmp_path):
+        """When AST parser returns invalid output, falls back to regex per-file."""
+        project = self._make_project(tmp_path)
+        with patch("mycode.js_ingester._parse_files_with_ts_ast", return_value=None):
+            ingester = JsProjectIngester(project, skip_npm_check=True)
+            # Force AST parser to appear available
+            ingester._node_available = True
+            ingester._ts_available = True
+            result = ingester.ingest()
+        assert result.files_analyzed >= 1
+        fn_names = [f.name for a in result.file_analyses for f in a.functions]
+        assert "handler" in fn_names
+
+    def test_use_ast_parser_false_skips_ast(self, tmp_path):
+        """When use_ast_parser=False, regex is used without checking Node."""
+        project = self._make_project(tmp_path)
+        ingester = JsProjectIngester(project, skip_npm_check=True, use_ast_parser=False)
+        result = ingester.ingest()
+        assert result.files_analyzed >= 1
+        # Node availability should never have been checked
+        assert ingester._node_available is None
+
+    def test_availability_cached_per_instance(self, tmp_path):
+        """Node/TS availability is checked only once per ingester instance."""
+        project = self._make_project(tmp_path)
+        call_count = {"node": 0, "ts": 0}
+
+        original_node = _check_node_available
+        original_ts = _check_typescript_available
+
+        def counting_node():
+            call_count["node"] += 1
+            return original_node()
+
+        def counting_ts():
+            call_count["ts"] += 1
+            return original_ts()
+
+        with patch("mycode.js_ingester._check_node_available", side_effect=counting_node), \
+             patch("mycode.js_ingester._check_typescript_available", side_effect=counting_ts):
+            ingester = JsProjectIngester(project, skip_npm_check=True)
+            result = ingester.ingest()
+
+        # Each should be called at most once regardless of file count
+        assert call_count["node"] <= 1
+        assert call_count["ts"] <= 1

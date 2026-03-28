@@ -1,0 +1,9 @@
+{
+  "name": "mycode-js-parser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript Compiler API parser for myCode JS/TS ingestion",
+  "dependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,207 +1,303 @@
-# Plan: Promote Confirmed Corpus Patterns into Library Profiles
+# Plan: Replace JS/TS Regex Ingester with TypeScript Compiler API Parser
 
-## Overview
+## Problem
 
-271 unique patterns extracted from 2,081 repos. 33 patterns appear in 10+ repos. This plan fixes classification gaps, enriches profiles with corpus-confirmed counts, and adds 2 new remediation patterns.
+The JS ingester (`src/mycode/js_ingester.py`, class `_JsFileAnalyzer`) uses 12+ regex patterns to extract functions, imports, classes, and dependency usage from JS/TS files. This misses:
+
+- **Nested functions** — regex only finds top-level and class methods; inner functions/closures invisible
+- **Dynamic imports** — `import(variable)` partially handled but `import(template literal)` missed
+- **TypeScript specifics** — generics with nested angle brackets break regex, complex type annotations confuse function extraction, interface/type/enum declarations ignored
+- **Complex module patterns** — `export default class {}`, re-exports with renaming, `export =`, barrel files with `export * from`
+- **JSX/TSX** — JSX expressions containing `{` confuse brace-depth tracking used for scope detection
+- **Decorators** — TypeScript/experimental decorators not captured
+- **Arrow functions without parens** — `x => x + 1` not matched by `_JS_ARROW_FUNC_RE` (requires `(`)
+
+The Python ingester uses `ast.parse()` and gets full-fidelity results. The JS path needs parity.
 
 ---
 
-## Step 1: Fix Classification Gaps in `classifiers.py`
+## Current Architecture
 
-**File:** `src/mycode/classifiers.py`
+### JS File Parsing (what we're replacing)
+- `_JsFileAnalyzer.analyze(source)` in `js_ingester.py:422-456`
+- Steps: strip comments → compute brace depths → extract classes → extract functions → extract imports → extract global vars
+- Returns `FileAnalysis` (shared dataclass from `ingester.py:146`)
+- Called by `JsProjectIngester._parse_file()` at line 858
 
-The root cause: `http_load_testing` is not in `_CATEGORY_DOMAIN_MAP`, and `"missing"` / `"could not start"` / `"degradation"` are not in `_NAME_DOMAIN_KEYWORDS`. So these findings fall through to "unclassified".
+### Existing Node.js Subprocess Pattern (what we're replicating)
+- `js_module_loader.js` — Node.js script, reads JSON from stdin, writes JSON to stdout
+- `js_module_loader.py` — Python wrapper: `_check_node_available()`, `subprocess.run()`, JSON parse, timeout handling, dataclass results
+- Pattern: `task = json.dumps({...})` → `subprocess.run([node_path, script], input=task, ...)` → parse stdout JSON
 
-### Changes to `_NAME_DOMAIN_KEYWORDS` (line ~170):
-Add these entries (order matters — more specific first):
-```python
-("could not start", "dependency_failure"),       # 1,218 repos — server start failures
-("missing depend", "dependency_failure"),          # 190+102 repos — missing deps
-("degradation", "scaling_collapse"),               # 82 repos — response time degradation
+### Data Structures (must match exactly)
+The parser output must populate these existing dataclasses:
+- `FunctionInfo(name, file_path, lineno, end_lineno, args, decorators, calls, is_method, class_name, is_async, globals_accessed)`
+- `ClassInfo(name, file_path, lineno, end_lineno, methods, bases, decorators)`
+- `ImportInfo(module, names, alias, is_from_import, lineno)`
+- `GlobalVarInfo(name, file_path, lineno)`
+- `FileAnalysis(file_path, functions, classes, imports, global_vars, parse_error, lines_of_code)`
+
+### Export info (what `_JsFileAnalyzer` does NOT currently track)
+- Whether a function/class is exported — not in the current dataclasses
+- We won't add an `exported` field to `FunctionInfo`/`ClassInfo` yet, because nothing downstream consumes it and the acceptance criteria says "do not change report output format". We can capture it in the JSON output from the parser for future use, but silently drop it in the Python wrapper.
+
+**Decision needed:** The acceptance criteria say "Outputs JSON with: ... export statements, ... dependency usage patterns (which imported modules are called where)." These are not in the current dataclasses. Options:
+1. Include them in the parser JSON output but don't wire into dataclasses (future-proof, no downstream change)
+2. Skip them entirely
+
+**Recommendation:** Option 1 — the parser outputs them, the Python wrapper ignores them for now.
+
+---
+
+## Design
+
+### New Files
+
+#### 1. `src/mycode/js_parser.js` — TypeScript Compiler API parser
+
+Single Node.js script. One dependency: `typescript` (via npm).
+
+**Input** (JSON on stdin):
+```json
+{
+  "command": "parse",
+  "file_path": "/absolute/path/to/file.tsx",
+  "source": "...optional, if provided parse this instead of reading file..."
+}
 ```
 
-**Why `_NAME_DOMAIN_KEYWORDS` and not `_CATEGORY_DOMAIN_MAP`?**
-`http_load_testing` findings span multiple domains (start failures = dependency_failure, response time = scaling_collapse, concurrency = concurrency_failure). Adding `http_load_testing` to `_CATEGORY_DOMAIN_MAP` would force one domain for all. Title-based keywords are more precise.
-
-### Changes to `_PATTERN_RULES` (line ~257):
-Add pattern rules so the failure_pattern classifier also fires:
-```python
-("dependency_failure", ["could not start", "server", "startup"], "missing_server_dependency"),
-("dependency_failure", ["missing depend", "unresolvable"], "unresolvable_dependency"),
-("scaling_collapse", ["response time", "degradation", "latency"], "response_time_cliff"),
+**Output** (JSON on stdout):
+```json
+{
+  "status": "ok",
+  "functions": [
+    {
+      "name": "handleClick",
+      "lineno": 10,
+      "end_lineno": 25,
+      "args": ["event", "options"],
+      "is_async": false,
+      "is_method": false,
+      "class_name": null,
+      "decorators": [],
+      "calls": ["console.log", "setState", "fetchData"],
+      "exported": false
+    }
+  ],
+  "classes": [
+    {
+      "name": "UserService",
+      "lineno": 30,
+      "end_lineno": 80,
+      "bases": ["BaseService"],
+      "methods": ["getUser", "saveUser"],
+      "decorators": ["Injectable"],
+      "exported": true
+    }
+  ],
+  "imports": [
+    {
+      "module": "react",
+      "names": ["useState", "useEffect"],
+      "alias": null,
+      "is_from_import": true,
+      "lineno": 1
+    }
+  ],
+  "global_vars": [
+    {"name": "API_URL", "lineno": 5}
+  ],
+  "exports": ["handleClick", "UserService", "API_URL"],
+  "lines_of_code": 95
+}
 ```
 
-### No changes to `_CATEGORY_DOMAIN_MAP` — `http_load_testing` intentionally excluded.
+**Error output:**
+```json
+{
+  "status": "error",
+  "error": "description",
+  "error_type": "ParseError"
+}
+```
 
----
+**Implementation approach:**
+- `ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true)` — parses any JS/TS/JSX/TSX without needing tsconfig
+- Walk the AST with `ts.forEachChild` recursively
+- Track scope (class context, nesting) via a visitor stack
+- For call extraction within function bodies: walk function body node, collect `ts.SyntaxKind.CallExpression` identifiers
+- For decorators: check `ts.canHaveDecorators(node)` → `ts.getDecorators(node)`
+- Line numbers: `sourceFile.getLineAndCharacterOfPosition(node.getStart())`
 
-## Step 2: Enrich Existing Profiles with `corpus_confirmed`
+**Key design decisions:**
+- Parse with `setParentNodes: true` so we can walk up to determine class membership
+- Use `ts.ScriptTarget.Latest` + `ts.ScriptKind` auto-detected from extension to handle all four file types
+- For syntax errors: TypeScript parser is error-recovering — it still produces an AST. We parse what we can and report diagnostics as warnings, not failures.
+- The script does NOT require project-level `tsconfig.json` or `node_modules`. It's pure syntactic parsing, no type checking.
+- Timeout: 10s per file (same as module loader)
 
-**Files:** 8 profile JSONs in `src/mycode/profiles/python/`
+#### 2. Python wrapper — modifications to `js_ingester.py`
 
-For each profile, add `corpus_confirmed` to entries in `known_failure_modes` where the corpus extraction has matching patterns. This is a new field — profiles currently have `name`, `description`, `trigger_conditions`, `severity`, `versions_affected`, `detection_hint`.
+**New function: `_parse_file_with_ts_parser()`**
 
-### pandas.json
-Add `corpus_confirmed` to existing failure modes, and add new entries for patterns confirmed in corpus but missing from profile:
-
-| Pattern | Corpus Count | Action |
-|---------|-------------|--------|
-| data_volume_scaling / scaling_collapse | 283 | Add `corpus_confirmed: 283` to `memory_error_on_operations` (closest match) |
-| silent_data_type_changes / input_handling | 60 | Add `corpus_confirmed: 60` to `silent_dtype_coercion` |
-| memory_profiling_over_time / resource_exhaustion | 52 | New entry: `memory_growth_over_time` |
-| merge_memory_stress / resource_exhaustion | 49 | Add `corpus_confirmed: 49` to `memory_error_on_operations` (merge is covered) |
-| iterrows_vs_vectorized / scaling_collapse | 49 | Add `corpus_confirmed: 49` to `apply_performance_cliff` (same antipattern class) |
-| memory_crash_on_data_ops / resource_exhaustion | 57 | Covered by `memory_error_on_operations`, add count |
-
-### numpy.json
-| Pattern | Corpus Count | Action |
-|---------|-------------|--------|
-| array_size_scaling / scaling_collapse | 142 | Add `corpus_confirmed: 142` to closest existing mode |
-| repeated_allocation_memory / resource_exhaustion | 41 | Add `corpus_confirmed: 41` |
-
-### streamlit.json
-| Pattern | Corpus Count | Action |
-|---------|-------------|--------|
-| cache_memory_growth / resource_exhaustion | 296 | Add `corpus_confirmed: 296` to existing cache mode |
-
-### requests.json
-| Pattern | Corpus Count | Action |
-|---------|-------------|--------|
-| concurrent_request_load / concurrency_failure | 36 | Add `corpus_confirmed: 36` |
-| large_download_memory / resource_exhaustion | 32 | Add `corpus_confirmed: 32` |
-| timeout_behavior / integration_failure | 29 | Add `corpus_confirmed: 29` |
-| session_vs_individual_performance / resource_exhaustion | 27 | Add `corpus_confirmed: 27` |
-
-### httpx.json
-| Pattern | Corpus Count | Action |
-|---------|-------------|--------|
-| async_concurrent_load / concurrency_failure | 19 | Add `corpus_confirmed: 19` |
-
-### pydantic.json
-| Pattern | Corpus Count | Action |
-|---------|-------------|--------|
-| validation_throughput / scaling_collapse | 22 | Add `corpus_confirmed: 22` |
-
-### fastapi.json
-| Pattern | Corpus Count | Action |
-|---------|-------------|--------|
-| server_start_failure / dependency_failure | shared 1,218 | Add `corpus_confirmed: 1218` (shared across frameworks) |
-| response_time_degradation / scaling_collapse | shared 82 | Add `corpus_confirmed: 82` (shared) |
-
-### flask.json
-Same two patterns as fastapi — `corpus_confirmed: 1218` and `corpus_confirmed: 82`.
-
-**Approach:** Read each profile, identify the matching `known_failure_modes` entry, add the `corpus_confirmed` field. If no matching entry exists (e.g., pandas `memory_growth_over_time`), add a new `known_failure_modes` entry with full schema.
-
----
-
-## Step 3: Add 2 New Remediation Patterns in `documents.py`
-
-**File:** `src/mycode/documents.py` (after line ~1260, before `_match_remediation`)
-
-### Pattern 1: Pandas silent data type changes (60 repos)
 ```python
-@_register_pattern
-def _pat_pandas_silent_dtypes(f, framework, fields):
-    if "pandas" in (f.affected_dependencies or []) and (
-        f.failure_pattern == "silent_data_type_changes"
-        or ("dtype" in f.title.lower() or "type" in f.title.lower())
-        and f.category == "edge_case_input"
-    ):
-        return (
-            "Pandas silently converts data types when input values don't match "
-            "expected types. A single non-numeric value in an integer column "
-            "converts the entire column to object dtype, increasing memory 10x "
-            "and producing incorrect numeric operations without raising errors.",
-            "Specify dtypes explicitly in read_csv(dtype={...}), use "
-            "pd.to_numeric(errors='coerce') for controlled conversion, and "
-            "validate column dtypes after loading with df.dtypes checks.",
+def _parse_file_with_ts_parser(
+    file_path: str,
+    rel_path: str,
+    source: str,
+    node_path: str = "node",
+    timeout: int = 10,
+) -> FileAnalysis | None:
+    """Try to parse a JS/TS file using the TypeScript compiler API.
+
+    Returns FileAnalysis on success, None on failure (caller falls back to regex).
+    """
+```
+
+- Locates `js_parser.js` via `Path(__file__).parent / "js_parser.js"` (same pattern as `js_module_loader.py`)
+- Checks Node.js availability (cache result for session — don't re-check per file)
+- Checks `typescript` npm package availability (single check: `node -e "require('typescript')"`)
+- Sends source via stdin JSON, reads stdout JSON
+- Converts JSON output → `FileAnalysis` with proper `FunctionInfo`, `ClassInfo`, `ImportInfo`, `GlobalVarInfo`
+- On any failure (Node not available, typescript not installed, parse error, timeout, bad JSON): returns `None`
+
+**Modification to `JsProjectIngester._parse_file()`** (line 840-868):
+
+```python
+def _parse_file(self, file_path: Path, rel_path: str) -> FileAnalysis:
+    # Read source (same as now)
+    source = ...
+
+    # Try AST parser first
+    if self._use_ast_parser:
+        ast_result = _parse_file_with_ts_parser(
+            str(file_path), rel_path, source
         )
-    return None
+        if ast_result is not None:
+            return ast_result
+
+    # Fallback: existing regex analysis (unchanged)
+    analyzer = _JsFileAnalyzer(rel_path)
+    result = analyzer.analyze(source)
+    ...
 ```
 
-### Pattern 2: Requests concurrent load (36 repos)
-```python
-@_register_pattern
-def _pat_requests_concurrent(f, framework, fields):
-    if "requests" in (f.affected_dependencies or []) and (
-        f.failure_domain == "concurrency_failure"
-        or f.category == "concurrent_execution"
-    ):
-        return (
-            f"The requests library is synchronous — each call blocks its "
-            f"thread until the response arrives. At {fields['load']} concurrent "
-            f"requests, all threads are occupied waiting on I/O and new "
-            f"requests queue.",
-            "Use requests.Session() for connection pooling, switch to "
-            "httpx.AsyncClient or aiohttp for async I/O, or use "
-            "concurrent.futures.ThreadPoolExecutor with a bounded pool size.",
-        )
-    return None
-```
+**New `__init__` parameter:** `use_ast_parser: bool = True` — allows disabling AST parser in tests or if Node.js unavailable. Auto-set to `False` on first failure to avoid repeated subprocess spawns.
+
+**Caching strategy:**
+- `_node_available: bool | None = None` — checked once per ingester instance
+- `_ts_available: bool | None = None` — checked once per ingester instance
+- If either is False, skip AST parser for all files (fall back to regex silently)
+
+### npm Dependency: `typescript`
+
+- The `typescript` package is needed at runtime when parsing JS/TS files
+- It should be installed in myCode's own environment, NOT in the user's project
+- Location: `src/mycode/node_modules/typescript` — installed during myCode's own setup
+- Add to project's `package.json` (create one at `src/mycode/package.json` if needed) or document as a prerequisite
+- **Alternative**: bundle with myCode's pip package — but npm packages can't go in pip wheels. Better: check on first use, log clear warning if missing, fall back to regex.
+
+**Decision needed:** Where should `typescript` be installed?
+- Option A: `src/mycode/package.json` with `npm install` as build step
+- Option B: Expect it globally (`npm install -g typescript`) — fragile
+- Option C: Auto-install into a known location on first use — magic, risky
+
+**Recommendation:** Option A. Add `src/mycode/package.json` with `{"dependencies": {"typescript": "^5.x"}}`. Document `npm install` in setup. The parser script resolves `typescript` from its own `__dirname/node_modules`.
 
 ---
 
-## Step 4: New Tests
+## Fallback Behavior
 
-**File:** `tests/test_classifiers.py` (or wherever classifier tests live)
+The regex ingester is **never deleted**. Fallback chain:
 
-### Test 1: Server start failure gets `dependency_failure`
-```python
-def test_server_start_classified_as_dependency_failure():
-    result = classify_finding(
-        scenario_name="Application server could not start",
-        scenario_category="http_load_testing",
-    )
-    assert result["failure_domain"] == "dependency_failure"
-    assert result["failure_pattern"] == "missing_server_dependency"
-```
+1. Check Node.js available → if no, use regex for all files, log once
+2. Check `typescript` importable → if no, use regex for all files, log once
+3. Per file: call `js_parser.js` → if it fails (timeout, bad output, crash), use regex for that file, log warning
+4. If AST parser succeeds: use its result, skip regex entirely for that file
 
-### Test 2: Response time degradation gets `scaling_collapse`
-```python
-def test_response_time_degradation_classified_as_scaling_collapse():
-    result = classify_finding(
-        scenario_name="Response time degradation on your application",
-        scenario_category="http_load_testing",
-    )
-    assert result["failure_domain"] == "scaling_collapse"
-    assert result["failure_pattern"] == "response_time_cliff"
-```
-
-### Test 3: Missing dependencies gets `dependency_failure`
-```python
-def test_missing_deps_classified_as_dependency_failure():
-    result = classify_finding(
-        scenario_name="4 missing dependencies",
-        scenario_category="",
-    )
-    assert result["failure_domain"] == "dependency_failure"
-    assert result["failure_pattern"] == "unresolvable_dependency"
-```
+No user-visible change in behavior when fallback activates. The report looks the same — just with less accurate analysis.
 
 ---
 
-## Step 5: Run Tests
+## File Changes Summary
 
-Run the fast test suite to verify nothing breaks:
-```
-pytest tests/ --ignore=tests/test_integration.py --ignore=tests/test_session.py --ignore=tests/test_pipeline.py -k "not (TestPipelineIntegration or TestCLIExitCode)"
-```
+| File | Change |
+|------|--------|
+| `src/mycode/js_parser.js` | **NEW** — TypeScript Compiler API parser script |
+| `src/mycode/package.json` | **NEW** — declares `typescript` dependency |
+| `src/mycode/js_ingester.py` | **MODIFY** — add `_parse_file_with_ts_parser()`, modify `_parse_file()` and `__init__()` |
+| `tests/test_js_parser.py` | **NEW** — tests for the AST parser (10+ tests) |
+| `tests/test_js_ingester.py` | **MODIFY** — add tests for fallback behavior |
+
+Files NOT modified:
+- `ingester.py` (Python ingester — untouched)
+- `report.py`, `documents.py` (report output — untouched)
+- `js_module_loader.js/.py` (separate concern — untouched)
+- Any existing test files (except `test_js_ingester.py` for fallback tests)
 
 ---
 
-## What Is NOT Changed
+## Test Plan
 
-- `scripts/corpus_extract.py` — untouched
-- `corpus_extraction/` output files — untouched
-- Test logic / scenario generation code — untouched
-- Profile JSON schema — only additive (`corpus_confirmed` field added, no restructuring)
+### `tests/test_js_parser.py` — New (10+ tests)
+
+1. **Plain JS function declarations** — function, arrow, expression, methods → correct name/args/lineno/calls
+2. **TypeScript with type annotations** — generics, return types, parameter types don't break extraction
+3. **JSX component** — React component with JSX return parsed correctly, not confused by `{` in JSX
+4. **TSX component** — TypeScript + JSX combination
+5. **ES6 imports** — default, named, namespace, side-effect, re-exports
+6. **CommonJS require** — const, destructured, bare, dynamic
+7. **Class declarations** — with extends, methods, decorators, static members
+8. **Nested functions** — inner functions captured (improvement over regex)
+9. **Empty file** — returns empty FileAnalysis, no crash
+10. **Syntax errors** — malformed JS still produces partial results (TS parser is error-recovering)
+11. **Dynamic imports** — `import()` with literal and variable arguments
+12. **Export detection** — exported vs non-exported functions/classes distinguished in parser JSON
+13. **Global variables** — module-level const/let/var captured
+14. **Async functions** — async flag correctly set for async functions, async arrows, async methods
+
+### `tests/test_js_ingester.py` — Additions
+
+15. **Fallback when Node.js unavailable** — mock `shutil.which` to return None, verify regex path used
+16. **Fallback when typescript not installed** — mock subprocess to fail on ts check, verify regex path used
+17. **Fallback when parser crashes** — mock subprocess to return bad JSON, verify regex path used for that file
+18. **AST parser caching** — verify Node/TS availability checked only once per ingester instance
+
+### Existing tests
+- All existing `test_js_ingester.py` tests must pass unchanged (they test regex behavior which remains as fallback)
+- All 2,152+ fast tests must pass
 
 ---
 
-## Risk Assessment
+## Execution Order
 
-- **Low risk:** Classifier changes only affect _new_ reports. Existing extraction data and reports are unaffected.
-- **Low risk:** Profile `corpus_confirmed` is a new field — nothing reads it yet. It's metadata for human review and future library enrichment.
-- **Low risk:** Remediation patterns are additive — new patterns checked after existing ones, so no change to current behaviour.
-- **Medium risk:** The `"could not start"` keyword in `_NAME_DOMAIN_KEYWORDS` is broad. But it's checked against `name_lower` (the finding title), and this exact phrase only appears in HTTP load testing findings. No false positives expected.
+1. Create `src/mycode/package.json` and `npm install typescript`
+2. Write `src/mycode/js_parser.js` — the Node.js parser script
+3. Manually test parser script: `echo '{"command":"parse","file_path":"test.js"}' | node src/mycode/js_parser.js`
+4. Write `_parse_file_with_ts_parser()` in `js_ingester.py`
+5. Modify `JsProjectIngester.__init__()` and `_parse_file()` for AST-first-with-fallback
+6. Write `tests/test_js_parser.py`
+7. Add fallback tests to `tests/test_js_ingester.py`
+8. Run full fast test suite, fix any failures
+9. Test against a real JS project to verify end-to-end
+
+---
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+|------|-----------|
+| `typescript` npm package adds ~40MB | It's a dev/analysis dependency, not shipped to user. Only needed on myCode's machine. |
+| Subprocess spawn per file is slow | TypeScript parser is fast (~10ms per file). Total overhead for typical project (20-50 files) is ~1-2s. Acceptable. Could batch multiple files in one subprocess call if needed later. |
+| Node.js not available on user's machine | Graceful fallback to regex. Log once. No crash. |
+| TS compiler API changes between versions | Pin `typescript` version. TS compiler API is stable for basic AST walking. |
+| Parser output doesn't match regex output exactly | Tests compare both paths on same input. Differences are improvements (nested functions found), not regressions. |
+
+---
+
+## Open Questions for Review
+
+1. **Batch mode?** Should `js_parser.js` accept multiple files per invocation (JSONL) to reduce subprocess overhead? Adds complexity but could matter for large projects.
+2. **`package.json` location** — `src/mycode/package.json` or project root? Root already has Python tooling; a nested one is cleaner but requires `npm install` in that directory.
+3. **Export tracking** — capture in parser JSON and ignore in Python wrapper, or skip entirely?
+4. **`call` extraction depth** — should nested calls inside callbacks/closures within a function body be attributed to the outer function? (Regex currently does this via brace range; AST can be more precise.)

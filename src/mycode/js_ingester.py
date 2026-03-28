@@ -1,15 +1,18 @@
 """JavaScript/Node.js Project Ingester (C3) — Static analysis and dependency resolution.
 
-Regex-based JS/TS parsing, dependency extraction from package.json and
-package-lock.json, function flow mapping, and coupling point identification.
-Handles partial parsing gracefully.
+AST-based JS/TS parsing via TypeScript Compiler API (with regex fallback),
+dependency extraction from package.json and package-lock.json, function flow
+mapping, and coupling point identification. Handles partial parsing gracefully.
 
-Pure Python. No LLM dependency. No Node.js dependency for analysis.
+Pure Python orchestrator. Node.js subprocess used for AST parsing when available.
 """
 
 import json
 import logging
+import os
 import re
+import shutil
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -416,6 +419,155 @@ def _parse_js_args(args_str: str) -> list[str]:
     return args
 
 
+# ── TypeScript Compiler API Parser (AST-based) ──
+
+_JS_PARSER_SCRIPT = Path(__file__).parent / "js_parser.js"
+_AST_PARSE_TIMEOUT = 30  # seconds for batch parse call
+
+
+def _check_node_available() -> bool:
+    """Return True if Node.js is available on PATH."""
+    try:
+        result = subprocess.run(
+            ["node", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _check_typescript_available() -> bool:
+    """Return True if the typescript package is importable by our parser script."""
+    try:
+        result = subprocess.run(
+            ["node", "-e", f"require(require('path').join({json.dumps(str(_JS_PARSER_SCRIPT.parent))}, 'node_modules', 'typescript'))"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _parse_files_with_ts_ast(
+    file_entries: list[dict],
+    timeout: int = _AST_PARSE_TIMEOUT,
+) -> list[dict] | None:
+    """Parse multiple JS/TS files using the TypeScript Compiler API.
+
+    Args:
+        file_entries: List of dicts with keys 'file_path' and 'source'.
+        timeout: Subprocess timeout in seconds.
+
+    Returns:
+        List of result dicts on success, None on failure.
+    """
+    if not file_entries:
+        return []
+
+    task_json = json.dumps(file_entries)
+
+    try:
+        result = subprocess.run(
+            ["node", str(_JS_PARSER_SCRIPT)],
+            input=task_json,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("AST parser timed out after %ds for %d files", timeout, len(file_entries))
+        return None
+    except OSError as exc:
+        logger.warning("Failed to spawn AST parser: %s", exc)
+        return None
+
+    stdout = result.stdout.strip()
+    if not stdout:
+        stderr = (result.stderr or "").strip()[:500]
+        logger.warning("AST parser produced no output (exit %d): %s", result.returncode, stderr)
+        return None
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        logger.warning("AST parser returned invalid JSON: %.200s", stdout)
+        return None
+
+    if not isinstance(data, list):
+        logger.warning("AST parser returned non-array: %s", type(data).__name__)
+        return None
+
+    return data
+
+
+def _ast_result_to_file_analysis(result: dict, rel_path: str) -> FileAnalysis | None:
+    """Convert a single AST parser result dict to a FileAnalysis.
+
+    Returns None if the result indicates an error.
+    """
+    if result.get("status") != "ok":
+        return None
+
+    functions = []
+    for f in result.get("functions", []):
+        functions.append(FunctionInfo(
+            name=f["name"],
+            file_path=rel_path,
+            lineno=f.get("lineno", 0),
+            end_lineno=f.get("end_lineno", 0),
+            args=f.get("args", []),
+            decorators=f.get("decorators", []),
+            calls=f.get("calls", []),
+            is_method=f.get("is_method", False),
+            class_name=f.get("class_name"),
+            is_async=f.get("is_async", False),
+        ))
+
+    classes = []
+    for c in result.get("classes", []):
+        classes.append(ClassInfo(
+            name=c["name"],
+            file_path=rel_path,
+            lineno=c.get("lineno", 0),
+            end_lineno=c.get("end_lineno", 0),
+            methods=c.get("methods", []),
+            bases=c.get("bases", []),
+            decorators=c.get("decorators", []),
+        ))
+
+    imports = []
+    for i in result.get("imports", []):
+        imports.append(ImportInfo(
+            module=i["module"],
+            names=i.get("names", []),
+            alias=i.get("alias"),
+            is_from_import=i.get("is_from_import", True),
+            lineno=i.get("lineno", 0),
+        ))
+
+    global_vars = []
+    for g in result.get("global_vars", []):
+        global_vars.append(GlobalVarInfo(
+            name=g["name"],
+            file_path=rel_path,
+            lineno=g.get("lineno", 0),
+        ))
+
+    return FileAnalysis(
+        file_path=rel_path,
+        functions=functions,
+        classes=classes,
+        imports=imports,
+        global_vars=global_vars,
+        lines_of_code=result.get("lines_of_code", 0),
+    )
+
+
 # ── File Analyzer ──
 
 
@@ -738,6 +890,7 @@ class JsProjectIngester:
         npm_timeout: float = 5.0,
         skip_npm_check: bool = False,
         dep_file_dir: Optional[Path] = None,
+        use_ast_parser: bool = True,
     ):
         self._project_path = Path(project_path).resolve()
         if not self._project_path.is_dir():
@@ -749,8 +902,33 @@ class JsProjectIngester:
         self._installed_packages = installed_packages
         self._npm_timeout = npm_timeout
         self._skip_npm_check = skip_npm_check
+        self._use_ast_parser = use_ast_parser
+
+        # Cached availability checks (set on first use)
+        self._node_available: bool | None = None
+        self._ts_available: bool | None = None
 
     # ── Public API ──
+
+    def _is_ast_parser_available(self) -> bool:
+        """Check if the AST parser (Node.js + typescript) is available. Caches result."""
+        if not self._use_ast_parser:
+            return False
+
+        if self._node_available is None:
+            self._node_available = _check_node_available()
+            if not self._node_available:
+                logger.info("Node.js not available — using regex JS parser")
+
+        if not self._node_available:
+            return False
+
+        if self._ts_available is None:
+            self._ts_available = _check_typescript_available()
+            if not self._ts_available:
+                logger.info("typescript package not available — using regex JS parser")
+
+        return self._ts_available
 
     def ingest(self) -> IngestionResult:
         """Analyze the project and return complete ingestion results."""
@@ -762,10 +940,21 @@ class JsProjectIngester:
             result.warnings.append("No JavaScript/TypeScript files found in project")
             return result
 
-        # 2. Parse each file
-        for file_path in js_files:
+        # 2. Parse files — batch AST first, regex fallback per-file
+        ast_results = self._batch_ast_parse(js_files)
+
+        for i, file_path in enumerate(js_files):
             rel_path = str(file_path.relative_to(self._project_path))
-            analysis = self._parse_file(file_path, rel_path)
+            analysis = None
+
+            # Try AST result first
+            if ast_results and i < len(ast_results) and ast_results[i] is not None:
+                analysis = ast_results[i]
+
+            # Fallback to regex
+            if analysis is None:
+                analysis = self._parse_file_regex(file_path, rel_path)
+
             result.file_analyses.append(analysis)
             if analysis.parse_error:
                 result.files_failed += 1
@@ -837,7 +1026,102 @@ class JsProjectIngester:
 
     # ── File Parsing ──
 
+    def _batch_ast_parse(self, js_files: list[Path]) -> list[FileAnalysis | None] | None:
+        """Batch-parse all files using the TypeScript AST parser.
+
+        Returns a list parallel to js_files with FileAnalysis or None per file.
+        Returns None entirely if AST parser is not available.
+        """
+        if not self._is_ast_parser_available():
+            return None
+
+        # Read sources and build batch request
+        file_entries = []
+        sources: list[str | None] = []
+        for file_path in js_files:
+            rel_path = str(file_path.relative_to(self._project_path))
+            try:
+                source = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                try:
+                    source = file_path.read_text(encoding="latin-1")
+                except Exception:
+                    source = None
+            except OSError:
+                source = None
+
+            if source is not None:
+                file_entries.append({
+                    "file_path": str(file_path),
+                    "source": source,
+                })
+                sources.append(source)
+            else:
+                file_entries.append(None)
+                sources.append(None)
+
+        # Filter to only parseable entries
+        valid_entries = [e for e in file_entries if e is not None]
+        if not valid_entries:
+            return None
+
+        raw_results = _parse_files_with_ts_ast(valid_entries)
+        if raw_results is None:
+            # AST parser failed entirely — disable for this instance
+            self._use_ast_parser = False
+            logger.warning("AST parser failed — falling back to regex for all files")
+            return None
+
+        # Map results back to original file order
+        result_iter = iter(raw_results)
+        analyses: list[FileAnalysis | None] = []
+        for i, file_path in enumerate(js_files):
+            if file_entries[i] is None:
+                analyses.append(None)
+                continue
+
+            rel_path = str(file_path.relative_to(self._project_path))
+            try:
+                raw = next(result_iter)
+                analysis = _ast_result_to_file_analysis(raw, rel_path)
+                if analysis is not None:
+                    # Fill in lines_of_code from source if parser didn't
+                    if analysis.lines_of_code == 0 and sources[i]:
+                        analysis.lines_of_code = len(sources[i].splitlines())
+                analyses.append(analysis)
+            except StopIteration:
+                analyses.append(None)
+
+        return analyses
+
     def _parse_file(self, file_path: Path, rel_path: str) -> FileAnalysis:
+        """Parse a single file — tries AST parser, falls back to regex."""
+        if self._is_ast_parser_available():
+            try:
+                source = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                try:
+                    source = file_path.read_text(encoding="latin-1")
+                except Exception:
+                    source = None
+            except OSError:
+                source = None
+
+            if source is not None:
+                raw_results = _parse_files_with_ts_ast([{
+                    "file_path": str(file_path),
+                    "source": source,
+                }])
+                if raw_results and len(raw_results) > 0:
+                    analysis = _ast_result_to_file_analysis(raw_results[0], rel_path)
+                    if analysis is not None:
+                        if analysis.lines_of_code == 0:
+                            analysis.lines_of_code = len(source.splitlines())
+                        return analysis
+
+        return self._parse_file_regex(file_path, rel_path)
+
+    def _parse_file_regex(self, file_path: Path, rel_path: str) -> FileAnalysis:
         """Parse a single JS/TS file and extract its structure."""
         analysis = FileAnalysis(file_path=rel_path)
 
