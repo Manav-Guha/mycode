@@ -243,6 +243,10 @@ function _selectedPill(name) {
 }
 
 async function submitIntentForm() {
+    if (!currentJobId) {
+        alert("No active job. Please submit a project first.");
+        return;
+    }
     const btn = $("run-btn");
     btn.disabled = true;
     btn.textContent = "Starting...";

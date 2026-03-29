@@ -200,14 +200,14 @@ async def submit_intent(
         "max_total_data": max_total_data,
         "analysis_depth": analysis_depth,
     }
-    result = handle_submit_intent(job_id, answers)
+    result = await asyncio.to_thread(handle_submit_intent, job_id, answers)
     return JSONResponse(content=result)
 
 
 @app.get("/api/predict/{job_id}")
 async def predict(job_id: str):
     """Return corpus-based predictions for a job's dependency stack."""
-    result = handle_predict(job_id)
+    result = await asyncio.to_thread(handle_predict, job_id)
     return JSONResponse(content=result)
 
 
