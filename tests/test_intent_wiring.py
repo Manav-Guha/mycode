@@ -18,8 +18,12 @@ from mycode.constraints import (
     per_user_data_to_items,
 )
 from mycode.prediction import (
+    PROFILED_DEPS,
     PredictionResult,
+    _extract_features,
+    _load_model,
     match_prediction_to_findings,
+    normalize_dep_name,
     predict_issues,
 )
 from mycode.report import (
@@ -290,59 +294,104 @@ def _write_corpus(tmp_path, patterns):
 
 
 class TestPredictIssues:
+    """Test predict_issues with model and corpus fallback paths."""
+
+    def _force_corpus_fallback(self):
+        """Force corpus lookup by clearing model cache."""
+        from mycode.prediction import _model_cache
+        saved = dict(_model_cache)
+        _model_cache.clear()
+        _model_cache["loaded"] = True  # mark as attempted
+        _model_cache["model"] = None
+        _model_cache["metadata"] = None
+        return saved
+
+    def _restore_cache(self, saved):
+        from mycode.prediction import _model_cache
+        _model_cache.clear()
+        _model_cache.update(saved)
+
     def test_uses_corpus_data(self, tmp_path):
-        corpus = [
-            {
-                "title": "Memory growth under concurrent Flask requests",
-                "confirmed_count": 10,
-                "affected_dependencies": ["flask", "sqlalchemy"],
-                "severity_distribution": {"critical": 7, "warning": 3},
-            },
-        ]
-        path = _write_corpus(str(tmp_path), corpus)
-        result = predict_issues(["flask", "sqlalchemy"], corpus_path=path)
-        assert isinstance(result, PredictionResult)
-        assert len(result.predictions) == 1
-        assert result.predictions[0].title == "Memory growth under concurrent Flask requests"
+        """Corpus fallback returns corpus-based predictions."""
+        saved = self._force_corpus_fallback()
+        try:
+            corpus = [
+                {
+                    "title": "Memory growth under concurrent Flask requests",
+                    "confirmed_count": 10,
+                    "affected_dependencies": ["flask", "sqlalchemy"],
+                    "severity_distribution": {"critical": 7, "warning": 3},
+                },
+            ]
+            path = _write_corpus(str(tmp_path), corpus)
+            result = predict_issues(["flask", "sqlalchemy"], corpus_path=path)
+            assert isinstance(result, PredictionResult)
+            assert len(result.predictions) == 1
+            assert result.predictions[0].title == "Memory growth under concurrent Flask requests"
+        finally:
+            self._restore_cache(saved)
 
     def test_empty_dependencies(self, tmp_path):
-        corpus = [
-            {
-                "title": "Some issue",
-                "confirmed_count": 5,
-                "affected_dependencies": ["flask"],
-                "severity_distribution": {"warning": 5},
-            },
-        ]
-        path = _write_corpus(str(tmp_path), corpus)
-        result = predict_issues([], corpus_path=path)
-        assert result.predictions == []
+        saved = self._force_corpus_fallback()
+        try:
+            corpus = [
+                {
+                    "title": "Some issue",
+                    "confirmed_count": 5,
+                    "affected_dependencies": ["flask"],
+                    "severity_distribution": {"warning": 5},
+                },
+            ]
+            path = _write_corpus(str(tmp_path), corpus)
+            result = predict_issues([], corpus_path=path)
+            assert result.predictions == []
+        finally:
+            self._restore_cache(saved)
 
     def test_no_corpus_file(self):
-        result = predict_issues(
-            ["flask"], corpus_path="/nonexistent/path.json",
-        )
-        assert result.predictions == []
+        saved = self._force_corpus_fallback()
+        try:
+            result = predict_issues(
+                ["flask"], corpus_path="/nonexistent/path.json",
+            )
+            assert result.predictions == []
+        finally:
+            self._restore_cache(saved)
 
     def test_scores_by_dependency_overlap(self, tmp_path):
-        corpus = [
-            {
-                "title": "Issue A",
-                "confirmed_count": 5,
-                "affected_dependencies": ["flask"],
-                "severity_distribution": {"warning": 5},
-            },
-            {
-                "title": "Issue B",
-                "confirmed_count": 5,
-                "affected_dependencies": ["flask", "pandas"],
-                "severity_distribution": {"critical": 5},
-            },
-        ]
-        path = _write_corpus(str(tmp_path), corpus)
-        result = predict_issues(["flask", "pandas"], corpus_path=path)
-        # Issue B has 2 dep overlap vs Issue A's 1, so B scores higher
-        assert result.predictions[0].title == "Issue B"
+        saved = self._force_corpus_fallback()
+        try:
+            corpus = [
+                {
+                    "title": "Issue A",
+                    "confirmed_count": 5,
+                    "affected_dependencies": ["flask"],
+                    "severity_distribution": {"warning": 5},
+                },
+                {
+                    "title": "Issue B",
+                    "confirmed_count": 5,
+                    "affected_dependencies": ["flask", "pandas"],
+                    "severity_distribution": {"critical": 5},
+                },
+            ]
+            path = _write_corpus(str(tmp_path), corpus)
+            result = predict_issues(["flask", "pandas"], corpus_path=path)
+            assert result.predictions[0].title == "Issue B"
+        finally:
+            self._restore_cache(saved)
+
+    def test_model_based_prediction(self):
+        """When model is available, returns model-based predictions."""
+        result = predict_issues(["flask", "sqlalchemy", "pandas"])
+        assert isinstance(result, PredictionResult)
+        assert len(result.predictions) > 0
+        assert len(result.predictions) <= 5
+        for p in result.predictions:
+            assert 0 < p.probability_pct <= 100
+            assert p.title
+            assert p.severity in ("critical", "warning", "info")
+        assert result.total_similar_projects > 0
 
 
 class TestMatchPredictionToFindings:
@@ -366,6 +415,120 @@ class TestMatchPredictionToFindings:
             [],
             ["concurrent_execution"],
         ) is True
+
+
+# ── 6c. Model-specific tests ──
+
+
+class TestNormalizeDepName:
+    def test_alias_mapping(self):
+        assert normalize_dep_name("react-dom") == "react"
+        assert normalize_dep_name("langchain-core") == "langchain"
+        assert normalize_dep_name("uvicorn") == "fastapi"
+
+    def test_npm_start_ignored(self):
+        assert normalize_dep_name("npm-start") is None
+
+    def test_unknown_dep_normalized(self):
+        assert normalize_dep_name("my-custom-lib") == "my_custom_lib"
+
+    def test_profiled_dep_passthrough(self):
+        assert normalize_dep_name("pandas") == "pandas"
+        assert normalize_dep_name("flask") == "flask"
+
+
+class TestFeatureExtraction:
+    def test_dep_features(self):
+        model, meta = _load_model()
+        if meta is None:
+            pytest.skip("Model not available")
+        cols = meta["feature_columns"]
+        X = _extract_features(["flask", "pandas", "numpy"], cols)
+        # Check shape
+        assert X.shape == (1, len(cols))
+        # Check dep columns
+        flask_idx = cols.index("dep_flask")
+        pandas_idx = cols.index("dep_pandas")
+        numpy_idx = cols.index("dep_numpy")
+        assert X[0, flask_idx] == 1.0
+        assert X[0, pandas_idx] == 1.0
+        assert X[0, numpy_idx] == 1.0
+        # Check a dep NOT present
+        react_idx = cols.index("dep_react")
+        assert X[0, react_idx] == 0.0
+
+    def test_alias_in_features(self):
+        """react-dom should activate dep_react."""
+        model, meta = _load_model()
+        if meta is None:
+            pytest.skip("Model not available")
+        cols = meta["feature_columns"]
+        X = _extract_features(["react-dom"], cols)
+        react_idx = cols.index("dep_react")
+        assert X[0, react_idx] == 1.0
+
+    def test_complexity_defaults(self):
+        """Without ingestion, complexity features get defaults."""
+        model, meta = _load_model()
+        if meta is None:
+            pytest.skip("Model not available")
+        cols = meta["feature_columns"]
+        X = _extract_features(["flask"], cols)
+        loc_idx = cols.index("loc")
+        assert X[0, loc_idx] == 0.0  # no ingestion → 0
+
+
+class TestModelLoading:
+    def test_loads_model(self):
+        model, meta = _load_model()
+        assert model is not None
+        assert meta is not None
+        assert "feature_columns" in meta
+        assert "target_columns" in meta
+        assert meta["training_samples"] > 0
+        assert meta["mean_auc"] > 0.5
+
+    def test_cache_returns_same(self):
+        m1, meta1 = _load_model()
+        m2, meta2 = _load_model()
+        assert m1 is m2
+        assert meta1 is meta2
+
+    def test_fallback_on_missing_model(self):
+        """Clearing cache and marking model as missing returns None."""
+        from mycode.prediction import _model_cache
+        saved = dict(_model_cache)
+        try:
+            _model_cache.clear()
+            _model_cache["loaded"] = True
+            _model_cache["model"] = None
+            _model_cache["metadata"] = None
+            m, meta = _load_model()
+            assert m is None
+            assert meta is None
+        finally:
+            _model_cache.clear()
+            _model_cache.update(saved)
+
+
+class TestModelPredictionOutput:
+    def test_probabilities_in_range(self):
+        result = predict_issues(["flask", "sqlalchemy", "pandas"])
+        for p in result.predictions:
+            assert 0 < p.probability_pct <= 100
+
+    def test_sorted_by_probability(self):
+        result = predict_issues(["flask", "sqlalchemy", "pandas"])
+        probs = [p.probability_pct for p in result.predictions]
+        assert probs == sorted(probs, reverse=True)
+
+    def test_max_five_predictions(self):
+        result = predict_issues(["flask", "pandas", "numpy", "streamlit", "sqlalchemy"])
+        assert len(result.predictions) <= 5
+
+    def test_never_crashes_on_unknown_deps(self):
+        result = predict_issues(["totally-unknown-dep-xyz"])
+        assert isinstance(result, PredictionResult)
 
 
 # ── 7. Report headroom framing ──

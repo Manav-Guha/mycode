@@ -1,0 +1,394 @@
+{
+  "feature_columns": [
+    "dep_anthropic",
+    "dep_anthropic_node",
+    "dep_axios",
+    "dep_chartjs",
+    "dep_chromadb",
+    "dep_dotenv",
+    "dep_express",
+    "dep_fastapi",
+    "dep_flask",
+    "dep_google_auth_library",
+    "dep_gradio",
+    "dep_httpx",
+    "dep_langchain",
+    "dep_langchainjs",
+    "dep_llamaindex",
+    "dep_mongoose",
+    "dep_nextjs",
+    "dep_node_core",
+    "dep_numpy",
+    "dep_openai",
+    "dep_openai_node",
+    "dep_os_pathlib",
+    "dep_pandas",
+    "dep_plotlyjs",
+    "dep_prisma",
+    "dep_pydantic",
+    "dep_react",
+    "dep_react_chartjs_2",
+    "dep_react_plotlyjs",
+    "dep_requests",
+    "dep_socketio",
+    "dep_sqlalchemy",
+    "dep_sqlite3",
+    "dep_streamlit",
+    "dep_stripe",
+    "dep_supabase",
+    "dep_supabase_js",
+    "dep_svelte",
+    "dep_tailwindcss",
+    "dep_threejs",
+    "dep_zod",
+    "dep_count",
+    "loc",
+    "file_count",
+    "files_failed",
+    "has_server_framework",
+    "language"
+  ],
+  "target_columns": [
+    "target_application_server_could_not_start",
+    "target_data_volume_scaling_pandas",
+    "target_response_time_degradation_on_your_application",
+    "target_cache_memory_growth_streamlit",
+    "target_array_size_scaling_numpy",
+    "target_computation_coupling_clear_timeout",
+    "target_general_stress_test_unrecognized_dependencies",
+    "target_validation_throughput_pydantic",
+    "target_dependency_installation_failed",
+    "target_n_plus_one_detection_sqlalchemy",
+    "target_scenario_failed_pandas_edge_case_dtypes",
+    "target_async_concurrent_load_httpx",
+    "target_get_root_http",
+    "target_memory_crash_on_data_operations_pandas",
+    "target_application_degrades_under_concurrent_load",
+    "target_concurrent_request_load_requests",
+    "target_memory_profiling_over_time_pandas",
+    "target_merge_memory_stress_pandas",
+    "target_response_time_degradation_on_admin",
+    "target_scenario_failed_pandas_iterrows_vs_vectorized",
+    "target_repeated_allocation_memory_numpy",
+    "target_env_validation_dotenv",
+    "target_js_query_throughput_supabase",
+    "target_scenario_failed_requests_large_download_memory",
+    "target_chain_length_scaling_langchain",
+    "target_scenario_failed_requests_timeout_behavior",
+    "target_concurrent_request_load_axios",
+    "target_scenario_failed_requests_session_vs_individual_performance",
+    "target_rate_limit_stress_openai",
+    "target_numpy_2_0_compatibility_numpy",
+    "target_connection_pool_stress_prisma",
+    "target_scenario_failed_unrecognized_deps_generic_stress",
+    "target_memory_crash_on_array_allocation_numpy",
+    "target_validation_throughput_zod",
+    "target_silent_number_overflow_numpy",
+    "target_scenario_failed_numpy_dtype_edge_cases",
+    "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check",
+    "target_scenario_failed_pandas_concurrent_dataframe_access",
+    "target_silent_data_corruption_risk_pandas",
+    "target_get_health_http"
+  ],
+  "dropped_targets": [],
+  "target_info": {
+    "target_application_server_could_not_start": {
+      "title": "Application server could not start",
+      "severity": "critical",
+      "category": "http_load_testing",
+      "confirmed_count": 1218
+    },
+    "target_data_volume_scaling_pandas": {
+      "title": "Data Volume Scaling (pandas)",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 442
+    },
+    "target_response_time_degradation_on_your_application": {
+      "title": "Response time degradation on your application",
+      "severity": "warning",
+      "category": "http_load_testing",
+      "confirmed_count": 425
+    },
+    "target_cache_memory_growth_streamlit": {
+      "title": "Cache Memory Growth (streamlit)",
+      "severity": "warning",
+      "category": "memory_profiling",
+      "confirmed_count": 296
+    },
+    "target_array_size_scaling_numpy": {
+      "title": "Array Size Scaling (numpy)",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 202
+    },
+    "target_computation_coupling_clear_timeout": {
+      "title": "Computation Coupling (Clear timeout)",
+      "severity": "warning",
+      "category": "data_volume_scaling",
+      "confirmed_count": 160
+    },
+    "target_general_stress_test_unrecognized_dependencies": {
+      "title": "General Stress Test (unrecognized dependencies)",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 149
+    },
+    "target_validation_throughput_pydantic": {
+      "title": "Validation Throughput (pydantic)",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 95
+    },
+    "target_dependency_installation_failed": {
+      "title": "Dependency installation failed",
+      "severity": "critical",
+      "category": "http_load_testing",
+      "confirmed_count": 91
+    },
+    "target_n_plus_one_detection_sqlalchemy": {
+      "title": "N Plus One Detection (sqlalchemy)",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 84
+    },
+    "target_scenario_failed_pandas_edge_case_dtypes": {
+      "title": "Scenario failed: pandas_edge_case_dtypes",
+      "severity": "critical",
+      "category": "edge_case_input",
+      "confirmed_count": 71
+    },
+    "target_async_concurrent_load_httpx": {
+      "title": "Async Concurrent Load (httpx)",
+      "severity": "critical",
+      "category": "concurrent_execution",
+      "confirmed_count": 69
+    },
+    "target_get_root_http": {
+      "title": "Get Root (http)",
+      "severity": "warning",
+      "category": "http_load_testing",
+      "confirmed_count": 66
+    },
+    "target_memory_crash_on_data_operations_pandas": {
+      "title": "Memory Crash on Data Operations (pandas)",
+      "severity": "warning",
+      "category": "edge_case_input",
+      "confirmed_count": 61
+    },
+    "target_application_degrades_under_concurrent_load": {
+      "title": "Application degrades under concurrent load",
+      "severity": "critical",
+      "category": "http_load_testing",
+      "confirmed_count": 60
+    },
+    "target_concurrent_request_load_requests": {
+      "title": "Concurrent Request Load (requests)",
+      "severity": "warning",
+      "category": "concurrent_execution",
+      "confirmed_count": 53
+    },
+    "target_memory_profiling_over_time_pandas": {
+      "title": "Memory Profiling Over Time (pandas)",
+      "severity": "critical",
+      "category": "memory_profiling",
+      "confirmed_count": 52
+    },
+    "target_merge_memory_stress_pandas": {
+      "title": "Merge Memory Stress (pandas)",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 49
+    },
+    "target_response_time_degradation_on_admin": {
+      "title": "Response time degradation on /admin",
+      "severity": "warning",
+      "category": "http_load_testing",
+      "confirmed_count": 48
+    },
+    "target_scenario_failed_pandas_iterrows_vs_vectorized": {
+      "title": "Scenario failed: pandas_iterrows_vs_vectorized",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 47
+    },
+    "target_repeated_allocation_memory_numpy": {
+      "title": "Repeated Allocation Memory (numpy)",
+      "severity": "critical",
+      "category": "memory_profiling",
+      "confirmed_count": 42
+    },
+    "target_env_validation_dotenv": {
+      "title": "Env Validation (dotenv)",
+      "severity": "warning",
+      "category": "edge_case_input",
+      "confirmed_count": 41
+    },
+    "target_js_query_throughput_supabase": {
+      "title": "Js Query Throughput (supabase)",
+      "severity": "warning",
+      "category": "concurrent_execution",
+      "confirmed_count": 32
+    },
+    "target_scenario_failed_requests_large_download_memory": {
+      "title": "Scenario failed: requests_large_download_memory",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 30
+    },
+    "target_chain_length_scaling_langchain": {
+      "title": "Chain Length Scaling (langchain)",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 27
+    },
+    "target_scenario_failed_requests_timeout_behavior": {
+      "title": "Scenario failed: requests_timeout_behavior",
+      "severity": "critical",
+      "category": "blocking_io",
+      "confirmed_count": 27
+    },
+    "target_concurrent_request_load_axios": {
+      "title": "Concurrent Request Load (axios)",
+      "severity": "warning",
+      "category": "concurrent_execution",
+      "confirmed_count": 27
+    },
+    "target_scenario_failed_requests_session_vs_individual_performance": {
+      "title": "Scenario failed: requests_session_vs_individual_performance",
+      "severity": "critical",
+      "category": "memory_profiling",
+      "confirmed_count": 25
+    },
+    "target_rate_limit_stress_openai": {
+      "title": "Rate Limit Stress (openai)",
+      "severity": "critical",
+      "category": "concurrent_execution",
+      "confirmed_count": 22
+    },
+    "target_numpy_2_0_compatibility_numpy": {
+      "title": "NumPy 2.0 Compatibility (numpy)",
+      "severity": "warning",
+      "category": "edge_case_input",
+      "confirmed_count": 21
+    },
+    "target_connection_pool_stress_prisma": {
+      "title": "Connection Pool Stress (prisma)",
+      "severity": "warning",
+      "category": "concurrent_execution",
+      "confirmed_count": 19
+    },
+    "target_scenario_failed_unrecognized_deps_generic_stress": {
+      "title": "Scenario failed: unrecognized_deps_generic_stress",
+      "severity": "critical",
+      "category": "data_volume_scaling",
+      "confirmed_count": 19
+    },
+    "target_memory_crash_on_array_allocation_numpy": {
+      "title": "Memory Crash on Array Allocation (numpy)",
+      "severity": "warning",
+      "category": "edge_case_input",
+      "confirmed_count": 17
+    },
+    "target_validation_throughput_zod": {
+      "title": "Validation Throughput (zod)",
+      "severity": "warning",
+      "category": "data_volume_scaling",
+      "confirmed_count": 16
+    },
+    "target_silent_number_overflow_numpy": {
+      "title": "Silent Number Overflow (numpy)",
+      "severity": "warning",
+      "category": "edge_case_input",
+      "confirmed_count": 15
+    },
+    "target_scenario_failed_numpy_dtype_edge_cases": {
+      "title": "Scenario failed: numpy_dtype_edge_cases",
+      "severity": "critical",
+      "category": "edge_case_input",
+      "confirmed_count": 15
+    },
+    "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check": {
+      "title": "Failure indicators triggered: numpy_numpy_2_breaking_changes_check",
+      "severity": "warning",
+      "category": "edge_case_input",
+      "confirmed_count": 15
+    },
+    "target_scenario_failed_pandas_concurrent_dataframe_access": {
+      "title": "Scenario failed: pandas_concurrent_dataframe_access",
+      "severity": "critical",
+      "category": "concurrent_execution",
+      "confirmed_count": 14
+    },
+    "target_silent_data_corruption_risk_pandas": {
+      "title": "Silent Data Corruption Risk (pandas)",
+      "severity": "warning",
+      "category": "edge_case_input",
+      "confirmed_count": 12
+    },
+    "target_get_health_http": {
+      "title": "Get Health (http)",
+      "severity": "warning",
+      "category": "http_load_testing",
+      "confirmed_count": 11
+    }
+  },
+  "training_samples": 3990,
+  "mean_auc": 0.8729,
+  "per_target_auc": {
+    "target_application_server_could_not_start": 0.9135,
+    "target_data_volume_scaling_pandas": 0.9314,
+    "target_response_time_degradation_on_your_application": 0.8846,
+    "target_cache_memory_growth_streamlit": 0.9065,
+    "target_array_size_scaling_numpy": 0.9314,
+    "target_computation_coupling_clear_timeout": 0.9205,
+    "target_general_stress_test_unrecognized_dependencies": 0.8615,
+    "target_validation_throughput_pydantic": 0.9172,
+    "target_dependency_installation_failed": 0.8738,
+    "target_n_plus_one_detection_sqlalchemy": 0.8615,
+    "target_scenario_failed_pandas_edge_case_dtypes": 0.8761,
+    "target_async_concurrent_load_httpx": 0.8362,
+    "target_get_root_http": 0.899,
+    "target_memory_crash_on_data_operations_pandas": 0.8658,
+    "target_application_degrades_under_concurrent_load": 0.8256,
+    "target_concurrent_request_load_requests": 0.8362,
+    "target_memory_profiling_over_time_pandas": 0.8391,
+    "target_merge_memory_stress_pandas": 0.832,
+    "target_response_time_degradation_on_admin": 0.8844,
+    "target_scenario_failed_pandas_iterrows_vs_vectorized": 0.8615,
+    "target_repeated_allocation_memory_numpy": 0.8549,
+    "target_env_validation_dotenv": 0.9746,
+    "target_js_query_throughput_supabase": 0.7686,
+    "target_scenario_failed_requests_large_download_memory": 0.8537,
+    "target_chain_length_scaling_langchain": 0.9602,
+    "target_scenario_failed_requests_timeout_behavior": 0.9092,
+    "target_concurrent_request_load_axios": 0.8362,
+    "target_scenario_failed_requests_session_vs_individual_performance": 0.843,
+    "target_rate_limit_stress_openai": 0.8362,
+    "target_numpy_2_0_compatibility_numpy": 0.8444,
+    "target_connection_pool_stress_prisma": 0.7774,
+    "target_scenario_failed_unrecognized_deps_generic_stress": 0.8615,
+    "target_memory_crash_on_array_allocation_numpy": 0.8648,
+    "target_validation_throughput_zod": 0.9172,
+    "target_silent_number_overflow_numpy": 0.8444,
+    "target_scenario_failed_numpy_dtype_edge_cases": 0.8761,
+    "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check": 0.8587,
+    "target_scenario_failed_pandas_concurrent_dataframe_access": 0.8362,
+    "target_silent_data_corruption_risk_pandas": 0.9435,
+    "target_get_health_http": 0.899
+  },
+  "xgb_params": {
+    "n_estimators": 200,
+    "max_depth": 4,
+    "learning_rate": 0.1,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "random_state": 42,
+    "verbosity": 0,
+    "n_jobs": -1
+  },
+  "sklearn_version": "1.8.0",
+  "xgboost_version": "3.2.0",
+  "trained_at": "2026-03-29T09:13:48.564203+00:00"
+}

@@ -695,6 +695,7 @@ def handle_predict(job_id: str) -> dict:
     result = predict_issues(
         dependency_names=dep_names,
         constraints=job.constraints,
+        ingestion=job.ingestion,
     )
 
     return {

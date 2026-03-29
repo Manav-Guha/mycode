@@ -33,6 +33,11 @@ web = [
 pdf = [
     "fpdf2>=2.8.0",
 ]
+ml = [
+    "scikit-learn>=1.3.0",
+    "xgboost>=2.0.0",
+    "joblib>=1.3.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/Manav-Guha/mycode"
@@ -46,7 +51,7 @@ mycode = "mycode.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mycode = ["profiles/**/*.json", "data/*.json"]
+mycode = ["profiles/**/*.json", "data/*.json", "data/*.joblib"]
 
 [tool.pytest.ini_options]
 markers = [
