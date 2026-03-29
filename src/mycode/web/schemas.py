@@ -82,6 +82,7 @@ class PreflightResponse:
 
     job_id: str = ""
     language: str = ""
+    detected_languages: list[str] = field(default_factory=list)
     project_name: str = ""
     dependencies: list[DependencyStatus] = field(default_factory=list)
     viability: Optional[ViabilityStatus] = None

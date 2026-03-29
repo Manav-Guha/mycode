@@ -20,6 +20,7 @@ from mycode.pipeline import (
     detect_language,
     detect_languages,
     determine_primary_language,
+    find_dep_dir_for_language,
     merge_ingestion_results,
     _infer_project_name,
 )
@@ -126,35 +127,53 @@ def handle_preflight(
 
         # Stage 3: Ingestion (run both ingesters for multi-language)
         installed = session.get_venv_packages()
-        dep_file_dir = session.find_dep_file_dir()
+        project_dir = session.project_copy_dir
 
         py_ingestion = None
         js_ingestion = None
 
         if "python" in languages:
             try:
+                py_dep_dir = find_dep_dir_for_language(project_dir, "python")
+                logger.info(
+                    "Python dep dir: %s", py_dep_dir,
+                )
                 py_ingester = ProjectIngester(
-                    project_path=session.project_copy_dir,
+                    project_path=project_dir,
                     installed_packages=installed,
                     skip_pypi_check=True,
-                    dep_file_dir=dep_file_dir,
+                    dep_file_dir=py_dep_dir,
                 )
                 py_ingestion = py_ingester.ingest()
                 py_ingestion.language = "python"
+                logger.info(
+                    "Python ingestion: %d deps, %d lines",
+                    len(py_ingestion.dependencies),
+                    py_ingestion.total_lines,
+                )
             except Exception as exc:
                 logger.warning("Python ingestion failed: %s", exc)
                 warnings.append(f"Python analysis failed: {exc}")
 
         if "javascript" in languages:
             try:
+                js_dep_dir = find_dep_dir_for_language(project_dir, "javascript")
+                logger.info(
+                    "JavaScript dep dir: %s", js_dep_dir,
+                )
                 js_ingester = JsProjectIngester(
-                    project_path=session.project_copy_dir,
+                    project_path=project_dir,
                     installed_packages=None,
                     skip_npm_check=True,
-                    dep_file_dir=dep_file_dir,
+                    dep_file_dir=js_dep_dir,
                 )
                 js_ingestion = js_ingester.ingest()
                 js_ingestion.language = "javascript"
+                logger.info(
+                    "JavaScript ingestion: %d deps, %d lines",
+                    len(js_ingestion.dependencies),
+                    js_ingestion.total_lines,
+                )
             except Exception as exc:
                 logger.warning("JavaScript ingestion failed: %s", exc)
                 warnings.append(f"JavaScript analysis failed: {exc}")
@@ -265,7 +284,8 @@ def handle_preflight(
 
         return PreflightResponse(
             job_id=job.id,
-            language=language,
+            language=job.language,
+            detected_languages=sorted(languages),
             project_name=project_name,
             dependencies=dep_statuses,
             viability=viability_status,

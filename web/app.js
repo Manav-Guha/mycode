@@ -65,6 +65,21 @@ async function apiGet(path) {
     return res.json();
 }
 
+function _formatLanguages(data) {
+    const detected = data.detected_languages || [];
+    const primary = data.language || "unknown";
+    if (detected.length <= 1) {
+        return escapeHtml(primary);
+    }
+    // Multi-language: "Python + JavaScript" with primary bolded
+    const _cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+    const parts = detected.map(l => {
+        const label = _cap(l);
+        return l === primary ? `<strong>${escapeHtml(label)}</strong>` : escapeHtml(label);
+    });
+    return parts.join(" + ");
+}
+
 function formatElapsed(seconds) {
     const s = Math.floor(seconds);
     if (s < 60) return s + "s";
@@ -174,7 +189,7 @@ function renderPreflight(data) {
         <div class="diagnostics-grid" id="diag-grid">
             <div class="diag-item">
                 <span class="diag-label">Language</span>
-                <span class="diag-value">${escapeHtml(data.language || "unknown")}</span>
+                <span class="diag-value">${_formatLanguages(data)}</span>
             </div>
             <div class="diag-item">
                 <span class="diag-label">Project</span>

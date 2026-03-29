@@ -343,13 +343,68 @@ def determine_primary_language(
     py_has_server = bool(py_dep_lower & _PYTHON_SERVER_FRAMEWORKS)
     js_has_server = bool(js_dep_lower & _JS_SERVER_FRAMEWORKS)
 
+    py_server_match = py_dep_lower & _PYTHON_SERVER_FRAMEWORKS
+    js_server_match = js_dep_lower & _JS_SERVER_FRAMEWORKS
+
+    logger.info(
+        "Primary language decision: py_deps=%d (%s), js_deps=%d (%s), "
+        "py_lines=%d, js_lines=%d, py_server=%s, js_server=%s",
+        len(py_deps), py_server_match or "none",
+        len(js_deps), js_server_match or "none",
+        py_lines, js_lines,
+        py_server_match, js_server_match,
+    )
+
     if py_has_server:
+        logger.info("Primary: python (server framework: %s)", py_server_match)
         return "python"
     if js_has_server:
+        logger.info("Primary: javascript (server framework: %s)", js_server_match)
         return "javascript"
     if js_lines > py_lines:
+        logger.info("Primary: javascript (more lines: %d > %d)", js_lines, py_lines)
         return "javascript"
+    logger.info("Primary: python (default/tie)")
     return "python"
+
+
+_PYTHON_DEP_FILES = frozenset({
+    "requirements.txt", "requirement.txt", "requirements-dev.txt",
+    "pyproject.toml", "setup.py", "setup.cfg", "Pipfile",
+})
+_JS_DEP_FILES = frozenset({
+    "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+})
+
+
+def find_dep_dir_for_language(project_dir: Path, language: str) -> Path:
+    """Find the directory containing dependency files for a specific language.
+
+    Checks root, then one level of subdirectories.  Returns the first
+    directory that has a dep file for the given language.  Falls back to
+    the project root.
+    """
+    dep_files = _PYTHON_DEP_FILES if language == "python" else _JS_DEP_FILES
+
+    # Check root
+    if any((project_dir / name).is_file() for name in dep_files):
+        return project_dir
+
+    # Check subdirectories
+    try:
+        children = sorted(project_dir.iterdir())
+    except OSError:
+        return project_dir
+
+    for child in children:
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        if child.name == "node_modules":
+            continue
+        if any((child / name).is_file() for name in dep_files):
+            return child
+
+    return project_dir
 
 
 def merge_ingestion_results(
