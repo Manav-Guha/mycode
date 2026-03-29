@@ -488,7 +488,7 @@ function renderReport(report, summary, understandingMd, fixesMd, edition, hasPdf
     // Findings
     const findings = report.findings || [];
     if (findings.length > 0) {
-        html += `<div class="section-title" style="margin-top:1.25rem">Findings</div>`;
+        html += `<div class="section-title" style="margin-top:1.25rem">Recommendations</div>`;
         html += `<div class="findings-list">`;
         for (const f of findings) {
             html += renderFinding(f);
@@ -910,8 +910,8 @@ function verdictForCurve(d, findings) {
 
     // Finding-based verdict takes precedence
     const findingSev = _findingSeverityForDp(d, findings);
-    if (findingSev === "critical") return "Critical \u2014 see above";
-    if (findingSev === "warning") return "Warning \u2014 see above";
+    if (findingSev === "critical") return "Priority \u2014 see above";
+    if (findingSev === "warning") return "Opportunity \u2014 see above";
 
     // Threshold-based fallback
     const metric = (d.metric || "").toLowerCase();
@@ -942,8 +942,8 @@ function verdictForCurve(d, findings) {
 
 function verdictColour(verdict) {
     const v = verdict.toLowerCase();
-    if (v.includes("critical") || v.includes("unresponsive") || v.includes("very heavy")) return "var(--red)";
-    if (v.includes("warning") || v.includes("slow") || v.includes("heavy") || v.includes("noticeable") || v.includes("errors")) return "var(--amber)";
+    if (v.includes("critical") || v.includes("priority") || v.includes("unresponsive") || v.includes("very heavy")) return "var(--red)";
+    if (v.includes("warning") || v.includes("opportunity") || v.includes("slow") || v.includes("heavy") || v.includes("noticeable") || v.includes("errors")) return "var(--amber)";
     if (v.includes("no issues") || v.includes("fine") || v.includes("no errors") || v.includes("stable")) return "var(--green)";
     return "var(--text-secondary)";
 }
@@ -1138,7 +1138,7 @@ function renderDegradations(degradations, findings) {
     if (rows.length === 0) return "";
 
     let html = `<div class="degradation-section">`;
-    html += `<div class="section-title">Performance under load</div>`;
+    html += `<div class="section-title">Scaling roadmap</div>`;
     html += `<table class="perf-table">`;
     html += `<thead><tr>`;
     html += `<th>What we tested</th>`;

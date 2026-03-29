@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from mycode.constraints import OperationalConstraints
+from mycode.constraints import OperationalConstraints, per_user_data_to_items
 
 logger = logging.getLogger(__name__)
 
@@ -159,18 +159,24 @@ def predict_issues(
         # Probability: what fraction of total matching patterns is this one
         prob_pct = (confirmed / total_similar * 100) if total_similar > 0 else 0
 
-        # Scale-relative framing
+        # Scale-relative framing with data context when available
         scale_note = ""
-        if constraints and constraints.max_users is not None:
-            scale_note = (
-                f"At your stated {constraints.max_users:,} users, "
-                f"this is worth watching"
-            )
-        elif constraints and constraints.user_scale is not None:
-            scale_note = (
-                f"At your stated {constraints.user_scale:,} users, "
-                f"this is worth watching"
-            )
+        if constraints:
+            max_u = constraints.max_users or constraints.user_scale
+            if max_u is not None and constraints.per_user_data:
+                pu_items = per_user_data_to_items(constraints.per_user_data)
+                combined = max_u * pu_items
+                scale_note = (
+                    f"At your stated {max_u:,} users with "
+                    f"{constraints.per_user_data} datasets "
+                    f"(~{pu_items:,} items each), combined data volume "
+                    f"of ~{combined:,} items may trigger this issue"
+                )
+            elif max_u is not None:
+                scale_note = (
+                    f"At your stated {max_u:,} users, "
+                    f"this is worth watching"
+                )
 
         predictions.append(PredictionItem(
             title=pattern.get("title", "Unknown"),

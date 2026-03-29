@@ -533,7 +533,7 @@ class DiagnosticReport:
                     _render_finding(lines, f)
 
             if warnings:
-                lines.append("## Worth Investigating")
+                lines.append("## Improvement Opportunities")
                 lines.append("")
                 lines.append(
                     "These aren't breaking under your stated conditions, "
@@ -2761,7 +2761,7 @@ class ReportGenerator:
                 )
 
         if report.degradation_points:
-            user_parts.append("\n## Degradation Curves")
+            user_parts.append("\n## Scaling Roadmap")
             for dp in report.degradation_points[:10]:
                 user_parts.append(f"- {dp.description}")
                 if dp.breaking_point:

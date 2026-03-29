@@ -447,7 +447,7 @@ def _render_perf_table_pdf(
     if not rows:
         return
 
-    pdf.section_heading("Performance Under Load")
+    pdf.section_heading("Scaling Roadmap")
     pdf.ln(2)
 
     # Column widths (mm) — total 161mm for A4 with 20mm margins
