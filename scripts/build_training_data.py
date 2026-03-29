@@ -197,6 +197,10 @@ def main():
 
     rows = []
     errors = 0
+    # Also collect per-architecture pattern counts
+    arch_project_counts: dict[str, int] = {}
+    arch_pattern_counts: dict[str, dict[str, int]] = {}
+
     for dirname in report_dirs:
         rp = CORPUS_DIR / dirname / "mycode-report.json"
         if not rp.is_file():
@@ -214,6 +218,24 @@ def main():
         targets = _extract_targets(report, target_patterns)
         row = {**features, **targets}
         rows.append(row)
+
+        # Track per-architecture pattern counts
+        arch = (
+            report.get("architectural_pattern", "")
+            or report.get("vertical", "")
+            or "general"
+        )
+        arch_project_counts[arch] = arch_project_counts.get(arch, 0) + 1
+        if arch not in arch_pattern_counts:
+            arch_pattern_counts[arch] = {}
+        seen_titles: set[str] = set()
+        for f_item in report.get("findings", []):
+            title = f_item.get("title", "").strip()
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                arch_pattern_counts[arch][title] = (
+                    arch_pattern_counts[arch].get(title, 0) + 1
+                )
 
     print(f"  {len(rows)} valid reports processed, {errors} errors")
 
@@ -255,6 +277,21 @@ def main():
         pct = positives / len(rows) * 100
         title = target_info.get(col, {}).get("title", col)
         print(f"    {positives:5d} ({pct:5.1f}%) {title[:60]}")
+
+    # Write per-architecture pattern breakdown
+    arch_path = OUTPUT_DIR / "corpus_patterns_by_architecture.json"
+    arch_data = {
+        "project_counts": arch_project_counts,
+        "pattern_counts": arch_pattern_counts,
+    }
+    with open(arch_path, "w") as f:
+        json.dump(arch_data, f, indent=2)
+    print(f"\n  Wrote {arch_path}")
+    print("  Architecture distribution:")
+    for arch, count in sorted(
+        arch_project_counts.items(), key=lambda x: -x[1],
+    ):
+        print(f"    {count:5d} {arch}")
 
 
 if __name__ == "__main__":

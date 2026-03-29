@@ -154,6 +154,31 @@ try:
 except ImportError:
     _HAS_ML = False
 
+# ── Architecture Data ──
+
+_ARCH_DATA_PATH = _DATA_DIR / "corpus_patterns_by_architecture.json"
+_arch_data_cache: dict = {}
+
+
+def _load_arch_data() -> dict:
+    """Load per-architecture pattern counts.  Returns dict with
+    ``project_counts`` and ``pattern_counts``, or empty dict on failure.
+    Cached after first load.
+    """
+    if "data" in _arch_data_cache:
+        return _arch_data_cache["data"]
+
+    result: dict = {}
+    if _ARCH_DATA_PATH.exists():
+        try:
+            with open(_ARCH_DATA_PATH) as f:
+                result = json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to load arch data: %s", exc)
+    _arch_data_cache["data"] = result
+    return result
+
+
 # Lazy model cache — loaded on first predict call.
 _model_cache: dict = {}
 
@@ -382,11 +407,10 @@ def predict_issues(
     model, metadata = _load_model()
     if model is not None and metadata is not None:
         try:
-            result = _predict_with_model(
+            return _predict_with_model(
                 model, metadata, dependency_names, constraints, ingestion,
+                arch_type=arch_type,
             )
-            result.architectural_type = arch_type
-            return result
         except Exception as exc:
             logger.warning("Model prediction failed, falling back to corpus: %s", exc)
 
@@ -399,15 +423,21 @@ def predict_issues(
     if not dep_set:
         return PredictionResult()
 
-    # Architecture filter: prefer patterns seen in this arch type
+    # Architecture filter: use per-architecture pattern counts when
+    # available, so project counts and probabilities reflect only
+    # projects matching the user's architectural type.
     arch_filtered = False
-    if arch_type and arch_type != "general":
-        arch_patterns = [
-            p for p in patterns
-            if arch_type in p.get("verticals", [])
-        ]
-        if len(arch_patterns) >= 20:
-            patterns = arch_patterns
+    arch_data = _load_arch_data()
+    arch_project_count = 0
+    arch_pattern_map: dict[str, int] = {}
+
+    if (arch_type and arch_type != "general" and arch_data
+            and arch_type in arch_data.get("project_counts", {})):
+        arch_project_count = arch_data["project_counts"][arch_type]
+        arch_pattern_map = arch_data.get("pattern_counts", {}).get(
+            arch_type, {},
+        )
+        if arch_project_count >= 20:
             arch_filtered = True
 
     # Score each pattern by dependency overlap × confirmed_count
@@ -419,7 +449,12 @@ def predict_issues(
         if title in _SKIP_TITLES:
             continue
 
-        confirmed = pattern.get("confirmed_count", 0)
+        # Use architecture-specific count when filtering
+        if arch_filtered:
+            confirmed = arch_pattern_map.get(title, 0)
+        else:
+            confirmed = pattern.get("confirmed_count", 0)
+
         if confirmed < _MIN_CONFIRMED:
             continue
 
@@ -439,15 +474,29 @@ def predict_issues(
     scored.sort(key=lambda x: x[0], reverse=True)
     top = scored[:_MAX_PREDICTIONS]
 
-    total_similar = sum(p.get("confirmed_count", 0) for _, p, _ in scored)
+    # total_similar_projects = architecture project count when filtered,
+    # otherwise sum of confirmed across matching patterns.
+    if arch_filtered:
+        total_similar = arch_project_count
+    else:
+        total_similar = sum(
+            p.get("confirmed_count", 0) for _, p, _ in scored
+        )
+
     all_matching = sorted({d for _, _, deps in scored for d in deps})
 
     predictions: list[PredictionItem] = []
     for _score, pattern, matched_deps in top:
-        confirmed = pattern.get("confirmed_count", 0)
+        if arch_filtered:
+            confirmed = arch_pattern_map.get(pattern.get("title", ""), 0)
+        else:
+            confirmed = pattern.get("confirmed_count", 0)
+
         severity_dist = pattern.get("severity_distribution", {})
         severity = _dominant_severity(severity_dist)
-        prob_pct = (confirmed / total_similar * 100) if total_similar > 0 else 0
+        prob_pct = (
+            confirmed / total_similar * 100
+        ) if total_similar > 0 else 0
         scale_note = _build_scale_note(constraints)
 
         predictions.append(PredictionItem(
@@ -498,12 +547,24 @@ def _predict_with_model(
     dependency_names: list[str],
     constraints: Optional[OperationalConstraints],
     ingestion,
+    arch_type: str = "general",
 ) -> PredictionResult:
     """Generate predictions using the trained XGBoost model."""
     feature_columns = metadata["feature_columns"]
     target_columns = metadata["target_columns"]
     target_info = metadata.get("target_info", {})
     training_samples = metadata.get("training_samples", 0)
+
+    # Use architecture-specific project count when available
+    arch_data = _load_arch_data()
+    arch_project_count = 0
+    arch_filtered = False
+    if (arch_type and arch_type != "general" and arch_data
+            and arch_type in arch_data.get("project_counts", {})):
+        arch_project_count = arch_data["project_counts"][arch_type]
+        if arch_project_count >= 20:
+            training_samples = arch_project_count
+            arch_filtered = True
 
     X = _extract_features(dependency_names, feature_columns, ingestion)
 
@@ -559,6 +620,8 @@ def _predict_with_model(
         predictions=predictions,
         total_similar_projects=training_samples,
         matching_deps=all_matching,
+        architectural_type=arch_type,
+        arch_filtered=arch_filtered,
     )
 
 
