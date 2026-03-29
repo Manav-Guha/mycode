@@ -47,9 +47,11 @@ from mycode.web.routes import (
     handle_converse,
     handle_download_pdf,
     handle_health,
+    handle_predict,
     handle_preflight,
     handle_report,
     handle_status,
+    handle_submit_intent,
 )
 
 
@@ -173,6 +175,40 @@ async def converse(
         handle_converse, job_id, turn, user_response,
     )
     return JSONResponse(content=_dataclass_to_dict(result))
+
+
+@app.post("/api/submit-intent")
+async def submit_intent(
+    job_id: str = Form(default=""),
+    description: str = Form(default=""),
+    data_type: str = Form(default=""),
+    current_users: str = Form(default=""),
+    max_users: str = Form(default=""),
+    usage_pattern: str = Form(default=""),
+    per_user_data: str = Form(default=""),
+    max_total_data: str = Form(default=""),
+    analysis_depth: str = Form(default=""),
+):
+    """Submit grouped form answers and start analysis."""
+    answers = {
+        "description": description,
+        "data_type": data_type,
+        "current_users": current_users,
+        "max_users": max_users,
+        "usage_pattern": usage_pattern,
+        "per_user_data": per_user_data,
+        "max_total_data": max_total_data,
+        "analysis_depth": analysis_depth,
+    }
+    result = handle_submit_intent(job_id, answers)
+    return JSONResponse(content=result)
+
+
+@app.get("/api/predict/{job_id}")
+async def predict(job_id: str):
+    """Return corpus-based predictions for a job's dependency stack."""
+    result = handle_predict(job_id)
+    return JSONResponse(content=result)
 
 
 @app.post("/api/analyze")

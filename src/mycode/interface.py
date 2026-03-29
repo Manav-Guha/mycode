@@ -33,6 +33,8 @@ from mycode.constraints import (
     parse_deployment_context,
     parse_growth_expectation,
     parse_max_payload,
+    parse_max_total_data,
+    parse_per_user_data,
     depth_to_timeout,
     parse_usage_pattern,
     parse_user_scale,
@@ -409,9 +411,13 @@ class ConversationalInterface:
     # ── Input Validation Constants ──
 
     _CLARIFICATIONS: dict[str, str] = {
-        "user_scale": (
+        "current_users": (
             "I didn't catch that — please enter a number "
             "(e.g. 10, 100, 5k) or 'not sure'."
+        ),
+        "max_users": (
+            "I didn't catch that — please enter a number "
+            "(e.g. 100, 1k, 10k) or 'not sure'."
         ),
         "data_type": (
             "I didn't catch that — please pick a number from 1-6 "
@@ -421,9 +427,13 @@ class ConversationalInterface:
             "I didn't catch that — please pick a number from 1-4 "
             "or describe the usage (e.g. steady, burst, occasional, growing)."
         ),
-        "max_payload_mb": (
+        "per_user_data": (
             "I didn't catch that — please pick a number from 1-3 "
-            "or enter a size (e.g. 10 MB, 2 GB)."
+            "or describe the data size (e.g. 'small', '50 rows', '10 MB')."
+        ),
+        "max_total_data": (
+            "I didn't catch that — please enter a size "
+            "(e.g. '10 GB', '1M rows') or 'not sure'."
         ),
         "analysis_depth": (
             "I didn't catch that — please pick a number from 1-3 "
@@ -432,10 +442,12 @@ class ConversationalInterface:
     }
 
     _DEFAULTS: dict[str, tuple[object, str]] = {
-        "user_scale": (10, "10 concurrent users"),
+        "current_users": (10, "10 current users"),
+        "max_users": (100, "100 maximum users"),
         "data_type": ("mixed", "mixed data types"),
-        "usage_pattern": ("sustained", "steady, continuous use"),
-        "max_payload_mb": (50.0, "medium-sized inputs (up to 50 MB)"),
+        "usage_pattern": ("steady", "steady, continuous use"),
+        "per_user_data": ("medium", "medium data per user"),
+        "max_total_data": ("medium", "medium total data"),
         "analysis_depth": ("standard", "standard analysis (~5 minutes)"),
     }
 
@@ -724,17 +736,35 @@ class ConversationalInterface:
         data_type = parse_data_type(combined)
         data_type_source = combined  # text that data_type was parsed from
         usage_pattern = parse_usage_pattern(combined)
-        max_payload_mb: float | None = None
+        current_users: int | None = None
+        max_users: int | None = None
+        per_user_data: str | None = None
+        max_total_data: str | None = None
 
         # ── Ask explicit questions for parameters still None ──
         if self._offline:
             if user_scale is None:
-                user_scale = self._ask_validated(
-                    "How many users do you expect at the same time? "
+                current_users = self._ask_validated(
+                    "How many users do you have currently? "
                     "(a number, or 'not sure')",
-                    "user_scale",
+                    "current_users",
                     parse_user_scale,
                 )
+                max_users = self._ask_validated(
+                    "What's the maximum number of users you envision "
+                    "over the next year? (a number, or 'not sure')",
+                    "max_users",
+                    parse_user_scale,
+                )
+                # Derive user_scale from max_users for backward compat
+                if max_users is not None:
+                    user_scale = max_users
+                elif current_users is not None:
+                    user_scale = current_users
+            else:
+                # user_scale inferred from turn text — use as both
+                current_users = user_scale
+                max_users = user_scale
 
             if data_type is None:
                 data_type = self._ask_validated(
@@ -764,16 +794,23 @@ class ConversationalInterface:
                     parse_usage_pattern,
                 )
 
-            if max_payload_mb is None:
-                max_payload_mb = self._ask_validated(
-                    "What's the largest input your project handles?\n"
-                    "  1. Small (under 1 MB)\n"
-                    "  2. Medium (1–50 MB)\n"
-                    "  3. Large (over 50 MB)\n"
-                    "(enter a number, a size like '50 MB', or 'not sure')",
-                    "max_payload_mb",
-                    parse_max_payload,
-                )
+            per_user_data = self._ask_validated(
+                "How much data does a typical user handle?\n"
+                "  1. Small (a few items, under 1 MB)\n"
+                "  2. Medium (hundreds of items, 1–50 MB)\n"
+                "  3. Large (thousands of items, over 50 MB)\n"
+                "(enter a number, a size, or describe it)",
+                "per_user_data",
+                parse_per_user_data,
+            )
+
+            max_total_data = self._ask_validated(
+                "What is the maximum total data your application is "
+                "expected to handle?\n"
+                "(e.g. '10 GB', '1M rows', 'small', or 'not sure')",
+                "max_total_data",
+                parse_max_total_data,
+            )
 
             analysis_depth = self._ask_validated(
                 "How thorough should the analysis be?\n"
@@ -803,8 +840,11 @@ class ConversationalInterface:
 
         return OperationalConstraints(
             user_scale=user_scale,
+            current_users=current_users,
+            max_users=max_users,
             usage_pattern=usage_pattern,
-            max_payload_mb=max_payload_mb,
+            per_user_data=per_user_data,
+            max_total_data=max_total_data,
             data_type=data_type,
             data_type_detail=data_type_detail,
             deployment_context=deployment_context,
@@ -1203,12 +1243,19 @@ class ConversationalInterface:
     # as a request/response cycle the route handler can drive turn-by-turn.
 
     # The questions mirror _extract_constraints lines 662-704 exactly.
-    _FOLLOWUP_FIELDS = ("user_scale", "data_type", "usage_pattern", "max_payload_mb", "analysis_depth")
+    _FOLLOWUP_FIELDS = (
+        "current_users", "max_users", "data_type", "usage_pattern",
+        "per_user_data", "max_total_data", "analysis_depth",
+    )
 
     _FOLLOWUP_QUESTIONS: dict[str, str] = {
-        "user_scale": (
-            "How many users do you expect at the same time? "
+        "current_users": (
+            "How many users do you have currently? "
             "(a number, or 'not sure')"
+        ),
+        "max_users": (
+            "What's the maximum number of users you envision over "
+            "the next year? (a number, or 'not sure')"
         ),
         "data_type": (
             "What kind of data does your project handle?\n"
@@ -1228,12 +1275,17 @@ class ConversationalInterface:
             "  4. Growing usage over time\n"
             "(enter a number or describe it)"
         ),
-        "max_payload_mb": (
-            "What's the largest input your project handles?\n"
-            "  1. Small (under 1 MB)\n"
-            "  2. Medium (1–50 MB)\n"
-            "  3. Large (over 50 MB)\n"
-            "(enter a number, a size like '50 MB', or 'not sure')"
+        "per_user_data": (
+            "How much data does a typical user handle?\n"
+            "  1. Small (a few items, under 1 MB)\n"
+            "  2. Medium (hundreds of items, 1–50 MB)\n"
+            "  3. Large (thousands of items, over 50 MB)\n"
+            "(enter a number, a size, or describe it)"
+        ),
+        "max_total_data": (
+            "What is the maximum total data your application is "
+            "expected to handle?\n"
+            "(e.g. '10 GB', '1M rows', 'small', or 'not sure')"
         ),
         "analysis_depth": (
             "How thorough should the analysis be?\n"
@@ -1246,10 +1298,12 @@ class ConversationalInterface:
     }
 
     _FOLLOWUP_PARSERS: dict[str, Callable[[str], object]] = {
-        "user_scale": parse_user_scale,
+        "current_users": parse_user_scale,
+        "max_users": parse_user_scale,
         "data_type": parse_data_type,
         "usage_pattern": parse_usage_pattern,
-        "max_payload_mb": parse_max_payload,
+        "per_user_data": parse_per_user_data,
+        "max_total_data": parse_max_total_data,
         "analysis_depth": parse_analysis_depth,
     }
 
@@ -1332,6 +1386,14 @@ class ConversationalInterface:
             kws = extract_data_type_keywords(answer)
             if kws:
                 constraints.data_type_detail = _format_data_type_detail(kws)
+
+        # Sync user_scale ↔ max_users for backward compatibility
+        if field_name == "max_users" and constraints.max_users is not None:
+            constraints.user_scale = constraints.max_users
+        elif field_name == "current_users" and constraints.current_users is not None:
+            # If max_users not yet set, use current as a starting point
+            if constraints.max_users is None and constraints.user_scale is None:
+                constraints.user_scale = constraints.current_users
 
         # Derive timeout from analysis depth
         if field_name == "analysis_depth" and constraints.analysis_depth:

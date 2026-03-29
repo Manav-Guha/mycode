@@ -235,9 +235,9 @@ class TestRenderUnderstanding:
 
     def test_findings_grouped_by_severity(self, sample_report):
         md = render_understanding(sample_report, 1)
-        assert "## CRITICAL" in md
-        assert "## WARNING" in md
-        assert "## INFO" in md
+        assert "## PRIORITY IMPROVEMENTS" in md
+        assert "## IMPROVEMENT OPPORTUNITIES" in md
+        assert "## GOOD TO KNOW" in md
 
     def test_finding_details_present(self, sample_report):
         md = render_understanding(sample_report, 1)

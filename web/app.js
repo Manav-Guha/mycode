@@ -143,7 +143,7 @@ async function runPreflight(formData) {
         if (data.viability && !data.viability.viable) {
             showViabilityWarning(data.viability);
         }
-        beginConversation();
+        showIntakeForm();
     } catch (err) {
         hide("preflight-loading");
         $("preflight-content").innerHTML =
@@ -201,7 +201,7 @@ function renderPreflight(data) {
     `;
 }
 
-// ── Conversation ──
+// ── Intake Form ──
 
 function showViabilityWarning(viability) {
     const pct = Math.round((viability.install_rate || 0) * 100);
@@ -218,68 +218,14 @@ function showViabilityWarning(viability) {
     }
 }
 
-function beginConversation() {
-    converseTurn = 1;
-    show("converse-section");
-    requestConverseTurn(1, "");
+function showIntakeForm() {
+    show("intake-section");
+    const desc = $("q-description");
+    if (desc) desc.focus();
 }
 
-async function requestConverseTurn(turn, userResponse) {
-    const fd = new FormData();
-    fd.append("job_id", currentJobId);
-    fd.append("turn", turn.toString());
-    fd.append("user_response", userResponse);
-
-    const data = await apiPost("/api/converse", fd);
-
-    if (data.error) {
-        addMessage("system", "Error: " + data.error);
-        return;
-    }
-
-    if (data.question) {
-        addMessage("system", data.question);
-    }
-
-    if (data.done) {
-        // Conversation complete — show run button
-        if (data.constraints) {
-            const summary = formatConstraints(data.constraints);
-            if (summary) {
-                addMessage("system", "Understood. " + summary);
-            }
-        }
-        hide("reply-area");
-        show("run-section");
-        $("run-section").scrollIntoView({ behavior: "smooth", block: "nearest" });
-    } else {
-        converseTurn = data.turn + 1;
-        show("reply-area");
-        $("reply-input").value = "";
-        $("reply-input").focus();
-    }
-}
-
-function sendReply() {
-    const text = $("reply-input").value.trim();
-    if (!text) return;
-    addMessage("user", text);
-    hide("reply-area");
-    requestConverseTurn(converseTurn, text);
-}
-
-// Handle Enter key in reply textarea
+// Handle Enter key on URL input
 document.addEventListener("DOMContentLoaded", () => {
-    const replyInput = $("reply-input");
-    if (replyInput) {
-        replyInput.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendReply();
-            }
-        });
-    }
-
     const urlInput = $("github-url");
     if (urlInput) {
         urlInput.addEventListener("keydown", (e) => {
@@ -291,28 +237,114 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 });
 
-function addMessage(role, text) {
-    const thread = $("converse-thread");
-    const div = document.createElement("div");
-    div.className = `message ${role}`;
-    div.textContent = text;
-    thread.appendChild(div);
-    div.scrollIntoView({ behavior: "smooth", block: "nearest" });
+function _selectedPill(name) {
+    const el = document.querySelector(`input[name="${name}"]:checked`);
+    return el ? el.value : "";
 }
 
-function formatConstraints(c) {
-    const parts = [];
-    if (c.user_scale) parts.push(`${c.user_scale} concurrent users`);
-    if (c.usage_pattern) parts.push(c.usage_pattern.replace("_", " ") + " usage");
-    if (c.deployment_context) parts.push(c.deployment_context.replace("_", " "));
-    if (c.data_type) parts.push(c.data_type.replace("_", " ") + " data");
-    if (c.analysis_depth) {
-        const labels = {quick: "quick scan", standard: "standard analysis", deep: "deep analysis"};
-        parts.push(labels[c.analysis_depth] || c.analysis_depth);
-    } else if (c.timeout_per_scenario) {
-        parts.push(`${c.timeout_per_scenario}s per test`);
+async function submitIntentForm() {
+    const btn = $("run-btn");
+    btn.disabled = true;
+    btn.textContent = "Starting...";
+
+    const fd = new FormData();
+    fd.append("job_id", currentJobId);
+    fd.append("description", ($("q-description") || {}).value || "");
+    fd.append("data_type", _selectedPill("data_type"));
+    fd.append("current_users", ($("q-current-users") || {}).value || "");
+    fd.append("max_users", ($("q-max-users") || {}).value || "");
+    fd.append("usage_pattern", _selectedPill("usage_pattern"));
+    fd.append("per_user_data", ($("q-per-user-data") || {}).value || "");
+    fd.append("max_total_data", ($("q-max-total-data") || {}).value || "");
+    fd.append("analysis_depth", _selectedPill("analysis_depth"));
+
+    try {
+        const data = await apiPost("/api/submit-intent", fd);
+        if (data.error) {
+            btn.disabled = false;
+            btn.textContent = "Run Stress Tests";
+            alert("Error: " + data.error);
+            return;
+        }
+        // Immediately fetch predictions and start analysis in parallel
+        fetchPredictions();
+        startAnalysis();
+    } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Run Stress Tests";
+        alert("Connection failed: " + err.message);
     }
-    return parts.length ? "Testing for: " + parts.join(", ") + "." : "";
+}
+
+// ── Predictions ──
+
+let predictionData = null;
+
+async function fetchPredictions() {
+    try {
+        const data = await apiGet(`/api/predict/${currentJobId}`);
+        if (data.error || !data.predictions || data.predictions.length === 0) return;
+        predictionData = data;
+        renderPredictions(data);
+        show("prediction-section");
+    } catch (err) {
+        // Predictions are best-effort — don't block on failure
+    }
+}
+
+function renderPredictions(data) {
+    const el = $("prediction-content");
+    let html = `<div class="prediction-header">Based on <strong>${data.total_similar_projects}</strong> projects with similar technology stack (${escapeHtml(data.matching_deps.slice(0, 5).join(", "))}):</div>`;
+    html += '<div class="prediction-list">';
+    for (const p of data.predictions) {
+        const sevClass = p.severity === "critical" ? "pred-critical" : p.severity === "warning" ? "pred-warning" : "pred-info";
+        html += `<div class="prediction-item ${sevClass}">`;
+        html += `<span class="pred-title">${escapeHtml(p.title)}</span>`;
+        html += `<span class="pred-pct">${p.probability_pct}%</span>`;
+        if (p.scale_note) {
+            html += `<div class="pred-note">${escapeHtml(p.scale_note)}</div>`;
+        }
+        html += `</div>`;
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+function annotatePredictions(findings) {
+    if (!predictionData || !predictionData.predictions) return;
+    const findingTitles = findings.map(f => f.title || "");
+    const findingCats = findings.map(f => f.category || "");
+    const el = $("prediction-content");
+    if (!el) return;
+
+    const items = el.querySelectorAll(".prediction-item");
+    predictionData.predictions.forEach((p, i) => {
+        if (i >= items.length) return;
+        const matched = _predictionMatches(p.title, findingTitles, findingCats);
+        const annotation = document.createElement("div");
+        annotation.className = matched ? "pred-confirmed" : "pred-not-confirmed";
+        annotation.textContent = matched
+            ? "Confirmed by testing"
+            : `Not observed in your project`;
+        items[i].appendChild(annotation);
+    });
+}
+
+function _predictionMatches(predTitle, findingTitles, findingCats) {
+    const predWords = new Set(predTitle.toLowerCase().split(/\s+/).filter(w => w.length >= 3));
+    predWords.delete("the"); predWords.delete("and"); predWords.delete("for");
+    predWords.delete("your"); predWords.delete("with");
+    for (const title of findingTitles) {
+        const titleWords = new Set(title.toLowerCase().split(/\s+/).filter(w => w.length >= 3));
+        let overlap = 0;
+        for (const w of predWords) { if (titleWords.has(w)) overlap++; }
+        if (overlap >= 2) return true;
+    }
+    for (const cat of findingCats) {
+        const catWords = new Set(cat.toLowerCase().replace(/_/g, " ").split(/\s+/));
+        for (const w of predWords) { if (catWords.has(w)) return true; }
+    }
+    return false;
 }
 
 // ── Analysis ──
@@ -489,6 +521,9 @@ function renderReport(report, summary, understandingMd, fixesMd, edition, hasPdf
     // Store report data for downloads
     content.dataset.report = JSON.stringify(report);
 
+    // Annotate predictions with test results
+    annotatePredictions(report.findings || []);
+
     // Bind survey pill click handlers
     if (_urlSource === "public") {
         _bindSurveyHandlers();
@@ -522,11 +557,18 @@ function _integrateDetails(description, details) {
     return [description, details];
 }
 
+const _severityLabels = {
+    critical: "priority",
+    warning: "opportunity",
+    info: "info",
+};
+
 function renderFinding(f) {
     const severity = f.severity || "info";
+    const badgeLabel = _severityLabels[severity] || severity;
     let html = `<div class="finding-card ${severity}">`;
     html += `<div class="finding-header">`;
-    html += `<span class="severity-badge ${severity}">${severity}</span>`;
+    html += `<span class="severity-badge ${severity}">${badgeLabel}</span>`;
     html += `<span class="finding-title">${escapeHtml(f.title || "")}</span>`;
     html += `</div>`;
 
@@ -1014,6 +1056,44 @@ function renderCurveChart(d, verdict) {
         const bpX = x(bpIdx);
         html += `<line x1="${bpX.toFixed(1)}" y1="${PAD.top}" x2="${bpX.toFixed(1)}" y2="${PAD.top + plotH}" stroke="${colour}" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>`;
         html += `<circle cx="${bpX.toFixed(1)}" cy="${y(values[bpIdx]).toFixed(1)}" r="5" fill="none" stroke="${colour}" stroke-width="2"/>`;
+    }
+
+    // Intent markers — user_baseline (current) and user_ceiling (target)
+    if (d.user_baseline || d.user_ceiling) {
+        // Find x position by matching step labels to user values
+        const stepNums = labels.map(l => {
+            const m = l.match(/(\d+)/);
+            return m ? parseInt(m[1]) : null;
+        });
+        function intentX(val) {
+            // Interpolate position between steps
+            for (let i = 0; i < stepNums.length - 1; i++) {
+                if (stepNums[i] !== null && stepNums[i + 1] !== null) {
+                    if (val >= stepNums[i] && val <= stepNums[i + 1]) {
+                        const frac = (val - stepNums[i]) / (stepNums[i + 1] - stepNums[i]);
+                        return x(i) + frac * (x(i + 1) - x(i));
+                    }
+                }
+            }
+            // Clamp to range
+            if (stepNums[0] !== null && val <= stepNums[0]) return x(0);
+            if (stepNums[stepNums.length - 1] !== null && val >= stepNums[stepNums.length - 1]) return x(stepNums.length - 1);
+            return null;
+        }
+        if (d.user_baseline) {
+            const bx = intentX(d.user_baseline);
+            if (bx !== null) {
+                html += `<line x1="${bx.toFixed(1)}" y1="${PAD.top}" x2="${bx.toFixed(1)}" y2="${PAD.top + plotH}" stroke="var(--green)" stroke-width="1" stroke-dasharray="4,2" opacity="0.7"/>`;
+                html += `<text x="${bx.toFixed(1)}" y="${PAD.top - 2}" text-anchor="middle" fill="var(--green)" font-size="8">Current</text>`;
+            }
+        }
+        if (d.user_ceiling) {
+            const cx = intentX(d.user_ceiling);
+            if (cx !== null) {
+                html += `<line x1="${cx.toFixed(1)}" y1="${PAD.top}" x2="${cx.toFixed(1)}" y2="${PAD.top + plotH}" stroke="var(--orange)" stroke-width="1" stroke-dasharray="4,2" opacity="0.7"/>`;
+                html += `<text x="${cx.toFixed(1)}" y="${PAD.top - 2}" text-anchor="middle" fill="var(--orange)" font-size="8">Target</text>`;
+            }
+        }
     }
 
     // Invisible hover hit areas + tooltip triggers

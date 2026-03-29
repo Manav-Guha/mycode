@@ -18,6 +18,7 @@
     --amber-dim: #9e6a03;
     --red: #f85149;
     --red-dim: #da3633;
+    --orange: #f0883e;
     --purple: #bc8cff;
     --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
     --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
@@ -868,4 +869,175 @@ footer {
     font-size: 0.85rem;
     color: var(--green);
     margin-top: 0.5rem;
+}
+
+/* ── Intake Form ── */
+
+.form-group {
+    margin-bottom: 1.2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.form-group:last-of-type {
+    border-bottom: none;
+    margin-bottom: 0.8rem;
+}
+
+.form-group-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.6rem;
+}
+
+.form-label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.3rem;
+    margin-top: 0.6rem;
+}
+
+.form-row {
+    display: flex;
+    gap: 0.8rem;
+}
+
+.form-field {
+    flex: 1;
+}
+
+#intake-section textarea,
+#intake-section input[type="number"],
+#intake-section select {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    padding: 0.45rem 0.6rem;
+    font-family: var(--font-sans);
+    font-size: 0.85rem;
+}
+
+#intake-section textarea:focus,
+#intake-section input:focus,
+#intake-section select:focus {
+    border-color: var(--border-focus);
+    outline: none;
+}
+
+/* Pill group — radio buttons styled as pills */
+.pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+}
+
+.pill-group .pill {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.3rem 0.75rem;
+    border-radius: 1rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background 0.15s, border-color 0.15s;
+    user-select: none;
+}
+
+.pill-group .pill input[type="radio"] {
+    display: none;
+}
+
+.pill-group .pill:hover {
+    border-color: var(--accent);
+}
+
+.pill-group .pill:has(input:checked) {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+    font-weight: 600;
+}
+
+/* ── Prediction Box ── */
+
+#prediction-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.prediction-header {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.6rem;
+}
+
+.prediction-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.prediction-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius);
+    background: var(--bg-tertiary);
+    font-size: 0.85rem;
+}
+
+.prediction-item.pred-critical { border-left: 3px solid var(--red); }
+.prediction-item.pred-warning { border-left: 3px solid var(--amber); }
+.prediction-item.pred-info { border-left: 3px solid var(--text-muted); }
+
+.pred-title {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.pred-pct {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    min-width: 3em;
+    text-align: right;
+}
+
+.pred-note {
+    width: 100%;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.pred-confirmed {
+    width: 100%;
+    font-size: 0.75rem;
+    color: var(--green);
+    margin-top: 0.2rem;
+}
+
+.pred-not-confirmed {
+    width: 100%;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+}
+
+/* ── Responsive: stack form fields on narrow screens ── */
+@media (max-width: 480px) {
+    .form-row {
+        flex-direction: column;
+    }
 }

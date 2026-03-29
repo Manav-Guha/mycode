@@ -43,19 +43,86 @@
                     </div>
                 </div>
 
-                <!-- CONVERSATION -->
-                <div class="section hidden" id="converse-section">
-                    <div class="section-title">Context</div>
-                    <div class="conversation-thread" id="converse-thread"></div>
-                    <div class="reply-area hidden" id="reply-area">
-                        <textarea id="reply-input" rows="2" placeholder="Describe your project..."></textarea>
-                        <button class="btn btn-accent" id="reply-btn" onclick="sendReply()">Send</button>
-                    </div>
-                </div>
+                <!-- INTAKE FORM (replaces sequential conversation) -->
+                <div class="section hidden" id="intake-section">
 
-                <!-- RUN BUTTON -->
-                <div class="section hidden" id="run-section">
-                    <button class="btn btn-primary" id="run-btn" onclick="startAnalysis()" style="width:100%">Run Stress Tests</button>
+                    <!-- Section 1: Your Project -->
+                    <div class="form-group">
+                        <div class="form-group-title">Your Project</div>
+                        <label class="form-label" for="q-description">What does your project do?</label>
+                        <textarea id="q-description" rows="2" placeholder="e.g. A dashboard that shows sales data from our Shopify store"></textarea>
+
+                        <label class="form-label">What type of data does it handle?</label>
+                        <div class="pill-group" id="pg-data-type">
+                            <label class="pill"><input type="radio" name="data_type" value="text"><span>Text</span></label>
+                            <label class="pill"><input type="radio" name="data_type" value="images"><span>Images</span></label>
+                            <label class="pill"><input type="radio" name="data_type" value="tabular"><span>Numerical</span></label>
+                            <label class="pill"><input type="radio" name="data_type" value="documents"><span>Documents</span></label>
+                            <label class="pill"><input type="radio" name="data_type" value="api_responses"><span>API data</span></label>
+                            <label class="pill"><input type="radio" name="data_type" value="mixed"><span>Mixed</span></label>
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Your Users -->
+                    <div class="form-group">
+                        <div class="form-group-title">Your Users</div>
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label class="form-label" for="q-current-users">Current users</label>
+                                <input type="number" id="q-current-users" placeholder="e.g. 50" min="1">
+                            </div>
+                            <div class="form-field">
+                                <label class="form-label" for="q-max-users">Max users (next year)</label>
+                                <input type="number" id="q-max-users" placeholder="e.g. 500" min="1">
+                            </div>
+                        </div>
+
+                        <label class="form-label">How will they use it?</label>
+                        <div class="pill-group" id="pg-usage">
+                            <label class="pill"><input type="radio" name="usage_pattern" value="steady"><span>Steady</span></label>
+                            <label class="pill"><input type="radio" name="usage_pattern" value="burst"><span>Bursts</span></label>
+                            <label class="pill"><input type="radio" name="usage_pattern" value="on_demand"><span>On-demand</span></label>
+                            <label class="pill"><input type="radio" name="usage_pattern" value="growing"><span>Growing</span></label>
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Your Data -->
+                    <div class="form-group">
+                        <div class="form-group-title">Your Data</div>
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label class="form-label" for="q-per-user-data">Data per user</label>
+                                <select id="q-per-user-data">
+                                    <option value="">Select...</option>
+                                    <option value="small">Small (a few items, &lt;1 MB)</option>
+                                    <option value="medium">Medium (hundreds of items, 1-50 MB)</option>
+                                    <option value="large">Large (thousands of items, 50+ MB)</option>
+                                </select>
+                            </div>
+                            <div class="form-field">
+                                <label class="form-label" for="q-max-total-data">Max total data</label>
+                                <select id="q-max-total-data">
+                                    <option value="">Select...</option>
+                                    <option value="small">Small (&lt;1 GB)</option>
+                                    <option value="medium">Medium (1-100 GB)</option>
+                                    <option value="large">Large (100+ GB)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 4: Analysis -->
+                    <div class="form-group">
+                        <div class="form-group-title">Analysis</div>
+                        <label class="form-label">How thorough should the analysis be?</label>
+                        <div class="pill-group" id="pg-depth">
+                            <label class="pill"><input type="radio" name="analysis_depth" value="quick"><span>Quick scan ~2 min</span></label>
+                            <label class="pill"><input type="radio" name="analysis_depth" value="standard" checked><span>Standard ~5 min</span></label>
+                            <label class="pill"><input type="radio" name="analysis_depth" value="deep"><span>Deep ~10 min</span></label>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary" id="run-btn" onclick="submitIntentForm()" style="width:100%">Run Stress Tests</button>
                 </div>
 
             </div>
@@ -66,6 +133,12 @@
                 <!-- Placeholder before results -->
                 <div class="results-placeholder" id="results-placeholder">
                     Results will appear here
+                </div>
+
+                <!-- Prediction box (shown before test results) -->
+                <div class="section hidden" id="prediction-section">
+                    <div class="section-title">Predictive Analysis</div>
+                    <div id="prediction-content"></div>
                 </div>
 
                 <!-- Progress (shown during analysis) -->

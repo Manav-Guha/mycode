@@ -888,7 +888,7 @@ class TestReportRendering:
             ],
         )
         text = report.as_text()
-        assert "Degradation Curves" in text
+        assert "Scaling Roadmap" in text
         assert "Breaking point: response time exceeds 100ms at large" in text
 
     def test_renders_version_flags(self):
@@ -2587,7 +2587,7 @@ class TestConstraintContextualisation:
         # concurrent_10 is within 20 users → critical
         f10 = [f for f in report.findings if "concurrent_10" in f.title][0]
         assert f10.severity == "critical"
-        assert "You said 20 users" in f10.description
+        assert "at or below your stated 20 users" in f10.description
 
     def test_beyond_capacity_becomes_warning(self):
         """Failure at 1x < load ≤ 3x → WARNING."""
@@ -2858,7 +2858,7 @@ class TestConstraintContextualisation:
         gen._contextualise_findings(report, constraints)
 
         f = report.findings[0]
-        assert "You said 20 users" in f.description
+        assert "reliable up to 50 concurrent users" in f.description
         assert "2.5x" in f.description
         assert f.severity == "warning"
 
@@ -2884,7 +2884,7 @@ class TestConstraintContextualisation:
         gen._contextualise_findings(report, constraints)
 
         f = report.findings[0]
-        assert "You said 20 users" in f.description
+        assert "at or below your stated 20 users" in f.description
         assert f.severity == "critical"  # 10/20 ≤ 1.0 → critical
 
     def test_data_size_finding_no_user_scale(self):
@@ -3322,8 +3322,8 @@ class TestReportNarrative:
             has_user_constraints=False,
         )
         text = report.as_text()
-        assert "Findings at Default Test Range" in text
-        assert "Fix Before Launch" not in text
+        assert "Recommendations at Default Test Range" in text
+        assert "Priority Improvements" not in text
 
     def test_constraint_header_text(self):
         report = DiagnosticReport(
@@ -3331,7 +3331,7 @@ class TestReportNarrative:
             has_user_constraints=True,
         )
         text = report.as_text()
-        assert "Fix Before Launch" in text
+        assert "Priority Improvements" in text
 
     def test_no_constraint_header_markdown(self):
         report = DiagnosticReport(
@@ -3339,7 +3339,7 @@ class TestReportNarrative:
             has_user_constraints=False,
         )
         md = report.as_markdown()
-        assert "Findings at Default Test Range" in md
+        assert "Recommendations at Default Test Range" in md
 
     def test_no_constraint_note(self):
         report = DiagnosticReport(
@@ -3424,7 +3424,7 @@ class TestReportNarrative:
         gen = ReportGenerator(offline=True)
         gen._contextualise_findings(report, constraints)
         f = report.findings[0]
-        assert "10%" in f.description or "just" in f.description
+        assert "at or below your stated 100 users" in f.description
 
 
 # ── Session 14: Project Name Inference Tests ──
@@ -4089,7 +4089,7 @@ class TestTimeoutInReportContext:
         )
         constraints = OperationalConstraints(
             user_scale=100,
-            usage_pattern="sustained",
+            usage_pattern="steady",
             timeout_per_scenario=120,
         )
         gen = ReportGenerator(offline=True)

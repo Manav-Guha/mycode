@@ -1096,7 +1096,7 @@ class TestHostConversation:
             "operational_intent": "A web API serving 100 users",
             "constraints": {
                 "user_scale": 100,
-                "usage_pattern": "sustained",
+                "usage_pattern": "steady",
                 "max_payload_mb": None,
                 "data_type": None,
                 "deployment_context": "cloud",

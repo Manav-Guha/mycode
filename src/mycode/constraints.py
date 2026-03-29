@@ -27,10 +27,18 @@ class OperationalConstraints:
     """Structured constraints extracted from user conversation.
 
     Attributes:
-        user_scale: Expected concurrent users (e.g., 20).
-        usage_pattern: How the app is used — ``"sustained"``,
-            ``"burst"``, ``"periodic"``, or ``"growing"``.
+        user_scale: Expected concurrent users (e.g., 20).  When
+            ``max_users`` is set, ``user_scale`` mirrors it for
+            backward compatibility.
+        current_users: User's current scale (baseline).
+        max_users: User's growth target (ceiling).
+        usage_pattern: How the app is used — ``"steady"``,
+            ``"burst"``, ``"on_demand"``, or ``"growing"``.
         max_payload_mb: Largest expected input/file size in megabytes.
+        per_user_data: Typical data per user — ``"small"``,
+            ``"medium"``, ``"large"``, or free text.
+        max_total_data: Maximum total data for the application —
+            e.g. ``"10GB"``, ``"1M rows"``, or free text.
         data_type: Kind of data handled — ``"tabular"``, ``"text"``,
             ``"images"``, ``"mixed"``, or ``"api_responses"``.
         deployment_context: Where it runs — ``"single_server"``,
@@ -42,13 +50,23 @@ class OperationalConstraints:
             or ``"medical"``.
         growth_expectation: Expected trajectory — ``"stable"``,
             ``"slow_growth"``, or ``"rapid_growth"``.
+        project_description: Free-text description of what the project
+            does (from Section 1 of the web form or Turn 1 of CLI).
+        assumptions_used: True when non-interactive mode applied
+            corpus-derived or hardcoded defaults instead of user input.
+        assumed_values: Dict of field→value for assumptions made in
+            non-interactive mode.
         raw_answers: Original user answers preserved for report
             contextualisation.
     """
 
     user_scale: Optional[int] = None
+    current_users: Optional[int] = None
+    max_users: Optional[int] = None
     usage_pattern: Optional[str] = None
     max_payload_mb: Optional[float] = None
+    per_user_data: Optional[str] = None
+    max_total_data: Optional[str] = None
     data_type: Optional[str] = None
     data_type_detail: Optional[str] = None
     deployment_context: Optional[str] = None
@@ -57,7 +75,17 @@ class OperationalConstraints:
     growth_expectation: Optional[str] = None
     timeout_per_scenario: Optional[int] = None
     analysis_depth: Optional[str] = None  # "quick", "standard", "deep"
+    project_description: Optional[str] = None
+    assumptions_used: bool = False
+    assumed_values: dict = field(default_factory=dict)
     raw_answers: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Sync user_scale ↔ max_users for backward compatibility."""
+        if self.max_users is not None and self.user_scale is None:
+            self.user_scale = self.max_users
+        elif self.user_scale is not None and self.max_users is None:
+            self.max_users = self.user_scale
 
     def as_summary(self) -> str:
         """Human-readable summary of extracted constraints.
@@ -66,7 +94,12 @@ class OperationalConstraints:
         ``OperationalIntent.stress_priorities``.
         """
         parts: list[str] = []
-        if self.user_scale is not None:
+        if self.current_users is not None and self.max_users is not None:
+            parts.append(
+                f"Current users: {self.current_users}, "
+                f"max target: {self.max_users}"
+            )
+        elif self.user_scale is not None:
             parts.append(f"Expected concurrent users: {self.user_scale}")
         if self.data_type:
             labels = {
@@ -80,10 +113,16 @@ class OperationalConstraints:
             parts.append(
                 f"Data: {labels.get(self.data_type, self.data_type)}"
             )
+        if self.per_user_data:
+            parts.append(f"Typical data per user: {self.per_user_data}")
+        if self.max_total_data:
+            parts.append(f"Max total data: {self.max_total_data}")
         if self.usage_pattern:
             labels = {
                 "sustained": "steady, continuous use",
+                "steady": "steady, continuous use",
                 "burst": "burst/peak usage patterns",
+                "on_demand": "occasional, on-demand use",
                 "periodic": "occasional, on-demand use",
                 "growing": "growing usage over time",
             }
@@ -337,22 +376,28 @@ def _format_data_type_detail(keywords: list[str]) -> str:
 # ── Usage Pattern ──
 
 _USAGE_PATTERN_CHOICES: dict[str, str] = {
-    "1": "sustained",
+    "1": "steady",
     "2": "burst",
-    "3": "periodic",
+    "3": "on_demand",
     "4": "growing",
 }
 
+# Canonical aliases — old values map to new canonical forms.
+_USAGE_PATTERN_ALIASES: dict[str, str] = {
+    "sustained": "steady",
+    "periodic": "on_demand",
+}
+
 _USAGE_PATTERN_KEYWORDS: dict[str, list[str]] = {
-    "sustained": [
+    "steady": [
         "steady", "constant", "continuous", "all day",
-        "always", "throughout", "nonstop", "24/7",
+        "always", "throughout", "nonstop", "24/7", "sustained",
     ],
     "burst": [
         "burst", "peak", "rush", "spike", "end of month",
         "deadline", "morning", "evening",
     ],
-    "periodic": [
+    "on_demand": [
         "occasional", "sometimes", "now and then", "weekly",
         "monthly", "periodic", "on demand", "when needed",
         "once in a while", "rarely", "infrequent",
@@ -365,13 +410,21 @@ _USAGE_PATTERN_KEYWORDS: dict[str, list[str]] = {
 
 
 def parse_usage_pattern(text: str) -> Optional[str]:
-    """Extract usage pattern from a numbered choice or keyword match."""
+    """Extract usage pattern from a numbered choice or keyword match.
+
+    Returns canonical values: ``"steady"``, ``"burst"``, ``"on_demand"``,
+    ``"growing"``.  Old values (``"sustained"``, ``"periodic"``) are
+    normalised to their canonical equivalents.
+    """
     text_lower = text.lower().strip()
 
     if _is_skip(text_lower):
         return None
 
+    # Direct value (e.g. from web pill)
     stripped = text_lower.rstrip(".").strip()
+    if stripped in _USAGE_PATTERN_ALIASES:
+        return _USAGE_PATTERN_ALIASES[stripped]
     if stripped in _USAGE_PATTERN_CHOICES:
         return _USAGE_PATTERN_CHOICES[stripped]
 
@@ -398,8 +451,10 @@ def infer_availability(usage_pattern: Optional[str]) -> Optional[str]:
         return None
     return {
         "sustained": "always_on",
+        "steady": "always_on",
         "burst": "business_hours",
         "periodic": "occasional",
+        "on_demand": "occasional",
         "growing": "always_on",
     }.get(usage_pattern)
 
@@ -677,3 +732,115 @@ def parse_growth_expectation(text: str) -> Optional[str]:
     if scores:
         return max(scores, key=scores.get)
     return None
+
+
+# ── Per-User Data ──
+
+_PER_USER_DATA_CATEGORIES: dict[str, str] = {
+    "1": "small",
+    "2": "medium",
+    "3": "large",
+}
+
+
+def parse_per_user_data(text: str) -> Optional[str]:
+    """Extract per-user data size category or description.
+
+    Accepts numbered choices (``"1"`` = small), category keywords
+    (``"small"``, ``"medium"``, ``"large"``), or free text that is
+    stored verbatim.
+    """
+    text_stripped = text.strip()
+    if _is_skip(text_stripped.lower()):
+        return None
+
+    stripped = text_stripped.lower().rstrip(".").strip()
+    if stripped in _PER_USER_DATA_CATEGORIES:
+        return _PER_USER_DATA_CATEGORIES[stripped]
+    if stripped in ("small", "medium", "large"):
+        return stripped
+
+    # Store free text as-is (e.g. "about 50 rows", "a few hundred KB")
+    if text_stripped:
+        return text_stripped
+    return None
+
+
+def parse_max_total_data(text: str) -> Optional[str]:
+    """Extract maximum total data description.
+
+    Accepts numbered choices, size expressions (``"10GB"``,
+    ``"1M rows"``), category keywords, or free text.
+    """
+    text_stripped = text.strip()
+    if _is_skip(text_stripped.lower()):
+        return None
+
+    stripped = text_stripped.lower().rstrip(".").strip()
+    if stripped in _PER_USER_DATA_CATEGORIES:
+        return _PER_USER_DATA_CATEGORIES[stripped]
+    if stripped in ("small", "medium", "large"):
+        return stripped
+
+    if text_stripped:
+        return text_stripped
+    return None
+
+
+# ── Data Size Conversion ──
+
+_PER_USER_ITEM_DEFAULTS: dict[str, int] = {
+    "small": 50,
+    "medium": 500,
+    "large": 5000,
+}
+
+_MAX_TOTAL_ITEM_DEFAULTS: dict[str, int] = {
+    "small": 1000,
+    "medium": 10000,
+    "large": 100000,
+}
+
+
+def per_user_data_to_items(per_user_data: Optional[str]) -> int:
+    """Convert per-user data description to an item count for testing."""
+    if not per_user_data:
+        return 100  # sensible default
+    lower = per_user_data.lower().strip()
+    if lower in _PER_USER_ITEM_DEFAULTS:
+        return _PER_USER_ITEM_DEFAULTS[lower]
+
+    # Try to extract a number
+    m = re.search(r'(\d+(?:\.\d+)?)\s*([km])?\b', lower)
+    if m:
+        val = float(m.group(1))
+        suffix = m.group(2)
+        if suffix == "k":
+            return int(val * 1000)
+        if suffix == "m":
+            return int(val * 1_000_000)
+        return max(1, int(val))
+
+    return 100
+
+
+def max_total_data_to_items(max_total_data: Optional[str]) -> int:
+    """Convert max total data description to an item count for testing."""
+    if not max_total_data:
+        return 10000  # sensible default
+    lower = max_total_data.lower().strip()
+    if lower in _MAX_TOTAL_ITEM_DEFAULTS:
+        return _MAX_TOTAL_ITEM_DEFAULTS[lower]
+
+    # Try to extract a number with optional suffix
+    m = re.search(r'(\d+(?:\.\d+)?)\s*([km])?\b', lower)
+    if m:
+        val = float(m.group(1))
+        suffix = m.group(2)
+        if suffix == "k":
+            return int(val * 1000)
+        if suffix == "m":
+            return int(val * 1_000_000)
+        return max(1, int(val))
+
+    return 10000

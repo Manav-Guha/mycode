@@ -25,7 +25,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-from mycode.constraints import OperationalConstraints, depth_to_coupling_cap
+from mycode.constraints import (
+    OperationalConstraints,
+    depth_to_coupling_cap,
+    max_total_data_to_items,
+    per_user_data_to_items,
+)
 from mycode.ingester import CouplingPoint, FunctionFlow, IngestionResult
 from mycode.library.loader import DependencyProfile, ProfileMatch
 
@@ -107,6 +112,43 @@ _DATA_TYPE_KEEP: dict[str, frozenset[str]] = {
 # specified a data type the profiled scenarios (data_volume_scaling,
 # memory_profiling) are more valuable and need the time budget.
 _MAX_COUPLING_SCENARIOS_FILTERED = 10
+
+# Non-interactive fallback defaults when no user intent is provided.
+_NON_INTERACTIVE_DEFAULTS: dict[str, object] = {
+    "current_users": 10,
+    "max_users": 100,
+    "per_user_data": "medium",
+    "max_total_data": "medium",
+}
+
+
+def apply_non_interactive_defaults(
+    constraints: OperationalConstraints,
+) -> OperationalConstraints:
+    """Populate missing constraint fields with sensible defaults.
+
+    Sets ``assumptions_used=True`` and records assumed values so the
+    report can disclose them.
+    """
+    assumed: dict[str, object] = {}
+    if constraints.current_users is None:
+        constraints.current_users = _NON_INTERACTIVE_DEFAULTS["current_users"]  # type: ignore[assignment]
+        assumed["current_users"] = constraints.current_users
+    if constraints.max_users is None:
+        constraints.max_users = _NON_INTERACTIVE_DEFAULTS["max_users"]  # type: ignore[assignment]
+        assumed["max_users"] = constraints.max_users
+    if constraints.user_scale is None:
+        constraints.user_scale = constraints.max_users
+    if constraints.per_user_data is None:
+        constraints.per_user_data = _NON_INTERACTIVE_DEFAULTS["per_user_data"]  # type: ignore[assignment]
+        assumed["per_user_data"] = constraints.per_user_data
+    if constraints.max_total_data is None:
+        constraints.max_total_data = _NON_INTERACTIVE_DEFAULTS["max_total_data"]  # type: ignore[assignment]
+        assumed["max_total_data"] = constraints.max_total_data
+    if assumed:
+        constraints.assumptions_used = True
+        constraints.assumed_values = assumed
+    return constraints
 
 
 class CouplingBehaviorType(str, Enum):
@@ -890,9 +932,11 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 constraint_notes.append(
                     "Data type not specified — tested with generic data"
                 )
-            if constraints.max_payload_mb is None:
+            if (constraints.per_user_data is None
+                    and constraints.max_total_data is None
+                    and constraints.max_payload_mb is None):
                 constraint_notes.append(
-                    "Max payload not specified — tested at default sizes"
+                    "Data volume not specified — tested at default sizes"
                 )
 
         # Collect browser-only deps — skip library-specific tests for these
@@ -1307,28 +1351,43 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
     ) -> list[StressTestScenario]:
         """Apply constraint-driven parameterisation to scenarios.
 
-        Five adjustments:
+        Six adjustments:
 
-        1. **Scale boundaries** (E1): ``user_scale`` drives concurrent
-           test levels (``[1x, 1.5x, 2x, 3x]``), memory-profiling
-           session counts, and data-volume item counts (fallback when
-           ``max_payload_mb`` is not set).
+        1. **Scale boundaries**: ``current_users`` / ``max_users`` drive
+           concurrent test levels in 10% increments with buffer.
+           Falls back to ``user_scale`` → ``_scale_levels`` for
+           backward compatibility.
 
-        2. **Data size boundaries**: ``max_payload_mb`` scales
-           ``data_sizes`` around the stated value.
+        2. **Data size boundaries**: ``per_user_data`` / ``max_total_data``
+           drive data test levels in 10% increments.  Falls back to
+           ``max_payload_mb`` → ``_data_scale_levels``.
 
         3. **Template filtering** (E2): ``data_type`` removes
-           irrelevant scenario categories.  Failure-mode and
-           version-discrepancy scenarios survive filtering.
+           irrelevant scenario categories.
 
         4. **Deployment filtering**: ``deployment_context`` demotes
            network scenarios for local-only projects.
 
-        5. **Priority boost** (existing): ``_DATA_TYPE_BOOST``
-           promotes/demotes surviving scenarios.
+        5. **Priority boost**: ``_DATA_TYPE_BOOST`` promotes/demotes.
+
+        6. **User intent**: every scenario gets a ``user_intent`` dict
+           in ``test_config`` so the report can frame findings.
         """
         user_scale = constraints.user_scale
+        current_users = constraints.current_users
+        max_users = constraints.max_users
         max_payload = constraints.max_payload_mb
+
+        # Build user_intent dict for report framing
+        user_intent: dict = {}
+        if current_users is not None:
+            user_intent["current_users"] = current_users
+        if max_users is not None:
+            user_intent["max_users"] = max_users
+        if constraints.per_user_data is not None:
+            user_intent["per_user_data"] = constraints.per_user_data
+        if constraints.max_total_data is not None:
+            user_intent["max_total_data"] = constraints.max_total_data
 
         # ── E2: Template selection — filter before parameterisation ──
         if constraints.data_type and constraints.data_type != "mixed":
@@ -1342,9 +1401,6 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 ]
 
             # ── Coupling scenario cap ──
-            # When a data_type filter is active, cap coupling scenarios so
-            # profiled scenarios (data_volume_scaling, memory_profiling) get
-            # enough of the time budget.  Cap varies by analysis_depth.
             cap = (
                 depth_to_coupling_cap(constraints.analysis_depth)
                 if constraints.analysis_depth
@@ -1371,12 +1427,20 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                 scenario.test_config["parameters"] = {}
             params = scenario.test_config["parameters"]
 
+            # Attach user_intent to every scenario
+            if user_intent:
+                scenario.test_config["user_intent"] = user_intent
+
             # ── E1a. Scale boundaries for concurrent tests ──
             if user_scale is not None and scenario.category in (
                 "concurrent_execution", "gil_contention",
                 "async_failures",
             ):
-                scale_levels = _scale_levels(user_scale)
+                # Use 10% increment logic when both current and max are set
+                if current_users is not None and max_users is not None:
+                    scale_levels = _user_scale_levels(current_users, max_users)
+                else:
+                    scale_levels = _scale_levels(user_scale)
                 params["concurrent"] = scale_levels
                 scenario.test_config["constraint_scale"] = scale_levels
                 scenario.test_config["user_stated_capacity"] = user_scale
@@ -1391,12 +1455,12 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                     )
 
             # ── E1b. Scale boundaries for memory profiling ──
-            # Memory leak detection needs 50-100 iterations, not hundreds.
-            # Cap iterations at a practical max; user_scale influences the
-            # report text but not the iteration count beyond what's needed
-            # to detect the leak pattern.
             if user_scale is not None and scenario.category == "memory_profiling":
-                if user_scale <= 100:
+                if current_users is not None and max_users is not None:
+                    sessions = _user_scale_levels(
+                        min(current_users, 200), min(max_users, 200),
+                    )
+                elif user_scale <= 100:
                     sessions = _scale_levels(user_scale)
                 else:
                     sessions = [50, 100, min(user_scale, 200)]
@@ -1411,17 +1475,23 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
 
             # ── E1c/2. Data size boundaries ──
             if scenario.category in ("data_volume_scaling", "blocking_io"):
-                if max_payload is not None:
-                    # max_payload takes precedence
+                if (constraints.per_user_data is not None
+                        or constraints.max_total_data is not None):
+                    # Intent-driven: use per_user → max_total 10% increments
+                    pu_items = per_user_data_to_items(constraints.per_user_data)
+                    mt_items = max_total_data_to_items(constraints.max_total_data)
+                    params["data_sizes"] = _data_scale_levels_intent(
+                        pu_items, mt_items,
+                    )
+                    scenario.description += (
+                        f" Data volume scaled from {pu_items:,} to "
+                        f"{mt_items:,} items based on your stated data ranges."
+                    )
+                elif max_payload is not None:
                     base = int(max_payload * 1000)
                     params["data_sizes"] = _data_scale_levels(base)
                     scenario.test_config["constraint_max_payload_mb"] = max_payload
                 elif user_scale is not None:
-                    # Fallback: derive item counts from user_scale.
-                    # Cap base at 1000 to prevent timeout on hosted
-                    # environments — the tiers [500..3000] are enough
-                    # to detect scaling issues.  user_scale still
-                    # influences report severity, not tier size.
                     base_items = min(user_scale * 10, 1000)
                     params["data_sizes"] = _data_scale_levels(base_items)
                     scenario.test_config["user_stated_capacity"] = user_scale
@@ -1460,7 +1530,6 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
                                 scenario.priority = "medium"
 
         # ── Quick mode: skip low-priority scenarios ──
-        # Runs after priority boost so _DATA_TYPE_LOW demotions are applied.
         if constraints.analysis_depth == "quick":
             scenarios = [
                 s for s in scenarios
@@ -1803,6 +1872,59 @@ def _data_scale_levels(base_items: int) -> list[int]:
         max(10, base_items * 3),
     })
     return levels
+
+
+def _user_scale_levels(current: int, maximum: int) -> list[int]:
+    """Generate test levels from *current* to *maximum* in 10% increments
+    of *maximum*, plus a 10-20% buffer beyond maximum.
+
+    Example: current=50, max=200, step=20 →
+        [50, 70, 90, 110, 130, 150, 170, 190, 200, 230]
+
+    Falls back to ``_scale_levels(maximum)`` when current > maximum or
+    inputs are invalid.
+    """
+    if maximum <= 0:
+        return [1, 10, 100]
+    if current <= 0:
+        current = 1
+    if current > maximum:
+        return _scale_levels(maximum)
+
+    step = max(1, maximum // 10)
+    levels = list(range(current, maximum + 1, step))
+    if not levels or levels[-1] != maximum:
+        levels.append(maximum)
+    # Add 15% buffer (midpoint of 10-20%)
+    buffer = maximum + max(1, int(maximum * 0.15))
+    buffer = min(buffer, MAX_CONCURRENT)
+    levels.append(buffer)
+    return sorted(set(levels))
+
+
+def _data_scale_levels_intent(
+    per_user_items: int, max_total_items: int,
+) -> list[int]:
+    """Generate data test levels from *per_user_items* up to
+    *max_total_items* in 10% increments, plus a 15% buffer.
+
+    Falls back to ``_data_scale_levels(per_user_items)`` when
+    max_total_items ≤ per_user_items.
+    """
+    if max_total_items <= 0:
+        return _data_scale_levels(per_user_items)
+    if per_user_items <= 0:
+        per_user_items = 10
+    if per_user_items >= max_total_items:
+        return _data_scale_levels(per_user_items)
+
+    step = max(1, max_total_items // 10)
+    levels = list(range(per_user_items, max_total_items + 1, step))
+    if not levels or levels[-1] != max_total_items:
+        levels.append(max_total_items)
+    buffer = max_total_items + max(1, int(max_total_items * 0.15))
+    levels.append(buffer)
+    return sorted(set(levels))
 
 
 def _coupling_relevance(

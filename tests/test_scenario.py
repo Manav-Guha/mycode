@@ -2726,7 +2726,7 @@ class TestConstraintWiringE1E2E3:
         ingestion, matches = self._make_basic_setup()
 
         c1 = OperationalConstraints(
-            user_scale=5, data_type="text", usage_pattern="sustained",
+            user_scale=5, data_type="text", usage_pattern="steady",
         )
         c2 = OperationalConstraints(
             user_scale=500, data_type="api_responses", usage_pattern="burst",

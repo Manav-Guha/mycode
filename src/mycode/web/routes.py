@@ -427,8 +427,12 @@ def _followup_or_done(job: Job, current_turn: int) -> ConverseResponse:
     if job.constraints:
         constraints_dict = {
             "user_scale": job.constraints.user_scale,
+            "current_users": job.constraints.current_users,
+            "max_users": job.constraints.max_users,
             "usage_pattern": job.constraints.usage_pattern,
             "max_payload_mb": job.constraints.max_payload_mb,
+            "per_user_data": job.constraints.per_user_data,
+            "max_total_data": job.constraints.max_total_data,
             "data_type": job.constraints.data_type,
             "deployment_context": job.constraints.deployment_context,
             "availability_requirement": job.constraints.availability_requirement,
@@ -603,6 +607,113 @@ def handle_download_pdf(job_id: str, doc_type: str) -> tuple[bytes, str, str]:
 # ── Health ──
 
 # Cache Docker availability — subprocess call can take 10s if daemon is down.
+# ── Submit Intent (web form) ──
+
+
+def handle_submit_intent(job_id: str, answers: dict) -> dict:
+    """Parse grouped form answers into OperationalConstraints and start analysis.
+
+    Called by the web frontend when the user submits the structured intake
+    form.  Unlike ``/api/converse``, this processes all answers in a single
+    request.
+    """
+    from mycode.constraints import (
+        OperationalConstraints,
+        infer_availability,
+        parse_analysis_depth,
+        parse_data_type,
+        parse_max_total_data,
+        parse_per_user_data,
+        parse_usage_pattern,
+        parse_user_scale,
+        depth_to_timeout,
+    )
+
+    job = store.get(job_id)
+    if job is None:
+        return {"error": f"Job {job_id} not found."}
+    if job.status not in ("preflight_complete", "conversing", "conversation_done"):
+        return {"error": f"Cannot submit intent — job is in state '{job.status}'."}
+
+    # Parse each field
+    current_users = parse_user_scale(answers.get("current_users", ""))
+    max_users = parse_user_scale(answers.get("max_users", ""))
+    data_type = parse_data_type(answers.get("data_type", ""))
+    usage_pattern = parse_usage_pattern(answers.get("usage_pattern", ""))
+    per_user_data = parse_per_user_data(answers.get("per_user_data", ""))
+    max_total_data = parse_max_total_data(answers.get("max_total_data", ""))
+    analysis_depth = parse_analysis_depth(answers.get("analysis_depth", ""))
+
+    constraints = OperationalConstraints(
+        current_users=current_users,
+        max_users=max_users,
+        user_scale=max_users or current_users,
+        data_type=data_type,
+        usage_pattern=usage_pattern,
+        per_user_data=per_user_data,
+        max_total_data=max_total_data,
+        analysis_depth=analysis_depth,
+        timeout_per_scenario=depth_to_timeout(analysis_depth) if analysis_depth else None,
+        availability_requirement=infer_availability(usage_pattern),
+        project_description=answers.get("description", ""),
+    )
+
+    job.constraints = constraints
+    job.intent_string = constraints.as_summary()
+    job.status = "conversation_done"
+
+    return {
+        "job_id": job_id,
+        "constraints": {
+            "user_scale": constraints.user_scale,
+            "current_users": constraints.current_users,
+            "max_users": constraints.max_users,
+            "usage_pattern": constraints.usage_pattern,
+            "per_user_data": constraints.per_user_data,
+            "max_total_data": constraints.max_total_data,
+            "data_type": constraints.data_type,
+            "analysis_depth": constraints.analysis_depth,
+        },
+        "done": True,
+    }
+
+
+# ── Predict ──
+
+
+def handle_predict(job_id: str) -> dict:
+    """Return corpus-based predictions for the job's dependency stack."""
+    from mycode.prediction import predict_issues
+
+    job = store.get(job_id)
+    if job is None:
+        return {"error": f"Job {job_id} not found."}
+    if job.ingestion is None:
+        return {"error": "No ingestion data — run preflight first."}
+
+    dep_names = [d.name for d in job.ingestion.dependencies]
+    result = predict_issues(
+        dependency_names=dep_names,
+        constraints=job.constraints,
+    )
+
+    return {
+        "total_similar_projects": result.total_similar_projects,
+        "matching_deps": result.matching_deps,
+        "predictions": [
+            {
+                "title": p.title,
+                "probability_pct": p.probability_pct,
+                "severity": p.severity,
+                "confirmed_count": p.confirmed_count,
+                "matching_deps": p.matching_deps,
+                "scale_note": p.scale_note,
+            }
+            for p in result.predictions
+        ],
+    }
+
+
 # Rechecked every 5 minutes.
 _docker_cache: dict[str, object] = {}
 

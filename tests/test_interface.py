@@ -320,18 +320,21 @@ class TestConversationalInterfaceOffline:
         io = MockIO(responses=[
             "It's a web app for tracking expenses",
             "I care most about handling lots of data",
-            # Constraint questions (user_scale, data_type, usage_pattern, max_payload, timeout)
+            # Constraint questions: current_users, max_users, data_type,
+            # usage_pattern, per_user_data, max_total_data, analysis_depth
+            "about 20",
             "about 20",
             "1",
             "1",
             "2",
+            "not sure",
             "1",
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
-        # 7 prompts: turn 1, turn 2, 5 constraint questions
-        assert len(io.prompts) == 7
+        # 9 prompts: turn 1, turn 2, 7 constraint questions
+        assert len(io.prompts) == 9
         # First prompt asks user to confirm analysis
         assert "sound right" in io.prompts[0].lower() or "project" in io.prompts[0].lower()
         # Second prompt asks targeted questions
@@ -489,8 +492,11 @@ class TestConversationalInterfaceLLM:
     def test_llm_failure_falls_back_to_offline(self, simple_ingestion):
         io = MockIO(responses=[
             "my app", "speed",
-            # Constraint questions (after LLM fallback triggers offline)
-            "not sure", "not sure", "not sure", "not sure", "not sure",
+            # Constraint questions (after LLM fallback triggers offline):
+            # current_users, max_users, data_type, usage_pattern,
+            # per_user_data, max_total_data, analysis_depth
+            "not sure", "not sure", "not sure", "not sure",
+            "not sure", "not sure", "not sure",
         ])
         config = LLMConfig(api_key="test-key")
         interface = ConversationalInterface(
@@ -506,8 +512,8 @@ class TestConversationalInterfaceLLM:
 
         result = interface.run(simple_ingestion)
 
-        # 7 prompts: turn 1, turn 2, 5 constraint questions
-        assert len(io.prompts) == 7
+        # 9 prompts: turn 1, turn 2, 7 constraint questions
+        assert len(io.prompts) == 9
         assert "project" in io.prompts[0].lower() or "tell me" in io.prompts[0].lower()
         # Warnings should mention LLM failure
         assert any("llm" in w.lower() or "unavailable" in w.lower()
@@ -686,10 +692,12 @@ class TestConstraintExtraction:
         io = MockIO(responses=[
             "It's a Flask app for tracking budgets",
             "I want to test data handling and speed",
-            "50",       # user_scale
+            "50",       # current_users
+            "50",       # max_users
             "1",        # data_type → tabular
             "2",        # usage_pattern → burst
-            "2",        # max_payload → medium (50 MB)
+            "2",        # per_user_data → medium
+            "not sure", # max_total_data
             "2",        # analysis_depth → standard
         ])
         interface = ConversationalInterface(offline=True, io=io)
@@ -700,7 +708,7 @@ class TestConstraintExtraction:
         assert c.user_scale == 50
         assert c.data_type == "tabular"
         assert c.usage_pattern == "burst"
-        assert c.max_payload_mb == 50.0
+        assert c.per_user_data == "medium"
         assert c.availability_requirement == "business_hours"  # derived from burst
         assert c.analysis_depth == "standard"
         assert c.timeout_per_scenario == 300  # derived from standard
@@ -711,8 +719,9 @@ class TestConstraintExtraction:
             "It's a medical records app deployed on AWS cloud for hospital staff",
             "About 200 users uploading CSV files, steady use all day",
             # user_scale, data_type, usage_pattern inferred from turn text
-            # max_payload always asked explicitly
-            "3",        # max_payload (large = 100 MB)
+            # per_user_data and max_total_data always asked explicitly
+            "3",        # per_user_data → large
+            "not sure", # max_total_data
             "1",        # analysis_depth → quick
         ])
         interface = ConversationalInterface(offline=True, io=io)
@@ -724,8 +733,8 @@ class TestConstraintExtraction:
         assert c.data_sensitivity == "medical"
         assert c.user_scale == 200
         assert c.data_type == "tabular"  # "CSV" matches tabular
-        assert c.usage_pattern == "sustained"  # "steady" + "all day"
-        assert c.max_payload_mb == 100.0  # choice 3 = large
+        assert c.usage_pattern == "steady"  # "steady" + "all day"
+        assert c.per_user_data == "large"  # choice 3 = large
         assert c.availability_requirement == "always_on"  # derived from sustained
         assert c.analysis_depth == "quick"
         assert c.timeout_per_scenario == 120  # derived from quick
@@ -735,11 +744,13 @@ class TestConstraintExtraction:
         io = MockIO(responses=[
             "just a side project",
             "nothing specific",
-            "not sure",
-            "skip",
-            "n/a",
-            "pass",
-            "",
+            "not sure",   # current_users
+            "skip",       # max_users
+            "n/a",        # data_type
+            "pass",       # usage_pattern
+            "",           # per_user_data
+            "not sure",   # max_total_data
+            "not sure",   # analysis_depth
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -749,7 +760,7 @@ class TestConstraintExtraction:
         assert c.user_scale is None
         assert c.data_type is None
         assert c.usage_pattern is None
-        assert c.max_payload_mb is None
+        assert c.per_user_data is None
         assert c.availability_requirement is None
 
     def test_constraints_raw_answers_preserved(self, simple_ingestion):
@@ -757,10 +768,12 @@ class TestConstraintExtraction:
         io = MockIO(responses=[
             "turn one",
             "turn two",
-            "10",
-            "1",
-            "3",
-            "1",
+            "10",       # current_users
+            "10",       # max_users
+            "1",        # data_type
+            "3",        # usage_pattern
+            "1",        # per_user_data
+            "not sure", # max_total_data
             "1",        # analysis_depth → quick
         ])
         interface = ConversationalInterface(offline=True, io=io)
@@ -779,11 +792,13 @@ class TestConstraintExtraction:
         io = MockIO(responses=[
             "It processes images and photos uploaded by users",
             "Speed matters most",
-            "5",
+            "5",        # current_users
+            "5",        # max_users
             # data_type inferred from "images" + "photos" → no question asked
-            "1",
-            "1",
-            "",
+            "1",        # usage_pattern
+            "1",        # per_user_data
+            "not sure", # max_total_data
+            "1",        # analysis_depth
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -798,10 +813,11 @@ class TestConstraintExtraction:
             "A dashboard for our team",
             "We need to handle a few hundred people at once",
             # user_scale inferred from "a few hundred" → no question asked
-            "1",
-            "1",
-            "1",
-            "",
+            "1",        # data_type
+            "1",        # usage_pattern
+            "1",        # per_user_data
+            "not sure", # max_total_data
+            "1",        # analysis_depth
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion)
@@ -817,11 +833,13 @@ class TestConstraintExtraction:
         io1 = MockIO(responses=[
             "A data processing app",
             "I want to test scaling",
-            "5",        # user_scale
+            "5",        # current_users
+            "5",        # max_users
             "1",        # tabular
             # usage_pattern skipped — inferred "growing" from "scaling"
-            "1",        # small payload
-            "",          # project name
+            "1",        # per_user_data → small
+            "not sure", # max_total_data
+            "2",        # analysis_depth → standard
         ])
         interface1 = ConversationalInterface(offline=True, io=io1)
         result1 = interface1.run(simple_ingestion)
@@ -830,11 +848,13 @@ class TestConstraintExtraction:
         io2 = MockIO(responses=[
             "A data processing app",
             "I want to test scaling",
-            "5000",     # user_scale
+            "5000",     # current_users
+            "5000",     # max_users
             "4",        # images (was choice 3 before documents added)
             # usage_pattern skipped — inferred "growing" from "scaling"
-            "3",        # large payload
-            "",          # project name
+            "3",        # per_user_data → large
+            "not sure", # max_total_data
+            "2",        # analysis_depth → standard
         ])
         interface2 = ConversationalInterface(offline=True, io=io2)
         result2 = interface2.run(simple_ingestion)
@@ -843,8 +863,8 @@ class TestConstraintExtraction:
         assert result2.constraints.user_scale == 5000
         assert result1.constraints.data_type == "tabular"
         assert result2.constraints.data_type == "images"
-        assert result1.constraints.max_payload_mb == 1.0
-        assert result2.constraints.max_payload_mb == 100.0
+        assert result1.constraints.per_user_data == "small"
+        assert result2.constraints.per_user_data == "large"
 
     def test_online_mode_skips_explicit_questions(self, simple_ingestion):
         """In online mode (non-offline), no structured questions are asked."""
@@ -922,10 +942,12 @@ class TestInputValidation:
         io = MockIO(responses=[
             "It's a web app",
             "speed matters",
-            "20",           # user_scale — valid
+            "20",           # current_users — valid
+            "20",           # max_users — valid
             "1",            # data_type — valid (tabular)
             "2",            # usage_pattern — valid (burst)
-            "1",            # max_payload — valid (small)
+            "1",            # per_user_data — valid (small)
+            "not sure",     # max_total_data
             "1",            # analysis_depth — valid (quick)
         ])
         interface = ConversationalInterface(offline=True, io=io)
@@ -934,29 +956,31 @@ class TestInputValidation:
         assert result.constraints.user_scale == 20
         assert result.constraints.data_type == "tabular"
         assert result.constraints.usage_pattern == "burst"
-        assert result.constraints.max_payload_mb == 1.0
+        assert result.constraints.per_user_data == "small"
         assert result.constraints.analysis_depth == "quick"
-        # No re-ask prompts — exactly 7 prompts total
-        assert len(io.prompts) == 7
+        # No re-ask prompts — exactly 9 prompts total
+        assert len(io.prompts) == 9
 
     def test_bad_input_re_asked_once(self, simple_ingestion):
         """Invalid input triggers one re-ask with clarification."""
         io = MockIO(responses=[
             "web app",
             "speed",
-            "banana",       # user_scale — invalid (first attempt)
-            "50",           # user_scale — valid (second attempt)
+            "banana",       # current_users — invalid (first attempt)
+            "50",           # current_users — valid (second attempt)
+            "50",           # max_users
             "1",            # data_type
             "1",            # usage_pattern
-            "2",            # max_payload
+            "2",            # per_user_data
+            "not sure",     # max_total_data
             "1",            # analysis_depth → quick
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
         assert result.constraints.user_scale == 50
-        # 8 prompts: 2 turns + 5 constraints + 1 re-ask
-        assert len(io.prompts) == 8
+        # 10 prompts: 2 turns + 7 constraints + 1 re-ask
+        assert len(io.prompts) == 10
         # The re-ask prompt should mention "didn't catch that"
         assert any("didn't catch that" in p for p in io.prompts)
 
@@ -965,16 +989,19 @@ class TestInputValidation:
         io = MockIO(responses=[
             "web app",
             "speed",
-            "banana",       # user_scale — invalid (first)
-            "also banana",  # user_scale — invalid (second) → defaults to 10
+            "banana",       # current_users — invalid (first)
+            "also banana",  # current_users — invalid (second) → defaults to 10
+            "not sure",     # max_users
             "1",            # data_type
             "1",            # usage_pattern
-            "2",            # max_payload
+            "2",            # per_user_data
+            "not sure",     # max_total_data
+            "2",            # analysis_depth → standard
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
-        assert result.constraints.user_scale == 10  # default
+        assert result.constraints.current_users == 10  # default
         # User should be notified about the default
         assert any("defaulting to" in d.lower() for d in io.displays)
 
@@ -983,31 +1010,36 @@ class TestInputValidation:
         io = MockIO(responses=[
             "web app",
             "speed",
-            "not sure",     # user_scale — explicit skip
+            "not sure",     # current_users — explicit skip
+            "not sure",     # max_users — explicit skip
             "1",            # data_type
             "1",            # usage_pattern
-            "not sure",     # max_payload — explicit skip
+            "not sure",     # per_user_data — explicit skip
+            "not sure",     # max_total_data — explicit skip
             "not sure",     # analysis_depth — explicit skip
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
         assert result.constraints.user_scale is None
-        assert result.constraints.max_payload_mb is None
+        assert result.constraints.per_user_data is None
         assert result.constraints.analysis_depth is None
-        # No re-asks — exactly 7 prompts
-        assert len(io.prompts) == 7
+        # No re-asks — exactly 9 prompts
+        assert len(io.prompts) == 9
 
     def test_data_type_reask_then_default(self, simple_ingestion):
         """data_type defaults to 'mixed' after two failures."""
         io = MockIO(responses=[
             "web app",
             "speed",
-            "10",           # user_scale — valid
+            "10",           # current_users — valid
+            "10",           # max_users — valid
             "banana",       # data_type — invalid
             "still banana", # data_type — invalid → defaults to mixed
             "1",            # usage_pattern
-            "2",            # max_payload
+            "2",            # per_user_data
+            "not sure",     # max_total_data
+            "2",            # analysis_depth → standard
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
@@ -1020,33 +1052,39 @@ class TestInputValidation:
         io = MockIO(responses=[
             "web app",
             "speed",
-            "10",           # user_scale
+            "10",           # current_users
+            "10",           # max_users
             "1",            # data_type
             "xyz",          # usage_pattern — invalid
             "steady",       # usage_pattern — valid on retry
-            "2",            # max_payload
+            "2",            # per_user_data
+            "not sure",     # max_total_data
+            "2",            # analysis_depth → standard
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
-        assert result.constraints.usage_pattern == "sustained"
+        assert result.constraints.usage_pattern == "steady"
 
-    def test_max_payload_defaults_to_medium(self, simple_ingestion):
-        """max_payload_mb defaults to 50.0 after two failures."""
+    def test_max_users_defaults_after_two_failures(self, simple_ingestion):
+        """max_users defaults to 100 after two failures."""
         io = MockIO(responses=[
             "web app",
             "speed",
-            "10",           # user_scale
+            "10",           # current_users — valid
+            "bananas",      # max_users — invalid
+            "more bananas", # max_users — invalid → defaults to 100
             "1",            # data_type
             "1",            # usage_pattern
-            "bananas",      # max_payload — invalid
-            "more bananas", # max_payload — invalid → defaults to 50
+            "2",            # per_user_data
+            "not sure",     # max_total_data
+            "2",            # analysis_depth → standard
         ])
         interface = ConversationalInterface(offline=True, io=io)
         result = interface.run(simple_ingestion, language="python")
 
-        assert result.constraints.max_payload_mb == 50.0
-        assert any("50 MB" in d for d in io.displays)
+        assert result.constraints.max_users == 100
+        assert any("defaulting to" in d.lower() for d in io.displays)
 
 
 class TestWebFollowupValidation:
@@ -1056,30 +1094,30 @@ class TestWebFollowupValidation:
         from mycode.constraints import OperationalConstraints
         constraints = OperationalConstraints()
         constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "user_scale", "50",
+            constraints, "current_users", "50",
         )
         assert ok is True
-        assert constraints.user_scale == 50
+        assert constraints.current_users == 50
         assert msg == ""
 
     def test_invalid_first_attempt_returns_clarification(self):
         from mycode.constraints import OperationalConstraints
         constraints = OperationalConstraints()
         constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "user_scale", "banana",
+            constraints, "current_users", "banana",
         )
         assert ok is False
         assert "didn't catch that" in msg
-        assert constraints.user_scale is None
+        assert constraints.current_users is None
 
     def test_invalid_retry_applies_default(self):
         from mycode.constraints import OperationalConstraints
         constraints = OperationalConstraints()
         constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "user_scale", "banana", is_retry=True,
+            constraints, "current_users", "banana", is_retry=True,
         )
         assert ok is True
-        assert constraints.user_scale == 10  # default
+        assert constraints.current_users == 10  # default
         assert "defaulting to" in msg.lower()
 
     def test_skip_word_returns_parsed_ok(self):
@@ -1107,16 +1145,16 @@ class TestWebFollowupValidation:
             constraints, "usage_pattern", "xyz", is_retry=True,
         )
         assert ok is True
-        assert constraints.usage_pattern == "sustained"
+        assert constraints.usage_pattern == "steady"
 
-    def test_max_payload_retry_defaults_to_medium(self):
+    def test_max_users_retry_defaults_to_100(self):
         from mycode.constraints import OperationalConstraints
         constraints = OperationalConstraints()
         constraints, ok, msg = ConversationalInterface.apply_followup_answer(
-            constraints, "max_payload_mb", "xyz", is_retry=True,
+            constraints, "max_users", "xyz", is_retry=True,
         )
         assert ok is True
-        assert constraints.max_payload_mb == 50.0
+        assert constraints.max_users == 100
 
     def test_analysis_depth_valid(self):
         from mycode.constraints import OperationalConstraints

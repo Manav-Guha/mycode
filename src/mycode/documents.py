@@ -697,11 +697,16 @@ def render_understanding(report: DiagnosticReport, edition: int) -> str:
     for f in all_findings:
         severity_groups.get(f.severity, severity_groups["info"]).append(f)
 
+    _severity_labels = {
+        "critical": "PRIORITY IMPROVEMENTS",
+        "warning": "IMPROVEMENT OPPORTUNITIES",
+        "info": "GOOD TO KNOW",
+    }
     for severity in ("critical", "warning", "info"):
         group = severity_groups[severity]
         if not group:
             continue
-        label = severity.upper()
+        label = _severity_labels.get(severity, severity.upper())
         lines.append(f"## {label} ({len(group)})")
         lines.append("")
         for f in group:
@@ -1799,11 +1804,17 @@ def render_understanding_pdf(
     for f in all_findings:
         severity_groups.get(f.severity, severity_groups["info"]).append(f)
 
+    _pdf_severity_labels = {
+        "critical": "PRIORITY IMPROVEMENTS",
+        "warning": "IMPROVEMENT OPPORTUNITIES",
+        "info": "GOOD TO KNOW",
+    }
     for severity in ("critical", "warning", "info"):
         group = severity_groups[severity]
         if not group:
             continue
-        pdf.section_heading(f"{severity.upper()} ({len(group)})", level=3)
+        label = _pdf_severity_labels.get(severity, severity.upper())
+        pdf.section_heading(f"{label} ({len(group)})", level=3)
         for f in group:
             _render_pdf_finding(pdf, f)
 

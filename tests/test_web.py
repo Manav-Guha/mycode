@@ -476,10 +476,11 @@ class TestInterfaceTurnAPI:
                 self._responses = iter([
                     "It's a web app",  # Turn 1
                     "10 users, JSON data",  # Turn 2
-                    "10",  # user_scale
-                    "4",  # data_type (API responses)
+                    # user_scale + data_type inferred from turn text
                     "1",  # usage_pattern (steady)
-                    "1",  # max_payload (small)
+                    "1",  # per_user_data (small)
+                    "not sure",  # max_total_data
+                    "2",  # analysis_depth (standard)
                 ])
                 self.displays = []
 
@@ -618,11 +619,12 @@ class TestConverseHandler:
         routes_module.store = s
         try:
             # Turn 3: "10 users, JSON payloads" → user_scale=10, data_type=api_responses
-            # usage_pattern and max_payload_mb are still None → follow-up
+            # __post_init__ syncs max_users=10; current_users, usage_pattern,
+            # per_user_data, max_total_data, analysis_depth still None → follow-up
             resp = handle_converse(job.id, 3, "10 users, JSON payloads, single server")
             assert not resp.done
-            assert resp.question  # should ask about usage_pattern
-            assert "how will people" in resp.question.lower() or "use it" in resp.question.lower()
+            assert resp.question  # should ask about current_users
+            assert "how many users" in resp.question.lower()
         finally:
             jobs_module.store = old_store
             routes_module.store = old_store
@@ -649,9 +651,11 @@ class TestConverseHandler:
             resp = handle_converse(job.id, 3, "10 users, JSON payloads, single server")
             assert not resp.done
 
-            # Answer follow-ups until done (max 4 safety cap)
+            # Answer follow-ups until done (max 8 safety cap)
+            # Fields: current_users, usage_pattern, per_user_data, max_total_data, analysis_depth
+            # (max_users auto-set by __post_init__ from user_scale; data_type inferred)
             turn = resp.turn + 1
-            answers = ["1", "2", "1", "1"]  # numbered choices for remaining fields
+            answers = ["10", "1", "2", "not sure", "1", "1", "1", "1"]
             for answer in answers:
                 if resp.done:
                     break
@@ -666,8 +670,8 @@ class TestConverseHandler:
             jobs_module.store = old_store
             routes_module.store = old_store
 
-    def test_converse_payload_always_asked(self, simple_ingestion):
-        """max_payload_mb is never inferred from turn text — always a follow-up."""
+    def test_converse_per_user_data_always_asked(self, simple_ingestion):
+        """per_user_data is never inferred from turn text — always a follow-up."""
         from mycode.web.jobs import JobStore
         from mycode.web.routes import handle_converse
         import mycode.web.routes as routes_module
@@ -684,28 +688,37 @@ class TestConverseHandler:
         jobs_module.store = s
         routes_module.store = s
         try:
-            # Turn 3: all text-inferable constraints present, but not payload
+            # Turn 3: user_scale, usage_pattern, data_type inferable from text
+            # but current_users/max_users not set by process_turn_2
             resp = handle_converse(
                 job.id, 3,
                 "50 users, steady use all day, JSON API data",
             )
             assert not resp.done
-            # The only remaining follow-up should be max_payload_mb
-            assert "largest input" in resp.question.lower()
+            # First follow-up is current_users (max_users auto-set by __post_init__)
+            assert "how many users" in resp.question.lower()
 
-            # Answer the payload question → depth question next
-            resp = handle_converse(job.id, 4, "2")  # medium = 50 MB
+            # Answer current_users (max_users already synced from user_scale)
+            resp = handle_converse(job.id, 4, "50")
+            assert not resp.done
+
+            # Answer per_user_data (max_users was set by __post_init__)
+            resp = handle_converse(job.id, 5, "2")  # medium
+            assert not resp.done
+
+            # Answer max_total_data
+            resp = handle_converse(job.id, 6, "10 GB")
             assert not resp.done
             assert "thorough" in resp.question.lower() or "analysis" in resp.question.lower()
 
-            # Answer the depth question → conversation done
-            resp = handle_converse(job.id, 5, "2")  # standard
+            # Answer the depth question — conversation done
+            resp = handle_converse(job.id, 7, "2")  # standard
             assert resp.done
             assert resp.constraints is not None
             assert resp.constraints["user_scale"] == 50
-            assert resp.constraints["usage_pattern"] == "sustained"
+            assert resp.constraints["usage_pattern"] == "steady"
             assert resp.constraints["data_type"] == "api_responses"
-            assert resp.constraints["max_payload_mb"] == 50.0
+            assert resp.constraints["per_user_data"] == "medium"
             assert resp.constraints["analysis_depth"] == "standard"
             assert job.status == "conversation_done"
         finally:
@@ -993,12 +1006,13 @@ class TestFullConversationFlow:
 
             # Turn 3: Answer Turn 2 — text constraints extracted, follow-ups begin
             r3 = handle_converse(job.id, 3, "5 users, JSON data, deployed on AWS, runs all day")
-            assert not r3.done  # max_payload_mb always asked explicitly
+            assert not r3.done  # current_users/per_user_data/max_total_data/analysis_depth asked
 
             # Answer follow-ups until done
+            # (max_users auto-set by __post_init__; data_type + usage_pattern inferred)
             turn = r3.turn + 1
             resp = r3
-            for answer in ["2", "2", "2", "2"]:  # safety cap
+            for answer in ["5", "2", "10 GB", "2", "2", "2"]:  # safety cap
                 if resp.done:
                     break
                 resp = handle_converse(job.id, turn, answer)

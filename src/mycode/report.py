@@ -137,6 +137,8 @@ class DegradationPoint:
     description: str = ""
     grouped_points: list["DegradationPoint"] = field(default_factory=list)
     group_count: int = 1
+    user_baseline: Optional[int] = None
+    user_ceiling: Optional[int] = None
 
 
 @dataclass
@@ -183,6 +185,8 @@ class DiagnosticReport:
     business_domain: str = ""
     has_user_constraints: bool = False
     user_scale: int | None = None
+    current_users: int | None = None
+    max_users: int | None = None
     _usage_pattern: str = ""
     _data_type: str = ""
     _data_type_detail: str = ""
@@ -270,13 +274,13 @@ class DiagnosticReport:
 
         # Header changes when no constraints were provided
         critical_header = (
-            "  Fix Before Launch" if self.has_user_constraints
-            else "  Findings at Default Test Range"
+            "  Priority Improvements" if self.has_user_constraints
+            else "  Recommendations at Default Test Range"
         )
 
         if not self.findings and self.scenarios_run:
             sections.append("\n" + "-" * 40)
-            sections.append("  Findings")
+            sections.append("  Recommendations")
             sections.append("-" * 40)
             sections.append(
                 "\n  All stress test scenarios completed cleanly. "
@@ -300,7 +304,7 @@ class DiagnosticReport:
             if warnings:
                 sections.append("\n" + "-" * 40)
                 sections.append(
-                    "  Worth Investigating"
+                    "  Improvement Opportunities"
                 )
                 sections.append("-" * 40)
                 for f in warnings:
@@ -325,7 +329,7 @@ class DiagnosticReport:
         # Degradation
         if self.degradation_points:
             sections.append("\n" + "-" * 40)
-            sections.append("  Degradation Curves")
+            sections.append("  Scaling Roadmap")
             sections.append("-" * 40)
             for dp in self.degradation_points:
                 header = _describe_scenario(dp.scenario_name) or dp.scenario_name
@@ -510,14 +514,14 @@ class DiagnosticReport:
 
             if criticals:
                 if self.has_user_constraints:
-                    lines.append("## Fix Before Launch")
+                    lines.append("## Priority Improvements")
                     lines.append("")
                     lines.append(
                         "These problems will affect your users under the "
                         "conditions you described. Address them before deploying."
                     )
                 else:
-                    lines.append("## Findings at Default Test Range")
+                    lines.append("## Recommendations at Default Test Range")
                     lines.append("")
                     lines.append(
                         "No usage context was provided, so myCode tested at "
@@ -549,7 +553,7 @@ class DiagnosticReport:
                 for f in infos:
                     _render_finding(lines, f)
         elif total > 0:
-            lines.append("## Findings")
+            lines.append("## Recommendations")
             lines.append("")
             lines.append(
                 "All stress tests completed cleanly. No errors, resource "
@@ -676,6 +680,8 @@ class DiagnosticReport:
                 "breaking_point": dp.breaking_point,
                 "description": dp.description,
                 "group_count": dp.group_count,
+                "user_baseline": dp.user_baseline,
+                "user_ceiling": dp.user_ceiling,
             }
             if dp.grouped_points:
                 d["grouped_points"] = [
@@ -1071,6 +1077,10 @@ class ReportGenerator:
         if constraints is not None:
             if constraints.user_scale is not None:
                 report.user_scale = constraints.user_scale
+            if constraints.current_users is not None:
+                report.current_users = constraints.current_users
+            if constraints.max_users is not None:
+                report.max_users = constraints.max_users
             if constraints.usage_pattern:
                 report._usage_pattern = constraints.usage_pattern
             if constraints.data_type:
@@ -1176,6 +1186,14 @@ class ReportGenerator:
         report.degradation_points.sort(
             key=lambda dp: self._degradation_ratio(dp), reverse=True,
         )
+
+        # 4b. Tag degradation points with user intent markers
+        if constraints is not None:
+            for dp in report.degradation_points:
+                if constraints.current_users is not None:
+                    dp.user_baseline = constraints.current_users
+                if constraints.max_users is not None:
+                    dp.user_ceiling = constraints.max_users
 
         # 4b. Generate plain-language summary for non-technical readers
         report.plain_summary = self._generate_plain_summary(
@@ -1779,23 +1797,22 @@ class ReportGenerator:
         constraints: OperationalConstraints,
         profile_matches: Optional[list[ProfileMatch]] = None,
     ) -> None:
-        """Classify finding severity relative to user-stated constraints.
+        """Frame findings relative to user-stated capacity using headroom
+        language.
 
-        Per spec §7:
-        - Within stated capacity → CRITICAL
-        - Beyond stated capacity but ≤3x → WARNING
-        - Far beyond (>3x) → INFORMATIONAL
-        - None parameters → note "not specified — tested at default range"
+        Severity is set by where the breaking point falls relative to the
+        user's operating range:
+        - Below ``current_users`` → CRITICAL (affecting you now)
+        - Between ``current_users`` and ``max_users`` → CRITICAL (within target)
+        - Up to 1.5x ``max_users`` → WARNING (improvement opportunity)
+        - Beyond 1.5x → INFO (worth knowing)
 
-        Also adds constraint context to finding descriptions so findings
-        reference the user's stated intent (e.g. "You said 20 users").
-
-        When *profile_matches* is provided, findings for dependencies with
-        corpus_stats get an additional sentence referencing test-portfolio
-        failure rates.
+        Findings include headroom percentage and plain-language capacity
+        assessment.  When *profile_matches* is provided, findings for
+        dependencies with corpus_stats get an additional sentence.
         """
-        user_scale = constraints.user_scale
-        max_payload = constraints.max_payload_mb
+        current = constraints.current_users
+        maximum = constraints.max_users or constraints.user_scale
 
         # Build corpus_stats lookup from profile_matches
         corpus_lookup: dict[str, dict] = {}
@@ -1815,14 +1832,11 @@ class ReportGenerator:
             ):
                 continue
 
-            # Try to extract the load level from the scenario name or details
             load_level, is_concurrency = _extract_load_level(finding)
 
-            if load_level is not None and is_concurrency and user_scale is not None:
-                # Concurrency metric — compare against user-stated scale
-                ratio = load_level / user_scale if user_scale > 0 else float("inf")
-
+            if load_level is not None and is_concurrency and maximum is not None:
                 # Look up prior severity for hysteresis
+                ratio = load_level / maximum if maximum > 0 else float("inf")
                 fkey = finding_key(finding.title, finding.category)
                 prior_sev = (
                     self._prior_state.finding_severities.get(fkey)
@@ -1834,47 +1848,67 @@ class ReportGenerator:
                     default_severity="info",
                     prior_severity=prior_sev,
                 )
-
                 finding.severity = severity
-                if severity == "critical":
-                    if load_level < user_scale:
-                        finding.description = (
-                            f"You said {user_scale:,} users. "
-                            f"This breaks at just {load_level:,} concurrent "
-                            f"users — well below your expected capacity. "
-                            f"This is a problem you need to fix before "
-                            f"launch. "
-                            f"{finding.description}"
+
+                # Build headroom-based description
+                orig = finding.description
+                if current and current > 0 and load_level <= current:
+                    # Breaking below current usage
+                    finding.description = (
+                        f"This issue occurs at {load_level:,} concurrent "
+                        f"users — below your current {current:,} users. "
+                        f"This is affecting your application now. "
+                        f"{orig}"
+                    )
+                    finding.severity = "critical"
+                elif current and current > 0 and load_level > current:
+                    headroom_pct = (
+                        (load_level - current) / current * 100
+                    )
+                    finding.description = (
+                        f"Your code is reliable up to {load_level:,} "
+                        f"concurrent users. "
+                        f"You have {headroom_pct:.0f}% headroom above your "
+                        f"current {current:,} users."
+                    )
+                    if maximum and load_level < maximum:
+                        finding.description += (
+                            f" At your maximum target of {maximum:,} users, "
+                            f"this becomes relevant. "
+                            f"To extend to {maximum:,}, here is what to "
+                            f"improve. {orig}"
+                        )
+                        finding.severity = "critical"
+                    elif maximum and load_level >= maximum:
+                        finding.description += (
+                            f" This is beyond your target of {maximum:,} "
+                            f"users. {orig}"
                         )
                     else:
-                        # Breaks at or near user's stated capacity
-                        finding.description = (
-                            f"You said {user_scale:,} users. "
-                            f"This breaks at exactly {load_level:,} "
-                            f"concurrent users — right at your expected "
-                            f"capacity. You have no safety margin. "
-                            f"{finding.description}"
-                        )
-                elif severity == "warning":
-                    finding.description = (
-                        f"You said {user_scale:,} users. "
-                        f"This breaks at {load_level:,} concurrent users "
-                        f"({ratio:.1f}x your stated needs). "
-                        f"Not a problem today, but won't take much growth "
-                        f"to hit this. "
-                        f"{finding.description}"
-                    )
+                        finding.description += f" {orig}"
                 else:
-                    # info
-                    finding.description = (
-                        f"You said {user_scale:,} users. "
-                        f"This breaks at {load_level:,} concurrent users "
-                        f"— well beyond your stated needs ({ratio:.0f}x). "
-                        f"Worth knowing, but not urgent. "
-                        f"{finding.description}"
-                    )
+                    # No current_users — use ratio-based framing
+                    if severity == "critical":
+                        finding.description = (
+                            f"Your code is reliable up to {load_level:,} "
+                            f"concurrent users — at or below your stated "
+                            f"{maximum:,} users. {orig}"
+                        )
+                    elif severity == "warning":
+                        finding.description = (
+                            f"Your code is reliable up to {load_level:,} "
+                            f"concurrent users ({ratio:.1f}x your stated "
+                            f"{maximum:,}). This is an improvement "
+                            f"opportunity. {orig}"
+                        )
+                    else:
+                        finding.description = (
+                            f"Your code is reliable up to {load_level:,} "
+                            f"concurrent users — well beyond your stated "
+                            f"{maximum:,} ({ratio:.0f}x). {orig}"
+                        )
+
             elif load_level is not None and not is_concurrency:
-                # Data-size metric — display the load level, no ratio
                 combined = f"{finding.title} {finding.details}"
                 m = _STEP_LEVEL_RE.search(combined)
                 step_name = m.group(0).rstrip(": ") if m else ""
@@ -1889,15 +1923,13 @@ class ReportGenerator:
                         f"This issue occurs at {load_level:,} operations. "
                         f"{finding.description}"
                     )
-            elif user_scale is None and finding.severity in ("critical", "warning"):
-                # No user_scale → keep original severity but note it
+            elif maximum is None and finding.severity in ("critical", "warning"):
                 finding.description = (
                     f"User scale not specified — tested at default range. "
                     f"{finding.description}"
                 )
 
-        # Append corpus stats sentences when available (warning only —
-        # critical findings already carry enough urgency)
+        # Append corpus stats sentences (warning only)
         if corpus_lookup:
             for finding in report.findings:
                 if finding.severity != "warning":
@@ -1912,7 +1944,25 @@ class ReportGenerator:
                             f"showed failures in {rate:.0%} of "
                             f"{count} tested projects."
                         )
-                        break  # one corpus sentence per finding
+                        break
+
+        # Non-interactive assumptions disclaimer
+        if constraints.assumptions_used and constraints.assumed_values:
+            vals = constraints.assumed_values
+            parts = [f"{k}={v}" for k, v in vals.items()]
+            disclaimer = (
+                "You did not specify user count, data volume, or growth "
+                "targets. myCode made the following assumptions and tested "
+                f"against them: {', '.join(parts)}. For a report tailored "
+                "to your actual use case, run myCode with the interactive "
+                "option."
+            )
+            if report.operational_context:
+                report.operational_context = (
+                    f"{disclaimer}\n\n{report.operational_context}"
+                )
+            else:
+                report.operational_context = disclaimer
 
         # Add constraint summary to report operational_context
         if constraints.as_summary() != "No specific constraints provided":
@@ -2567,8 +2617,10 @@ class ReportGenerator:
                 )
         if report._usage_pattern:
             _usage_labels = {
+                "steady": "steady usage",
                 "sustained": "steady usage",
                 "burst": "burst/peak usage patterns",
+                "on_demand": "occasional use",
                 "periodic": "occasional use",
                 "growing": "growing usage over time",
             }
