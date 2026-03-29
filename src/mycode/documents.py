@@ -1681,44 +1681,52 @@ def _make_pdf_class():
             self.cell(4, 5, "")  # spacer
 
         def code_block(self, text: str):
-            """Prompt box: grey bg, border, monospace text."""
+            """Prompt box: grey bg, border, monospace text.
+
+            If the box won't fit on the current page, inserts a page
+            break first so the box starts at the top of a fresh page.
+            Keeps auto-page-break on so very long prompts flow
+            naturally (the background is drawn only for the portion
+            that fits on the first page).
+            """
             safe = _safe_text(text[:800])
             x = self.l_margin
             w = self.w - self.l_margin - self.r_margin
             pad = 4  # mm internal padding
 
-            # Two-pass: first measure, then draw box, then render
+            # Estimate box height
             self.set_font("Courier", "", 8)
-            box_y = self.get_y()
-            # Measure by rendering to nowhere
-            self.set_xy(x + pad, box_y + pad)
-            start_measure = self.get_y()
-            self.multi_cell(w - 2 * pad, 3.8, safe, dry_run=True)
-            text_h = self.get_y() - start_measure
-            # dry_run doesn't move cursor in all fpdf2 versions,
-            # so also estimate from line count
-            line_count = safe.count("\n") + 1
-            # Account for wrapping: estimate chars per line
             chars_per_line = max(1, int((w - 2 * pad) / 1.9))
             wrapped_lines = sum(
                 max(1, (len(ln) + chars_per_line - 1) // chars_per_line)
                 for ln in safe.split("\n")
             )
-            text_h = max(text_h, wrapped_lines * 3.8)
+            text_h = wrapped_lines * 3.8
             box_h = text_h + 2 * pad
 
-            # Draw background + border
+            # If box won't fit but would fit on a fresh page, break now
+            remaining = self.h - self.get_y() - 20
+            if box_h > remaining and box_h < self.h - 40:
+                self.add_page()
+
+            box_y = self.get_y()
+
+            # Draw background — clip to available space on this page
+            draw_h = min(box_h, self.h - box_y - 20)
             self.set_fill_color(*_CODE_BG)
             self.set_draw_color(*_CODE_BORDER)
             self.set_line_width(0.35)
-            self.rect(x, box_y, w, box_h, style="FD")
+            self.rect(x, box_y, w, draw_h, style="FD")
 
-            # Render text inside
+            # Render text inside (auto page break handles overflow)
             self.set_font("Courier", "", 8)
             self.set_text_color(*_BODY)
             self.set_xy(x + pad, box_y + pad)
             self.multi_cell(w - 2 * pad, 3.8, safe)
-            self.set_y(box_y + box_h)
+
+            # Ensure Y is past the box
+            if self.get_y() < box_y + box_h:
+                self.set_y(box_y + box_h)
             self.ln(2)
 
         def bullet(self, text: str):
@@ -2072,22 +2080,11 @@ def render_understanding_pdf(
         pdf.multi_cell(0, 5, _safe_text(_http_tested_summary(http_tested)))
         pdf.ln(6)
 
-    # Performance summary table + confidence + callout — keep together
+    # Performance summary table + confidence + callout — flow continuously
     rows = _dedup_by_label(report.degradation_points)
     has_actionable = any(
         f.severity in ("critical", "warning") for f in report.findings
     )
-    # Estimate total height of remaining content
-    tail_h = 0
-    if rows:
-        tail_h += 10 + 6 + len(rows) * 6 + 4  # heading + header + rows + gap
-    if report.confidence_note:
-        tail_h += 10
-    if has_actionable:
-        tail_h += 25  # callout box
-    remaining = pdf.h - pdf.get_y() - 18  # footer margin
-    if tail_h > 0 and remaining < tail_h:
-        pdf.add_page()
 
     if rows:
         _render_perf_table_pdf(pdf, report.degradation_points, report.findings)
@@ -2146,13 +2143,53 @@ def _integrate_details(description: str, details: str) -> str:
     return f"{desc}. {detail_clean}."
 
 
+def _estimate_finding_height(f: Finding) -> float:
+    """Estimate the total height (mm) of a finding card.
+
+    Used to decide whether to page-break before rendering so the card
+    stays together as a visual unit.
+    """
+    h = 8.0  # badge + title line + spacing
+    combined = _integrate_details(f.description or "", f.details or "")
+    if combined:
+        h += 6 + len(combined) / 70 * 4.5  # label + wrapped text
+    diagnosis = _build_diagnosis(f)
+    if diagnosis:
+        h += 6 + len(diagnosis) / 70 * 4.5
+    if f.severity == "info":
+        h += 8
+        return h
+    consequence = _consequence_for_user(f)
+    if consequence:
+        h += 6 + len(consequence) / 70 * 4.5
+    prompt = generate_finding_prompt(f)
+    if prompt:
+        h += 6 + 8  # label + instruction
+        # Code block: ~3.5mm per line, capped at 800 chars
+        prompt_lines = _safe_text(prompt[:800]).count("\n") + 1
+        h += 10 + prompt_lines * 3.5  # padding + lines
+    h += 12  # "After you fix it" + spacing
+    return h
+
+
 def _render_pdf_finding(pdf, f: Finding) -> None:
     """Render a single finding for the understanding PDF.
 
-    Each finding is a card with a coloured left border and light
-    background fill.  Critical/warning: full layout with prompt box.
+    Each finding is a card with a coloured left border.
+    Critical/warning: full layout with prompt box.
     Info: "What we found" only.
+
+    The card is kept together on one page when possible — if the
+    estimated height won't fit, a page break is inserted before
+    the card starts (not in the middle).
     """
+    # Pre-flight: keep the card together if it fits on a fresh page
+    est_h = _estimate_finding_height(f)
+    remaining = pdf.h - pdf.get_y() - 20  # bottom margin
+    if est_h < pdf.h - 40 and remaining < est_h:
+        # Card fits on a page but not on the current one — break first
+        pdf.add_page()
+
     border_color = _SEVERITY_BORDER.get(f.severity, _BLUE)
     card_indent = 4  # mm from left margin to content (after border)
     card_pad = 2     # mm inner padding for the card area
@@ -2197,14 +2234,7 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
             pdf.ln(3)
         card_end_y = pdf.get_y() + card_pad
         pdf.set_left_margin(original_margin)
-        # Draw background fill
-        card_w = pdf.w - original_margin - pdf.r_margin
-        pdf.set_fill_color(*_CARD_BG)
-        pdf.rect(
-            original_margin, card_start_y, card_w,
-            card_end_y - card_start_y, style="F",
-        )
-        _draw_card_border(pdf, border_color, original_margin, card_start_y, card_end_y)
+        _draw_card_border(pdf, border_color, original_margin, card_start_y, min(card_end_y, pdf.get_y()))
         pdf.set_y(card_end_y)
         pdf.ln(4)
         return
@@ -2237,20 +2267,10 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     pdf.cell(0, 5, "Run myCode again to verify the fix worked.")
     pdf.ln(4)
 
-    # Draw background fill behind the entire card (under text already rendered)
+    # Draw left border spanning the card
     card_end_y = pdf.get_y() + card_pad
     pdf.set_left_margin(original_margin)
-    card_w = pdf.w - original_margin - pdf.r_margin
-    # Note: background drawn after text means text overlays it in PDF
-    # layer order.  fpdf2 draws in stream order, so we record the
-    # background as a rect behind the content.  Since fpdf2 does not
-    # support z-ordering, the near-white bg is subtle enough that
-    # overlapping text is still fully readable.
-    pdf.set_fill_color(*_CARD_BG)
-    # We cannot retroactively insert; instead the background is already
-    # effectively white-on-white.  The left border provides the visual
-    # card boundary.
-    _draw_card_border(pdf, border_color, original_margin, card_start_y, card_end_y)
+    _draw_card_border(pdf, border_color, original_margin, card_start_y, min(card_end_y, pdf.get_y()))
     pdf.set_y(card_end_y)
     pdf.ln(4)
 
