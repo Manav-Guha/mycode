@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from mycode.classifiers import classify_finding, classify_project
-from mycode.constraints import OperationalConstraints
+from mycode.constraints import OperationalConstraints, per_user_data_to_items
 from mycode.engine import ExecutionEngineResult, ScenarioResult, StepResult
 from mycode.hysteresis import (
     PriorRunState,
@@ -1909,20 +1909,69 @@ class ReportGenerator:
                         )
 
             elif load_level is not None and not is_concurrency:
-                combined = f"{finding.title} {finding.details}"
-                m = _STEP_LEVEL_RE.search(combined)
-                step_name = m.group(0).rstrip(": ") if m else ""
-                step_desc = _describe_step(step_name) if step_name else ""
-                if step_desc:
-                    finding.description = (
-                        f"This issue occurs at {step_desc}. "
-                        f"{finding.description}"
-                    )
+                orig = finding.description
+                # Compute projected data volume from user intent
+                pu_items = (
+                    per_user_data_to_items(constraints.per_user_data)
+                    if constraints.per_user_data else None
+                )
+                if maximum and pu_items:
+                    current_vol = (current or 1) * pu_items
+                    max_vol = maximum * pu_items
+                    pu_label = constraints.per_user_data or "data"
+                    if load_level <= current_vol:
+                        finding.severity = "critical"
+                        finding.description = (
+                            f"This issue appears at {load_level:,} items. "
+                            f"At your current {current or 1:,} users with "
+                            f"{pu_label} datasets (~{pu_items:,} items each), "
+                            f"your total data volume is approximately "
+                            f"{current_vol:,} items — already past this "
+                            f"threshold. This is affecting your application "
+                            f"now. {orig}"
+                        )
+                    elif load_level <= max_vol:
+                        finding.severity = "critical"
+                        finding.description = (
+                            f"This issue appears at {load_level:,} items. "
+                            f"At your {maximum:,} maximum users with "
+                            f"{pu_label} datasets (~{pu_items:,} items each), "
+                            f"total data volume is approximately "
+                            f"{max_vol:,} items. This exceeds the threshold "
+                            f"where this issue appears. This is a priority "
+                            f"improvement for your stated scale. {orig}"
+                        )
+                    else:
+                        headroom = (
+                            (load_level - max_vol) / max_vol * 100
+                            if max_vol > 0 else 0
+                        )
+                        finding.severity = "info"
+                        finding.description = (
+                            f"This issue appears at {load_level:,} items. "
+                            f"At your {maximum:,} maximum users with "
+                            f"{pu_label} datasets (~{pu_items:,} items each), "
+                            f"total data volume is approximately "
+                            f"{max_vol:,} items — well below this threshold. "
+                            f"You have {headroom:.0f}% headroom. {orig}"
+                        )
                 else:
-                    finding.description = (
-                        f"This issue occurs at {load_level:,} operations. "
-                        f"{finding.description}"
+                    # No user intent for data volume — describe the step
+                    combined = f"{finding.title} {finding.details}"
+                    m = _STEP_LEVEL_RE.search(combined)
+                    step_name = m.group(0).rstrip(": ") if m else ""
+                    step_desc = (
+                        _describe_step(step_name) if step_name else ""
                     )
+                    if step_desc:
+                        finding.description = (
+                            f"This issue occurs at {step_desc}. {orig}"
+                        )
+                    else:
+                        finding.description = (
+                            f"This issue occurs at {load_level:,} "
+                            f"operations. {orig}"
+                        )
             elif maximum is None and finding.severity in ("critical", "warning"):
                 finding.description = (
                     f"User scale not specified — tested at default range. "

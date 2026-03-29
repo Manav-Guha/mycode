@@ -419,6 +419,90 @@ class TestReportHeadroomFraming:
         )
 
 
+# ── 7b. Data volume framing ──
+
+
+class TestDataVolumeFraming:
+    """Test data-volume findings framed against user×per_user_data."""
+
+    def _make_data_finding(self, load_level):
+        """Create a data_volume_scaling finding at the given load level."""
+        return Finding(
+            title=f"Error at data_{load_level}",
+            severity="warning",
+            category="data_volume_scaling",
+            description="Original description.",
+            _load_level=load_level,
+        )
+
+    def _contextualise(self, finding, current_users=None, max_users=None,
+                       per_user_data=None):
+        report = DiagnosticReport(findings=[finding])
+        constraints = OperationalConstraints(
+            current_users=current_users, max_users=max_users,
+            per_user_data=per_user_data,
+        )
+        gen = ReportGenerator(offline=True)
+        gen._contextualise_findings(report, constraints)
+        return report.findings[0]
+
+    def test_exceeds_at_max_scale(self):
+        """2 users × 50 items = 100 current. 25 max × 50 = 1,250.
+        Threshold at 500 → between current and max → critical."""
+        f = self._make_data_finding(load_level=500)
+        result = self._contextualise(
+            f, current_users=2, max_users=25, per_user_data="small",
+        )
+        assert "25" in result.description
+        assert "1,250 items" in result.description
+        assert "priority improvement" in result.description.lower() or \
+               "exceeds" in result.description
+        assert result.severity == "critical"
+
+    def test_exceeds_at_current_scale(self):
+        """10 users × 50 items = 500 total. Threshold at 100 → critical now."""
+        f = self._make_data_finding(load_level=100)
+        result = self._contextualise(
+            f, current_users=10, max_users=100, per_user_data="small",
+        )
+        # current_vol = 10*50 = 500, load_level=100 < 500 → affecting now
+        assert "affecting your application now" in result.description
+        assert result.severity == "critical"
+
+    def test_well_below_threshold(self):
+        """5 users × 50 items = 250 total. Threshold at 10,000 → info."""
+        f = self._make_data_finding(load_level=10000)
+        result = self._contextualise(
+            f, current_users=5, max_users=25, per_user_data="small",
+        )
+        # max_vol = 25*50 = 1,250. load_level=10,000 >> 1,250 → info
+        assert "headroom" in result.description
+        assert result.severity == "info"
+
+    def test_no_per_user_data_falls_back(self):
+        """Without per_user_data, fall back to generic description."""
+        f = self._make_data_finding(load_level=500)
+        result = self._contextualise(
+            f, current_users=5, max_users=25, per_user_data=None,
+        )
+        # Should use step-based description, not intent-framed
+        assert "500" in result.description
+        assert "items each" not in result.description
+
+    def test_medium_per_user_data(self):
+        """1 user × 500 items = 500 current. 10 max × 500 = 5,000.
+        Threshold at 1,000 → between current and max → critical."""
+        f = self._make_data_finding(load_level=1000)
+        result = self._contextualise(
+            f, current_users=1, max_users=10, per_user_data="medium",
+        )
+        # current_vol = 1*500 = 500, max_vol = 10*500 = 5,000
+        # load_level=1,000 > 500 but < 5,000 → exceeds at max
+        assert "5,000 items" in result.description
+        assert "exceeds" in result.description
+        assert result.severity == "critical"
+
+
 # ── 8. DegradationPoint intent markers ──
 
 
