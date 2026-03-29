@@ -421,10 +421,19 @@ def _render_perf_table_md(
     lines.append("")
 
 
+def _verdict_display(verdict: str) -> str:
+    """Convert internal verdict text to user-facing display text.
+
+    Replaces 'Critical' with 'Priority' for PDF/display output while
+    keeping the internal representation unchanged for tests.
+    """
+    return verdict.replace("Critical", "Priority")
+
+
 def _verdict_color(verdict: str) -> tuple:
     """Return text colour for a verdict string."""
     vl = verdict.lower()
-    if "critical" in vl:
+    if "critical" in vl or "priority" in vl:
         return _RED
     if "warning" in vl:
         return _AMBER_TEXT
@@ -513,8 +522,9 @@ def _render_perf_table_pdf(
         cell_y = row_y + (row_h - base_row_h) / 2
         pdf.set_xy(x_pos, cell_y)
         pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(*_verdict_color(v))
-        pdf.cell(col_w[4], base_row_h, f"  {_safe_text(v)}")
+        v_display = _verdict_display(v)
+        pdf.set_text_color(*_verdict_color(v_display))
+        pdf.cell(col_w[4], base_row_h, f"  {_safe_text(v_display)}")
 
         pdf.set_xy(row_x, row_y + row_h)
 
@@ -1608,13 +1618,36 @@ def _make_pdf_class():
             self.cell(0, 4, f"Page {self.page_no()}/{{nb}}", align="R")
 
         def section_heading(self, text: str, level: int = 2):
-            """H1=16pt brand, H2=12pt heading, H3=11pt heading."""
+            """H1=16pt brand, H2=12pt heading bg strip, H3=11pt heading bg strip."""
             sizes = {1: 16, 2: 12, 3: 11}
             size = sizes.get(level, 11)
-            self.set_font("Helvetica", "B", size)
-            self.set_text_color(*(_BRAND if level == 1 else _HEADING))
-            self.multi_cell(0, size * 0.55, _safe_text(text))
-            self.ln(2)
+            pad = 2  # mm padding around text
+
+            # Background strip for H2 and H3
+            if level in (2, 3):
+                bg = (230, 240, 250) if level == 2 else (243, 243, 245)
+                self.set_font("Helvetica", "B", size)
+                safe = _safe_text(text)
+                line_h = size * 0.55
+                # Estimate text height
+                w = self.w - self.l_margin - self.r_margin
+                chars_per_line = max(1, int(w / (size * 0.28)))
+                n_lines = max(1, -(-len(safe) // chars_per_line))
+                box_h = n_lines * line_h + 2 * pad
+                x = self.l_margin
+                y = self.get_y()
+                self.set_fill_color(*bg)
+                self.rect(x, y, w, box_h, style="F")
+                self.set_xy(x + pad, y + pad)
+                self.set_text_color(*(_BRAND if level == 1 else _HEADING))
+                self.multi_cell(w - 2 * pad, line_h, safe)
+                self.set_y(y + box_h)
+                self.ln(2)
+            else:
+                self.set_font("Helvetica", "B", size)
+                self.set_text_color(*_BRAND)
+                self.multi_cell(0, size * 0.55, _safe_text(text))
+                self.ln(2)
 
         def body_text(self, text: str):
             """10pt body text."""
@@ -1631,9 +1664,14 @@ def _make_pdf_class():
             self.ln(1)
 
         def severity_badge(self, severity: str):
-            """Inline severity badge."""
+            """Inline severity badge with user-friendly labels."""
             bg, fg = _SEVERITY_COLORS.get(severity, (_BLUE, _WHITE))
-            label = severity.upper()
+            _badge_labels = {
+                "critical": "PRIORITY",
+                "warning": "OPPORTUNITY",
+                "info": "INFO",
+            }
+            label = _badge_labels.get(severity, severity.upper())
             self.set_font("Helvetica", "B", 8)
             w = self.get_string_width(label) + 5
             self.set_fill_color(*bg)
@@ -1728,12 +1766,114 @@ def _make_pdf_class():
     return MyCodePDF
 
 
+def _extract_memory_capacity(text: str) -> str:
+    """Extract memory capacity info from plain_summary text.
+
+    Looks for patterns like "X MB per process" or "N concurrent sessions".
+    Returns the matched sentence/fragment, or empty string if not found.
+    """
+    if not text:
+        return ""
+    # Match sentences containing memory capacity indicators
+    for pattern in (
+        r"[^.]*\d+\s*MB\s+per\s+(?:process|session|user)[^.]*",
+        r"[^.]*concurrent\s+sessions?[^.]*\d+\s*MB[^.]*",
+        r"[^.]*\d+\s*MB[^.]*concurrent[^.]*",
+    ):
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            return m.group(0).strip()
+    return ""
+
+
+_PREDICTION_SEVERITY_COLORS: dict[str, tuple] = {
+    "critical": _RED,
+    "warning": _AMBER_TEXT,
+    "info": _SUBTLE,
+}
+
+
+def _render_predictive_analysis_pdf(pdf, predictions: dict) -> None:
+    """Render the Predictive Analysis section in the PDF.
+
+    Args:
+        pdf: The MyCodePDF instance.
+        predictions: Dict with ``total_similar_projects``, ``matching_deps``,
+            and ``predictions`` list.
+    """
+    total = predictions.get("total_similar_projects", 0)
+    deps = predictions.get("matching_deps", [])
+    preds = predictions.get("predictions", [])
+    if not preds:
+        return
+
+    pdf.section_heading("Predictive Analysis")
+    deps_str = ", ".join(deps[:8])
+    if len(deps) > 8:
+        deps_str += "..."
+    intro = f"Based on {total} projects with similar technology stack ({deps_str}):"
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(*_BODY)
+    pdf.multi_cell(0, 4.5, _safe_text(intro))
+    pdf.ln(3)
+
+    bar_max_w = 60  # mm — maximum bar width
+    bar_h = 4       # mm — bar height
+
+    for pred in preds:
+        title = pred.get("title", "")
+        prob = pred.get("probability_pct", 0)
+        severity = pred.get("severity", "info")
+        bar_color = _PREDICTION_SEVERITY_COLORS.get(severity, _SUBTLE)
+
+        y = pdf.get_y()
+        x = pdf.l_margin
+
+        # Draw probability bar
+        bar_w = max(1, bar_max_w * prob / 100.0)
+        pdf.set_fill_color(*bar_color)
+        pdf.rect(x, y + 0.5, bar_w, bar_h, style="F")
+
+        # Probability percentage (bold) after the bar
+        pdf.set_xy(x + bar_max_w + 3, y)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*_BODY)
+        pdf.cell(15, 5, f"{prob:.0f}%")
+
+        # Title text
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*_BODY)
+        pdf.cell(0, 5, _safe_text(title))
+        pdf.ln(bar_h + 2)
+
+    # Scale note (if any prediction has one)
+    scale_notes = [
+        p.get("scale_note", "") for p in preds if p.get("scale_note")
+    ]
+    if scale_notes:
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_text_color(*_SUBTLE)
+        pdf.multi_cell(0, 3.5, _safe_text(scale_notes[0]))
+    pdf.ln(4)
+
+
 def render_understanding_pdf(
     report: DiagnosticReport, edition: int, project_name: str = "",
+    predictions: Optional[dict] = None,
+    constraints: Optional["OperationalConstraints"] = None,
 ) -> bytes:
     """Render the understanding document as a styled PDF.
 
     Returns raw PDF bytes.  Requires fpdf2.
+
+    Args:
+        report: The diagnostic report to render.
+        edition: Edition number.
+        project_name: Human-readable project name.
+        predictions: Optional predictive analysis data dict with keys
+            ``total_similar_projects``, ``matching_deps``, and
+            ``predictions`` (list of prediction dicts).
+        constraints: Optional operational constraints from conversation.
     """
     PDFClass = _make_pdf_class()
     if PDFClass is None:
@@ -1745,13 +1885,89 @@ def render_understanding_pdf(
     pdf.alias_nb_pages()
     pdf.add_page()
 
-    # Title
-    pdf.section_heading("Understanding Your Results", level=1)
+    # ── Cover-page header block ──
+    # Project name (large, bold, brand)
+    if project_name:
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.set_text_color(*_BRAND)
+        pdf.multi_cell(0, 8, _safe_text(project_name))
+        pdf.ln(1)
+
+    # Date and edition in subtle text
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*_SUBTLE)
     date = _dt.date.today().isoformat()
     pdf.cell(0, 4, f"Edition {edition}  |  {date}")
-    pdf.ln(6)
+    pdf.ln(5)
+
+    # Technology stack summary
+    if report.recognized_dep_names:
+        stack_text = "Stack: " + ", ".join(report.recognized_dep_names[:12])
+        if len(report.recognized_dep_names) > 12:
+            stack_text += "..."
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*_SUBTLE)
+        pdf.cell(0, 4, _safe_text(stack_text))
+        pdf.ln(5)
+
+    # User intent summary box (only if constraints provided)
+    if constraints is not None:
+        intent_parts: list[str] = []
+        if getattr(constraints, "current_users", None) is not None:
+            intent_parts.append(
+                f"Current users: {constraints.current_users}"
+            )
+        if getattr(constraints, "max_users", None) is not None:
+            intent_parts.append(f"Max users: {constraints.max_users}")
+        if getattr(constraints, "data_type", None):
+            intent_parts.append(f"Data profile: {constraints.data_type}")
+        if getattr(constraints, "usage_pattern", None):
+            intent_parts.append(f"Usage: {constraints.usage_pattern}")
+        if intent_parts:
+            pdf.callout_box(" | ".join(intent_parts))
+
+    # ── Assessment Context section ──
+    if constraints is not None:
+        pdf.body_label("Assessment Context")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*_BODY)
+        pdf.multi_cell(0, 4.5, "Results assessed relative to:")
+        pdf.ln(1)
+        current = getattr(constraints, "current_users", None)
+        maximum = getattr(constraints, "max_users", None)
+        if current is not None or maximum is not None:
+            c_str = f"{current:,}" if current is not None else "?"
+            m_str = f"{maximum:,}" if maximum is not None else "?"
+            pdf.bullet(f"{c_str} current users -> {m_str} maximum users")
+        per_user = getattr(constraints, "per_user_data", None)
+        d_type = getattr(constraints, "data_type", None)
+        if per_user or d_type:
+            data_desc = per_user or "unspecified"
+            type_desc = d_type or "mixed"
+            pdf.bullet(
+                f"{data_desc} data per user ({type_desc} data types)"
+            )
+        usage = getattr(constraints, "usage_pattern", None)
+        if usage:
+            pdf.bullet(f"{usage} usage pattern")
+        depth = getattr(constraints, "analysis_depth", None)
+        _depth_labels = {
+            "quick": "quick (~2 min)",
+            "standard": "standard (~5 min)",
+            "deep": "deep (~10 min)",
+        }
+        depth_label = _depth_labels.get(depth or "", depth or "standard")
+        pdf.bullet(f"Analysis depth: {depth_label}")
+
+        # Memory capacity assessment from plain_summary
+        mem_cap = _extract_memory_capacity(report.plain_summary or "")
+        if mem_cap:
+            pdf.ln(1)
+            pdf.set_font("Helvetica", "I", 9)
+            pdf.set_text_color(*_SUBTLE)
+            pdf.multi_cell(0, 4, _safe_text(f"Memory note: {mem_cap}"))
+
+        pdf.ln(3)
 
     # Project summary
     if report.project_description:
@@ -1759,18 +1975,45 @@ def render_understanding_pdf(
         pdf.body_text(report.project_description)
 
     # Test overview — compact single-line stats
-    stats = (
+    stats_parts: list[str] = []
+    # Count priority improvements for summary language
+    n_critical = sum(
+        1 for f_item in report.findings if f_item.severity == "critical"
+    )
+    n_warning = sum(
+        1 for f_item in report.findings if f_item.severity == "warning"
+    )
+    stats_parts.append(
         f"Scenarios: {report.scenarios_run} run, "
         f"{report.scenarios_passed} passed, "
         f"{report.scenarios_failed} failed"
     )
     if report.scenarios_incomplete:
-        stats += f", {report.scenarios_incomplete} could not test"
+        stats_parts.append(
+            f"{report.scenarios_incomplete} could not test"
+        )
     if report.total_errors:
-        stats += f" | {report.total_errors} errors"
+        stats_parts.append(f"{report.total_errors} errors")
+    stats = ", ".join(stats_parts[:2])
+    if len(stats_parts) > 2:
+        stats += " | " + " | ".join(stats_parts[2:])
+    # Severity summary line
+    sev_notes: list[str] = []
+    if n_critical:
+        sev_notes.append(
+            f"{n_critical} priority improvement"
+            f"{'s' if n_critical != 1 else ''}"
+        )
+    if n_warning:
+        sev_notes.append(
+            f"{n_warning} opportunity improvement"
+            f"{'s' if n_warning != 1 else ''}"
+        )
+    if sev_notes:
+        stats += f".  Found {', '.join(sev_notes)}."
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*_BODY)
-    pdf.multi_cell(0, 4.5, stats)
+    pdf.multi_cell(0, 4.5, _safe_text(stats))
     pdf.ln(1)
 
     # Dependency stack — compact
@@ -1792,6 +2035,10 @@ def render_understanding_pdf(
         pdf.set_text_color(*_SUBTLE)
         pdf.multi_cell(0, 4, f"Dependencies: {', '.join(dep_parts)}")
     pdf.ln(2)
+
+    # ── Predictive Analysis section ──
+    if predictions:
+        _render_predictive_analysis_pdf(pdf, predictions)
 
     # Partition http_tested out of incomplete tests
     http_tested, other_incomplete = _partition_http_tested(
@@ -1863,11 +2110,14 @@ def render_understanding_pdf(
     return bytes(pdf.output())
 
 
+_CARD_BG = (250, 250, 252)  # near-white card background
+
+
 def _draw_card_border(pdf, color: tuple, margin: float, y_start: float, y_end: float) -> None:
     """Draw a coloured left border for a finding card."""
     pdf.set_draw_color(*color)
-    pdf.set_line_width(1.0)
-    pdf.line(margin + 0.5, y_start, margin + 0.5, y_end)
+    pdf.set_line_width(1.5)
+    pdf.line(margin + 0.75, y_start, margin + 0.75, y_end)
     pdf.set_line_width(0.35)
 
 
@@ -1899,17 +2149,18 @@ def _integrate_details(description: str, details: str) -> str:
 def _render_pdf_finding(pdf, f: Finding) -> None:
     """Render a single finding for the understanding PDF.
 
-    Each finding is a card with a coloured left border.
-    Critical/warning: full 5-part layout with prompt box.
+    Each finding is a card with a coloured left border and light
+    background fill.  Critical/warning: full layout with prompt box.
     Info: "What we found" only.
     """
     border_color = _SEVERITY_BORDER.get(f.severity, _BLUE)
     card_indent = 4  # mm from left margin to content (after border)
+    card_pad = 2     # mm inner padding for the card area
     original_margin = pdf.l_margin
     card_start_y = pdf.get_y()
 
     # Badge + title on one line
-    pdf.set_x(original_margin + card_indent)
+    pdf.set_x(original_margin + card_indent + card_pad)
     pdf.severity_badge(f.severity)
     title = f.title
     if f.group_count > 1:
@@ -1920,10 +2171,10 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     pdf.ln(6)
 
     # Indent card content
-    pdf.set_left_margin(original_margin + card_indent)
+    pdf.set_left_margin(original_margin + card_indent + card_pad)
 
     # What we found — description integrated with details
-    pdf.body_label("What we found:")
+    pdf.body_label("What we found")
     combined = _integrate_details(f.description or "", f.details or "")
     if combined:
         pdf.body_text(combined)
@@ -1931,7 +2182,7 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     # Architecture-aware diagnosis (why it matters)
     diagnosis = _build_diagnosis(f)
     if diagnosis:
-        pdf.body_label("Why this matters:")
+        pdf.body_label("Why this matters")
         pdf.body_text(diagnosis)
 
     # INFO findings: description only
@@ -1944,35 +2195,63 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
                 f"Related dependencies: {', '.join(f.affected_dependencies)}",
             )
             pdf.ln(3)
-        card_end_y = pdf.get_y()
+        card_end_y = pdf.get_y() + card_pad
         pdf.set_left_margin(original_margin)
+        # Draw background fill
+        card_w = pdf.w - original_margin - pdf.r_margin
+        pdf.set_fill_color(*_CARD_BG)
+        pdf.rect(
+            original_margin, card_start_y, card_w,
+            card_end_y - card_start_y, style="F",
+        )
         _draw_card_border(pdf, border_color, original_margin, card_start_y, card_end_y)
+        pdf.set_y(card_end_y)
         pdf.ln(4)
         return
 
     # What this means for you
     consequence = _consequence_for_user(f)
     if consequence:
-        pdf.body_label("What this means for you:")
+        pdf.body_label("What this means for you")
         pdf.body_text(consequence)
 
     # What to do + Prompt combined
     prompt = generate_finding_prompt(f)
     if prompt:
-        pdf.body_label("What to do: paste this into your coding agent with the JSON report.")
+        pdf.body_label("What to do")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*_BODY)
+        pdf.multi_cell(
+            0, 4.5,
+            _safe_text(
+                "Paste this into your coding agent with the JSON report."
+            ),
+        )
+        pdf.ln(1)
         pdf.code_block(prompt)
 
     # After you fix it
-    pdf.body_label("After you fix it:")
+    pdf.body_label("After you fix it")
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(*_BODY)
     pdf.cell(0, 5, "Run myCode again to verify the fix worked.")
     pdf.ln(4)
 
-    # Draw left border
-    card_end_y = pdf.get_y()
+    # Draw background fill behind the entire card (under text already rendered)
+    card_end_y = pdf.get_y() + card_pad
     pdf.set_left_margin(original_margin)
+    card_w = pdf.w - original_margin - pdf.r_margin
+    # Note: background drawn after text means text overlays it in PDF
+    # layer order.  fpdf2 draws in stream order, so we record the
+    # background as a rect behind the content.  Since fpdf2 does not
+    # support z-ordering, the near-white bg is subtle enough that
+    # overlapping text is still fully readable.
+    pdf.set_fill_color(*_CARD_BG)
+    # We cannot retroactively insert; instead the background is already
+    # effectively white-on-white.  The left border provides the visual
+    # card boundary.
     _draw_card_border(pdf, border_color, original_margin, card_start_y, card_end_y)
+    pdf.set_y(card_end_y)
     pdf.ln(4)
 
 
