@@ -1618,7 +1618,13 @@ def _make_pdf_class():
             self.cell(0, 4, f"Page {self.page_no()}/{{nb}}", align="R")
 
         def section_heading(self, text: str, level: int = 2):
-            """H1=16pt brand, H2=12pt heading bg strip, H3=11pt heading bg strip."""
+            """H1=16pt brand, H2=12pt heading bg strip, H3=11pt heading bg strip.
+
+            Widow/orphan control: if the heading + ~25mm of following
+            content won't fit on the current page, break first.  A
+            section header must never appear alone at the bottom of a
+            page.
+            """
             sizes = {1: 16, 2: 12, 3: 11}
             size = sizes.get(level, 11)
             pad = 2  # mm padding around text
@@ -1629,11 +1635,17 @@ def _make_pdf_class():
                 self.set_font("Helvetica", "B", size)
                 safe = _safe_text(text)
                 line_h = size * 0.55
-                # Estimate text height
                 w = self.w - self.l_margin - self.r_margin
                 chars_per_line = max(1, int(w / (size * 0.28)))
                 n_lines = max(1, -(-len(safe) // chars_per_line))
                 box_h = n_lines * line_h + 2 * pad
+
+                # Widow/orphan: need heading + at least 25mm of content
+                min_after = box_h + 25
+                remaining = self.h - self.get_y() - 20
+                if remaining < min_after:
+                    self.add_page()
+
                 x = self.l_margin
                 y = self.get_y()
                 self.set_fill_color(*bg)
@@ -1644,6 +1656,7 @@ def _make_pdf_class():
                 self.set_y(y + box_h)
                 self.ln(2)
             else:
+                # H1 — no widow control needed (always at top)
                 self.set_font("Helvetica", "B", size)
                 self.set_text_color(*_BRAND)
                 self.multi_cell(0, size * 0.55, _safe_text(text))
@@ -1681,27 +1694,26 @@ def _make_pdf_class():
             self.cell(4, 5, "")  # spacer
 
         def code_block(self, text: str):
-            """Prompt box: grey bg, border, monospace text.
+            """Compact prompt box: grey bg, border, 7pt monospace.
 
-            If the box won't fit on the current page, inserts a page
-            break first so the box starts at the top of a fresh page.
-            Keeps auto-page-break on so very long prompts flow
-            naturally (the background is drawn only for the portion
-            that fits on the first page).
+            These are reference prompts for coding agents — compact is
+            better.  If the box won't fit, breaks before it starts.
             """
             safe = _safe_text(text[:800])
             x = self.l_margin
             w = self.w - self.l_margin - self.r_margin
-            pad = 4  # mm internal padding
+            pad = 3  # mm internal padding (compact)
+            font_size = 7
+            line_h = 3.0  # tight line spacing
 
             # Estimate box height
-            self.set_font("Courier", "", 8)
-            chars_per_line = max(1, int((w - 2 * pad) / 1.9))
+            self.set_font("Courier", "", font_size)
+            chars_per_line = max(1, int((w - 2 * pad) / 1.7))
             wrapped_lines = sum(
                 max(1, (len(ln) + chars_per_line - 1) // chars_per_line)
                 for ln in safe.split("\n")
             )
-            text_h = wrapped_lines * 3.8
+            text_h = wrapped_lines * line_h
             box_h = text_h + 2 * pad
 
             # If box won't fit but would fit on a fresh page, break now
@@ -1719,10 +1731,10 @@ def _make_pdf_class():
             self.rect(x, box_y, w, draw_h, style="FD")
 
             # Render text inside (auto page break handles overflow)
-            self.set_font("Courier", "", 8)
+            self.set_font("Courier", "", font_size)
             self.set_text_color(*_BODY)
             self.set_xy(x + pad, box_y + pad)
-            self.multi_cell(w - 2 * pad, 3.8, safe)
+            self.multi_cell(w - 2 * pad, line_h, safe)
 
             # Ensure Y is past the box
             if self.get_y() < box_y + box_h:
@@ -2080,11 +2092,19 @@ def render_understanding_pdf(
         pdf.multi_cell(0, 5, _safe_text(_http_tested_summary(http_tested)))
         pdf.ln(6)
 
-    # Performance summary table + confidence + callout — flow continuously
+    # Performance summary table + confidence + callout
     rows = _dedup_by_label(report.degradation_points)
     has_actionable = any(
         f.severity in ("critical", "warning") for f in report.findings
     )
+
+    if rows:
+        # Give the table a fresh page if it won't fit comfortably
+        # (heading + header row + at least 2 data rows = ~30mm minimum)
+        table_min_h = 10 + 6 + min(len(rows), 2) * 6 + 4
+        remaining = pdf.h - pdf.get_y() - 20
+        if remaining < table_min_h:
+            pdf.add_page()
 
     if rows:
         _render_perf_table_pdf(pdf, report.degradation_points, report.findings)
