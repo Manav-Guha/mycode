@@ -1815,13 +1815,35 @@ _PREDICTION_SEVERITY_COLORS: dict[str, tuple] = {
 }
 
 
+def _render_pred_bars(pdf, preds: list[dict]) -> None:
+    """Render a list of prediction items as probability bars."""
+    bar_max_w = 60
+    bar_h = 4
+    for pred in preds:
+        title = pred.get("title", "")
+        prob = pred.get("probability_pct", 0)
+        severity = pred.get("severity", "info")
+        bar_color = _PREDICTION_SEVERITY_COLORS.get(severity, _SUBTLE)
+        y = pdf.get_y()
+        x = pdf.l_margin
+        bar_w = max(1, bar_max_w * prob / 100.0)
+        pdf.set_fill_color(*bar_color)
+        pdf.rect(x, y + 0.5, bar_w, bar_h, style="F")
+        pdf.set_xy(x + bar_max_w + 3, y)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*_BODY)
+        pdf.cell(15, 5, f"{prob:.0f}%")
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*_BODY)
+        pdf.cell(0, 5, _safe_text(title))
+        pdf.ln(bar_h + 2)
+
+
 def _render_predictive_analysis_pdf(pdf, predictions: dict) -> None:
     """Render the Predictive Analysis section in the PDF.
 
-    Args:
-        pdf: The MyCodePDF instance.
-        predictions: Dict with ``total_similar_projects``, ``matching_deps``,
-            and ``predictions`` list.
+    Shows two layers when architecture-filtered: architecture-specific
+    predictions first, then technology-wide predictions.
     """
     total = predictions.get("total_similar_projects", 0)
     deps = predictions.get("matching_deps", [])
@@ -1833,47 +1855,65 @@ def _render_predictive_analysis_pdf(pdf, predictions: dict) -> None:
     deps_str = ", ".join(deps[:8])
     if len(deps) > 8:
         deps_str += "..."
+
     arch_type = predictions.get("architectural_type", "")
     arch_label = (
-        arch_type.replace("_", " ") + " "
+        arch_type.replace("_", " ")
         if arch_type and arch_type != "general" else ""
     )
-    intro = f"Based on {total} {arch_label}projects using {deps_str}:"
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(*_BODY)
-    pdf.multi_cell(0, 4.5, _safe_text(intro))
-    pdf.ln(3)
+    arch_filtered = predictions.get("arch_filtered", False)
+    tw_preds = predictions.get("tech_wide_predictions", [])
+    tw_total = predictions.get("tech_wide_total", 0)
 
-    bar_max_w = 60  # mm — maximum bar width
-    bar_h = 4       # mm — bar height
-
-    for pred in preds:
-        title = pred.get("title", "")
-        prob = pred.get("probability_pct", 0)
-        severity = pred.get("severity", "info")
-        bar_color = _PREDICTION_SEVERITY_COLORS.get(severity, _SUBTLE)
-
-        y = pdf.get_y()
-        x = pdf.l_margin
-
-        # Draw probability bar
-        bar_w = max(1, bar_max_w * prob / 100.0)
-        pdf.set_fill_color(*bar_color)
-        pdf.rect(x, y + 0.5, bar_w, bar_h, style="F")
-
-        # Probability percentage (bold) after the bar
-        pdf.set_xy(x + bar_max_w + 3, y)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.set_text_color(*_BODY)
-        pdf.cell(15, 5, f"{prob:.0f}%")
-
-        # Title text
+    if arch_filtered and arch_label:
+        # Section 1 — Architecture-specific
+        intro = (
+            f"For {arch_label} projects "
+            f"({total} projects using {deps_str}):"
+        )
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(*_BODY)
-        pdf.cell(0, 5, _safe_text(title))
-        pdf.ln(bar_h + 2)
+        pdf.multi_cell(0, 4.5, _safe_text(intro))
+        pdf.ln(2)
+        _render_pred_bars(pdf, preds)
 
-    # Scale note (if any prediction has one)
+        # Section 2 — Technology-wide
+        if tw_preds:
+            pdf.ln(2)
+            tw_intro = (
+                f"Across all project types "
+                f"({tw_total} projects using {deps_str}):"
+            )
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(*_BODY)
+            pdf.multi_cell(0, 4.5, _safe_text(tw_intro))
+            pdf.ln(2)
+            _render_pred_bars(pdf, tw_preds)
+    elif arch_label and not arch_filtered:
+        # Limited arch data
+        intro = (
+            f"Limited {arch_label}-specific data available. "
+            f"Showing predictions across all project types "
+            f"({total} projects using {deps_str}):"
+        )
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*_BODY)
+        pdf.multi_cell(0, 4.5, _safe_text(intro))
+        pdf.ln(2)
+        _render_pred_bars(pdf, preds)
+    else:
+        # No architecture — tech-wide only
+        intro = (
+            f"Based on {total} projects with similar "
+            f"technology stack ({deps_str}):"
+        )
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*_BODY)
+        pdf.multi_cell(0, 4.5, _safe_text(intro))
+        pdf.ln(2)
+        _render_pred_bars(pdf, preds)
+
+    # Scale note
     scale_notes = [
         p.get("scale_note", "") for p in preds if p.get("scale_note")
     ]

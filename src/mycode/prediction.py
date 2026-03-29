@@ -338,13 +338,22 @@ class PredictionItem:
 
 @dataclass
 class PredictionResult:
-    """Complete prediction output."""
+    """Complete prediction output.
+
+    ``predictions`` are the primary layer (architecture-filtered when
+    available).  ``tech_wide_predictions`` is the unfiltered layer
+    across all project types — always populated when the arch layer is
+    active so the UI can show both.
+    """
 
     predictions: list[PredictionItem] = field(default_factory=list)
     total_similar_projects: int = 0
     matching_deps: list[str] = field(default_factory=list)
     architectural_type: str = ""
     arch_filtered: bool = False
+    # Technology-wide layer (unfiltered)
+    tech_wide_predictions: list[PredictionItem] = field(default_factory=list)
+    tech_wide_total: int = 0
 
 
 def _load_corpus(corpus_path: Optional[str] = None) -> list[dict]:
@@ -423,13 +432,18 @@ def predict_issues(
     if not dep_set:
         return PredictionResult()
 
-    # Architecture filter: use per-architecture pattern counts when
-    # available, so project counts and probabilities reflect only
-    # projects matching the user's architectural type.
-    arch_filtered = False
+    scale_note = _build_scale_note(constraints)
+
+    # Always compute the technology-wide (unfiltered) layer
+    tw_preds, tw_total, tw_deps = _corpus_score(
+        patterns, dep_set, scale_note,
+    )
+
+    # Try architecture-specific layer
     arch_data = _load_arch_data()
-    arch_project_count = 0
-    arch_pattern_map: dict[str, int] = {}
+    arch_filtered = False
+    arch_preds: list[PredictionItem] = []
+    arch_total = 0
 
     if (arch_type and arch_type != "general" and arch_data
             and arch_type in arch_data.get("project_counts", {})):
@@ -438,9 +452,47 @@ def predict_issues(
             arch_type, {},
         )
         if arch_project_count >= 20:
-            arch_filtered = True
+            arch_preds, arch_total, _ = _corpus_score(
+                patterns, dep_set, scale_note,
+                arch_pattern_map=arch_pattern_map,
+                arch_project_count=arch_project_count,
+            )
+            if arch_preds:
+                arch_filtered = True
 
-    # Score each pattern by dependency overlap × confirmed_count
+    if arch_filtered:
+        return PredictionResult(
+            predictions=arch_preds,
+            total_similar_projects=arch_total,
+            matching_deps=tw_deps,
+            architectural_type=arch_type,
+            arch_filtered=True,
+            tech_wide_predictions=tw_preds,
+            tech_wide_total=tw_total,
+        )
+
+    return PredictionResult(
+        predictions=tw_preds,
+        total_similar_projects=tw_total,
+        matching_deps=tw_deps,
+        architectural_type=arch_type,
+        arch_filtered=False,
+    )
+
+
+def _corpus_score(
+    patterns: list[dict],
+    dep_set: set[str],
+    scale_note: str,
+    arch_pattern_map: Optional[dict[str, int]] = None,
+    arch_project_count: int = 0,
+) -> tuple[list[PredictionItem], int, list[str]]:
+    """Score corpus patterns and return (predictions, total, matching_deps).
+
+    When *arch_pattern_map* is provided, uses architecture-specific
+    confirmed counts instead of global counts.
+    """
+    use_arch = arch_pattern_map is not None
     scored: list[tuple[float, dict, list[str]]] = []
     total_confirmed = 0
 
@@ -448,58 +500,40 @@ def predict_issues(
         title = pattern.get("title", "")
         if title in _SKIP_TITLES:
             continue
-
-        # Use architecture-specific count when filtering
-        if arch_filtered:
-            confirmed = arch_pattern_map.get(title, 0)
+        if use_arch:
+            confirmed = arch_pattern_map.get(title, 0)  # type: ignore[union-attr]
         else:
             confirmed = pattern.get("confirmed_count", 0)
-
         if confirmed < _MIN_CONFIRMED:
             continue
-
         affected = {d.lower() for d in pattern.get("affected_dependencies", [])}
         overlap = dep_set & affected
         if len(overlap) < _MIN_DEP_OVERLAP:
             continue
-
-        score = len(overlap) * confirmed
-        matched_deps = sorted(overlap)
-        scored.append((score, pattern, matched_deps))
+        scored.append((len(overlap) * confirmed, pattern, sorted(overlap)))
         total_confirmed += confirmed
 
     if not scored:
-        return PredictionResult()
+        return [], 0, []
 
     scored.sort(key=lambda x: x[0], reverse=True)
     top = scored[:_MAX_PREDICTIONS]
 
-    # total_similar_projects = architecture project count when filtered,
-    # otherwise sum of confirmed across matching patterns.
-    if arch_filtered:
-        total_similar = arch_project_count
-    else:
-        total_similar = sum(
-            p.get("confirmed_count", 0) for _, p, _ in scored
-        )
-
+    total_similar = arch_project_count if use_arch else total_confirmed
     all_matching = sorted({d for _, _, deps in scored for d in deps})
 
-    predictions: list[PredictionItem] = []
+    preds: list[PredictionItem] = []
     for _score, pattern, matched_deps in top:
-        if arch_filtered:
-            confirmed = arch_pattern_map.get(pattern.get("title", ""), 0)
+        if use_arch:
+            confirmed = arch_pattern_map.get(  # type: ignore[union-attr]
+                pattern.get("title", ""), 0,
+            )
         else:
             confirmed = pattern.get("confirmed_count", 0)
-
         severity_dist = pattern.get("severity_distribution", {})
         severity = _dominant_severity(severity_dist)
-        prob_pct = (
-            confirmed / total_similar * 100
-        ) if total_similar > 0 else 0
-        scale_note = _build_scale_note(constraints)
-
-        predictions.append(PredictionItem(
+        prob_pct = (confirmed / total_similar * 100) if total_similar > 0 else 0
+        preds.append(PredictionItem(
             title=pattern.get("title", "Unknown"),
             probability_pct=round(prob_pct, 1),
             severity=severity,
@@ -508,13 +542,7 @@ def predict_issues(
             scale_note=scale_note,
         ))
 
-    return PredictionResult(
-        predictions=predictions,
-        total_similar_projects=total_similar,
-        matching_deps=all_matching,
-        architectural_type=arch_type,
-        arch_filtered=arch_filtered,
-    )
+    return preds, total_similar, all_matching
 
 
 def _build_scale_note(
@@ -616,12 +644,24 @@ def _predict_with_model(
     # All matching deps from the project
     all_matching = sorted(d for d in dep_set if d in PROFILED_DEPS)
 
+    full_total = metadata.get("training_samples", 0)
+    if arch_filtered:
+        return PredictionResult(
+            predictions=predictions,
+            total_similar_projects=training_samples,
+            matching_deps=all_matching,
+            architectural_type=arch_type,
+            arch_filtered=True,
+            tech_wide_predictions=list(predictions),
+            tech_wide_total=full_total,
+        )
+
     return PredictionResult(
         predictions=predictions,
         total_similar_projects=training_samples,
         matching_deps=all_matching,
         architectural_type=arch_type,
-        arch_filtered=arch_filtered,
+        arch_filtered=False,
     )
 
 

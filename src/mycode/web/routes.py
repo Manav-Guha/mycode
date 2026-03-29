@@ -572,11 +572,8 @@ def handle_report(job_id: str) -> ReportResponse:
                         architectural_pattern=arch,
                     )
                     if pred_result.predictions:
-                        pdf_predictions = {
-                            "total_similar_projects": pred_result.total_similar_projects,
-                            "matching_deps": pred_result.matching_deps,
-                            "architectural_type": pred_result.architectural_type,
-                            "predictions": [
+                        def _pred_dicts(items):
+                            return [
                                 {
                                     "title": p.title,
                                     "probability_pct": p.probability_pct,
@@ -584,8 +581,18 @@ def handle_report(job_id: str) -> ReportResponse:
                                     "confirmed_count": p.confirmed_count,
                                     "scale_note": p.scale_note,
                                 }
-                                for p in pred_result.predictions
-                            ],
+                                for p in items
+                            ]
+                        pdf_predictions = {
+                            "total_similar_projects": pred_result.total_similar_projects,
+                            "matching_deps": pred_result.matching_deps,
+                            "architectural_type": pred_result.architectural_type,
+                            "arch_filtered": pred_result.arch_filtered,
+                            "predictions": _pred_dicts(pred_result.predictions),
+                            "tech_wide_total": pred_result.tech_wide_total,
+                            "tech_wide_predictions": _pred_dicts(
+                                pred_result.tech_wide_predictions,
+                            ),
                         }
                 except Exception:
                     pass  # predictions are best-effort
@@ -752,6 +759,18 @@ def handle_predict(job_id: str) -> dict:
                 "scale_note": p.scale_note,
             }
             for p in result.predictions
+        ],
+        "tech_wide_total": result.tech_wide_total,
+        "tech_wide_predictions": [
+            {
+                "title": p.title,
+                "probability_pct": p.probability_pct,
+                "severity": p.severity,
+                "confirmed_count": p.confirmed_count,
+                "matching_deps": p.matching_deps,
+                "scale_note": p.scale_note,
+            }
+            for p in result.tech_wide_predictions
         ],
     }
 

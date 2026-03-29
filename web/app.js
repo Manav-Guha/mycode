@@ -325,20 +325,9 @@ async function fetchPredictions() {
     }
 }
 
-function renderPredictions(data) {
-    const el = $("prediction-content");
-    const archType = data.architectural_type || "";
-    const archLabel = archType && archType !== "general" ? archType.replace(/_/g, " ") + " " : "";
-    const deps = data.matching_deps.slice(0, 5).join(", ");
-    const qualifier = archLabel
-        ? `Based on <strong>${data.total_similar_projects}</strong> ${escapeHtml(archLabel)}projects using ${escapeHtml(deps)}:`
-        : `Based on <strong>${data.total_similar_projects}</strong> projects with similar technology stack (${escapeHtml(deps)}):`;
-    const limitNote = (archType && archType !== "general" && !data.arch_filtered)
-        ? ` <span class="pred-note-inline">(limited ${escapeHtml(archLabel)}data available)</span>`
-        : "";
-    let html = `<div class="prediction-header">${qualifier}${limitNote}</div>`;
-    html += '<div class="prediction-list">';
-    for (const p of data.predictions) {
+function _renderPredList(preds) {
+    let html = '<div class="prediction-list">';
+    for (const p of preds) {
         const sevClass = p.severity === "critical" ? "pred-critical" : p.severity === "warning" ? "pred-warning" : "pred-info";
         html += `<div class="prediction-item ${sevClass}">`;
         html += `<span class="pred-title">${escapeHtml(p.title)}</span>`;
@@ -349,6 +338,36 @@ function renderPredictions(data) {
         html += `</div>`;
     }
     html += '</div>';
+    return html;
+}
+
+function renderPredictions(data) {
+    const el = $("prediction-content");
+    const archType = data.architectural_type || "";
+    const archLabel = archType && archType !== "general" ? archType.replace(/_/g, " ") : "";
+    const deps = escapeHtml(data.matching_deps.slice(0, 5).join(", "));
+    let html = "";
+
+    if (data.arch_filtered && archLabel) {
+        // Section 1 — Architecture-specific
+        html += `<div class="prediction-header">For ${escapeHtml(archLabel)} projects (<strong>${data.total_similar_projects}</strong> projects using ${deps}):</div>`;
+        html += _renderPredList(data.predictions);
+
+        // Section 2 — Technology-wide
+        if (data.tech_wide_predictions && data.tech_wide_predictions.length > 0) {
+            html += `<div class="prediction-header" style="margin-top:0.8rem">Across all project types (<strong>${data.tech_wide_total}</strong> projects using ${deps}):</div>`;
+            html += _renderPredList(data.tech_wide_predictions);
+        }
+    } else if (archLabel && !data.arch_filtered) {
+        // Limited arch data — show tech-wide with note
+        html += `<div class="prediction-header">Limited ${escapeHtml(archLabel)}-specific data available. Showing predictions across all project types (<strong>${data.total_similar_projects}</strong> projects using ${deps}):</div>`;
+        html += _renderPredList(data.predictions);
+    } else {
+        // No architecture — tech-wide only
+        html += `<div class="prediction-header">Based on <strong>${data.total_similar_projects}</strong> projects with similar technology stack (${deps}):</div>`;
+        html += _renderPredList(data.predictions);
+    }
+
     el.innerHTML = html;
 }
 
