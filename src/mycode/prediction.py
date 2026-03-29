@@ -17,10 +17,14 @@ from mycode.constraints import OperationalConstraints
 
 logger = logging.getLogger(__name__)
 
-# Default corpus path (relative to repo root or package).
+# Default corpus paths, tried in order:
+# 1. Bundled package data (works on Railway / pip install)
+# 2. Repo-relative from source tree (works in development)
+# 3. CWD-relative (fallback)
 _CORPUS_PATHS = [
-    Path("corpus_extraction/corpus_patterns_ranked.json"),
+    Path(__file__).parent / "data" / "corpus_patterns_ranked.json",
     Path(__file__).parent.parent.parent / "corpus_extraction" / "corpus_patterns_ranked.json",
+    Path("corpus_extraction/corpus_patterns_ranked.json"),
 ]
 
 # Skip patterns that are purely informational or infrastructure noise.

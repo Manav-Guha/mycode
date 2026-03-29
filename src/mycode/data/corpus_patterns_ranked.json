@@ -1,0 +1,7024 @@
+[
+  {
+    "title": "Application server could not start",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode detected a fastapi application but the server failed to start: Server could not start: missing API key or secret — the app requires environment variables. Your application will not start on mod",
+    "confirmed_count": 1218,
+    "severity_distribution": {
+      "critical": 1218
+    },
+    "affected_dependencies": [
+      "express",
+      "fastapi",
+      "flask",
+      "nextjs",
+      "npm-start",
+      "react",
+      "react-dom",
+      "react-scripts",
+      "streamlit",
+      "uvicorn"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "1tsadityaraj__INSIGHTAI",
+      "23f2001809__parking_app_23f2001809",
+      "2vivien__NoteMate"
+    ]
+  },
+  {
+    "title": "Application handled HTTP load without issues",
+    "category": "http_load_testing",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested your streamlit application under load up to 100 concurrent connections. No degradation or errors were detected.",
+    "confirmed_count": 321,
+    "severity_distribution": {
+      "info": 321
+    },
+    "affected_dependencies": [
+      "express",
+      "fastapi",
+      "flask",
+      "npm-start",
+      "react",
+      "react-dom",
+      "react-scripts",
+      "streamlit",
+      "uvicorn"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "065060-Awantika__lifestyle-disease-analytics",
+      "0abhimanyu0__assembly-line-balancing-app",
+      "ADAM1257431__CryptoTracker"
+    ]
+  },
+  {
+    "title": "Cache Memory Growth (streamlit)",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "unbounded_cache_growth",
+    "description": "myCode detected: memory usage grows without limit.",
+    "confirmed_count": 296,
+    "severity_distribution": {
+      "warning": 296
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "web_app"
+    ],
+    "example_repos": [
+      "0abhimanyu0__assembly-line-balancing-app",
+      "AHMED-METAWEA__Liver-Disease-Predictor",
+      "ANSR1226__titanic-survival-prediction"
+    ]
+  },
+  {
+    "title": "Data Volume Scaling (pandas)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "myCode tested processing larger amounts of data. 5 steps executed. 20 errors recorded. peak memory 124.0 MB. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 283,
+    "severity_distribution": {
+      "critical": 251,
+      "warning": 62
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "0abhimanyu0__assembly-line-balancing-app",
+      "20krish20__tax-loss-harvesting-dashboard",
+      "AHMED-METAWEA__Liver-Disease-Predictor"
+    ]
+  },
+  {
+    "title": "4 missing dependencies",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "torch, torchvision, torchaudio, segmentation-models-pytorch are declared in requirements but not installed. This may cause import failures under certain code paths.",
+    "confirmed_count": 190,
+    "severity_distribution": {
+      "warning": 190
+    },
+    "affected_dependencies": [
+      "```txt",
+      "absl-py",
+      "accelerate",
+      "aequitas",
+      "aif360",
+      "aiohappyeyeballs",
+      "aiohttp",
+      "aiosignal",
+      "anthropic",
+      "apache-airflow",
+      "apscheduler",
+      "argparse",
+      "asttokens",
+      "astunparse",
+      "asyncpg",
+      "atoma-sdk",
+      "backcall",
+      "backports.zoneinfo",
+      "bcrypt",
+      "beautifulsoup4",
+      "bedrock-agentcore",
+      "bedrock-agentcore-starter-toolkit",
+      "better-sqlite3",
+      "bleach",
+      "bokeh",
+      "boto3",
+      "botocore",
+      "bottleneck",
+      "brotlicffi",
+      "canvas-size",
+      "catboost",
+      "cbpro",
+      "cffi",
+      "chardet",
+      "chatterbox-tts",
+      "colorama",
+      "colpali-engine",
+      "comm",
+      "contourpy",
+      "cramjam",
+      "crawl4ai",
+      "create",
+      "crewai",
+      "crewai-tools",
+      "cryptography",
+      "cx-oracle",
+      "cycler",
+      "dataclasses-json",
+      "datasets",
+      "debugpy",
+      "decorator",
+      "defusedxml",
+      "deon",
+      "dill",
+      "distro",
+      "django-allauth",
+      "django-heroku",
+      "dnspython",
+      "docstring_parser",
+      "docx",
+      "dotenv",
+      "duckdb",
+      "easyocr",
+      "elm-tooling",
+      "email-validator",
+      "emoji",
+      "exception",
+      "exceptiongroup",
+      "executing",
+      "express",
+      "express-session",
+      "fairlearn",
+      "faiss-cpu",
+      "faker",
+      "fastapi",
+      "fastavro",
+      "faster-whisper",
+      "fastparquet",
+      "feedparser",
+      "ffmpeg-python",
+      "file-saver",
+      "file-select-dialog",
+      "fiona",
+      "flask-mysqldb",
+      "folium",
+      "fonttools",
+      "fpdf2",
+      "functools",
+      "gdax",
+      "gdown",
+      "genanki",
+      "gensim",
+      "geopandas",
+      "git",
+      "gmpy2",
+      "google-ai-generativelanguage",
+      "google-api-core",
+      "google-api-python-client",
+      "google-auth",
+      "google-auth-httplib2",
+      "google-auth-oauthlib",
+      "google-cloud-tasks",
+      "google-genai",
+      "google-generativeai",
+      "googleapis-common-protos",
+      "gradio",
+      "graphviz",
+      "greenlet",
+      "grpcio-tools",
+      "gspread",
+      "gspread-dataframe",
+      "h11",
+      "h5py",
+      "html5lib",
+      "httpcore",
+      "https",
+      "httpx",
+      "huggingface-hub",
+      "io",
+      "ipaddress",
+      "ipykernel",
+      "jax",
+      "jaxlib",
+      "jiter",
+      "joblib",
+      "js-base64",
+      "jspdf",
+      "jupyter",
+      "kaleido",
+      "kokoro-tts",
+      "langchain-anthropic",
+      "langchain-groq",
+      "langchain-nvidia-ai-endpoints",
+      "langchain-ollama",
+      "langchain-openai",
+      "langdetect",
+      "langfuse",
+      "levenshtein",
+      "lifelines",
+      "lightgbm",
+      "llvmlite",
+      "lxml",
+      "lzwcompress",
+      "mailjet_rest",
+      "markdown",
+      "matplotlib",
+      "mediapipe",
+      "mhfp",
+      "minify_html",
+      "mkl-service",
+      "mkl_fft",
+      "mkl_random",
+      "ml-dtypes",
+      "mlflow",
+      "monai",
+      "montility",
+      "multer",
+      "mysqlclient",
+      "nltk",
+      "node-fetch",
+      "numba",
+      "numexpr",
+      "numpy",
+      "ollama",
+      "openai",
+      "opencv-python",
+      "opencv-python-headless",
+      "openlit",
+      "openpyxl",
+      "pandas",
+      "pandas-ta",
+      "passlib",
+      "pathlib",
+      "pdfplumber",
+      "pickle-mixin",
+      "pillow",
+      "pip-audit",
+      "playsound",
+      "playwright",
+      "plotly",
+      "potracer",
+      "prophet",
+      "psycopg",
+      "psycopg-binary",
+      "psycopg2",
+      "psycopg2-binary",
+      "pyarrow",
+      "pyaudio",
+      "pyautogen",
+      "pycairo",
+      "pycox",
+      "pycparser",
+      "pyd",
+      "pydantic-settings",
+      "pydicom",
+      "pygame",
+      "pygobject",
+      "pyinstaller",
+      "pyldavis",
+      "pymannkendall",
+      "pymongo",
+      "pymupdf",
+      "pyodbc",
+      "pypdf2",
+      "pypiwin32",
+      "pyproj",
+      "pyside6",
+      "pyside6_addons",
+      "pyside6_essentials",
+      "pysocks",
+      "pysqlite3-binary",
+      "pytest-cov",
+      "pytest-timeout",
+      "python-docx",
+      "python-dotenv",
+      "python-levenshtein",
+      "python-magic",
+      "python-multipart",
+      "python-telegram-bot",
+      "pyttsx3",
+      "pywin32",
+      "pywinpty",
+      "pyyaml",
+      "qrcode",
+      "rapidfuzz",
+      "rdkit",
+      "rdkit-pypi",
+      "rembg",
+      "reportlab",
+      "rsconnect-python",
+      "rtree",
+      "ruamel.yaml.clib",
+      "ruff",
+      "s3pathlib",
+      "scikit-image",
+      "scikit-learn",
+      "scikit_learn",
+      "scipy",
+      "scispacy",
+      "seaborn",
+      "segmentation-models-pytorch",
+      "sentence-transformers",
+      "sentencepiece",
+      "shap",
+      "shapash",
+      "shapely",
+      "shiboken6",
+      "shodan",
+      "sigfig",
+      "smtplib",
+      "sniffio",
+      "soupsieve",
+      "spacy",
+      "sqlalchemy",
+      "sqlite3",
+      "st-theme",
+      "statsmodels",
+      "strands-agents",
+      "streamlit",
+      "streamlit-aggrid",
+      "streamlit-autorefresh",
+      "streamlit-drawable-canvas",
+      "streamlit-echarts",
+      "streamlit-folium",
+      "streamlit-jodit",
+      "streamlit-lightweight-charts",
+      "streamlit-option-menu",
+      "streamlit_pandas_profiling",
+      "supabase",
+      "tensorflow",
+      "tensorflow-cpu",
+      "textblob",
+      "threading-timeout",
+      "threadpoolctl",
+      "tiktoken",
+      "tmap-viz",
+      "tokenizers",
+      "torch",
+      "torchaudio",
+      "torchvision",
+      "transformers",
+      "trimesh",
+      "typst",
+      "ultralytics",
+      "uvicorn",
+      "uwsgi",
+      "watchdog",
+      "watchfiles",
+      "webencodings",
+      "websocket-client",
+      "werkzeug.security",
+      "xgboost",
+      "xlsxwriter",
+      "ydata-profiling",
+      "yfinance",
+      "youtube-transcript-api",
+      "zipfile",
+      "﻿# core dependencies",
+      "﻿# core framework",
+      "﻿matplotlib==3.9.2"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "web_app"
+    ],
+    "example_repos": [
+      "AKSHAHANSHA__RoadLens",
+      "ARCHANA201201__ML-driven-Healthcare-Premium-Predictor-Project",
+      "AbhijeethReddy-0704__medical-fraud-detection"
+    ]
+  },
+  {
+    "title": "Array Size Scaling (numpy)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "myCode tested working with larger arrays. 5 steps executed. 15 errors recorded. peak memory 1594.9 MB. 1 function(s) skipped (runtime context). This means your app will slow down or crash when handlin",
+    "confirmed_count": 142,
+    "severity_distribution": {
+      "critical": 152,
+      "warning": 38
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [
+      10,
+      1000
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "web_app"
+    ],
+    "example_repos": [
+      "22AD040__smart-ai-knowledge-navigator",
+      "AKSHAHANSHA__RoadLens",
+      "ANSR1226__titanic-survival-prediction"
+    ]
+  },
+  {
+    "title": "1 missing dependency",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "tensorflow is declared in requirements but not installed. This may cause import failures under certain code paths.",
+    "confirmed_count": 102,
+    "severity_distribution": {
+      "warning": 102
+    },
+    "affected_dependencies": [
+      "```txt",
+      "arize-otel",
+      "asyncpg",
+      "bitsandbytes",
+      "crewai",
+      "dash-mantine-components",
+      "dash-tools",
+      "discord-ext-voice-recv",
+      "django-filters",
+      "eof",
+      "facenet-pytorch",
+      "faiss-cpu",
+      "fiona",
+      "fletzxing",
+      "gensim",
+      "git",
+      "greenlet",
+      "https",
+      "langchain-pinecone",
+      "llama-index-llms-gemini",
+      "matplotlib",
+      "mysqlclient",
+      "openpyxl",
+      "pandas",
+      "pandas_ta",
+      "pillow",
+      "plotly",
+      "psycopg2-binary",
+      "pyarrow",
+      "pyaudio",
+      "pygame",
+      "pymupdf",
+      "pynostr",
+      "pyodbc",
+      "python-dotenv",
+      "pywin32",
+      "pywinauto",
+      "pywinpty",
+      "pyyaml",
+      "reportlab",
+      "scikit-learn",
+      "scipy",
+      "statsmodels",
+      "streamlit",
+      "tensorflow",
+      "tensorflow-cpu",
+      "textual",
+      "threading",
+      "tiktoken",
+      "tomli",
+      "xhtml2pdf",
+      "﻿asgiref==3.11.1",
+      "﻿blinker==1.9.0",
+      "﻿dash",
+      "﻿fastapi==0.115.6"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "065060-Awantika__lifestyle-disease-analytics",
+      "AbdulMohaimin4__EDA-Project",
+      "Addisu-Amare__Health_app"
+    ]
+  },
+  {
+    "title": "9 unrecognized dependencies",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "matplotlib, seaborn, plotly, pymannkendall, google-generativeai, and 4 more — these have no profile in the component library, so generic stress testing was applied. Results may be less targeted.",
+    "confirmed_count": 92,
+    "severity_distribution": {
+      "info": 92
+    },
+    "affected_dependencies": [
+      "@modelcontextprotocol/sdk",
+      "absl-py",
+      "aiohappyeyeballs",
+      "aiohttp",
+      "aiosignal",
+      "ajv",
+      "altair",
+      "annotated-doc",
+      "annotated-types",
+      "anyio",
+      "apache-airflow",
+      "apscheduler",
+      "asttokens",
+      "astunparse",
+      "attrs",
+      "backcall",
+      "bcrypt",
+      "beautifulsoup4",
+      "bedrock-agentcore",
+      "bedrock-agentcore-starter-toolkit",
+      "blinker",
+      "boto3",
+      "cachetools",
+      "catboost",
+      "certifi",
+      "cffi",
+      "charset-normalizer",
+      "click",
+      "colorama",
+      "colpali-engine",
+      "contourpy",
+      "crawl4ai",
+      "crewai",
+      "crewai-tools",
+      "dill",
+      "dotenv",
+      "easyocr",
+      "email-validator",
+      "faker",
+      "faster-whisper",
+      "feedparser",
+      "ffmpeg-python",
+      "file-type",
+      "fiona",
+      "folium",
+      "fpdf2",
+      "gdown",
+      "genanki",
+      "geopandas",
+      "gitdb",
+      "gitpython",
+      "google-api-python-client",
+      "google-auth",
+      "google-auth-httplib2",
+      "google-auth-oauthlib",
+      "google-cloud-tasks",
+      "google-genai",
+      "google-generativeai",
+      "graphviz",
+      "gspread",
+      "gspread-dataframe",
+      "h5py",
+      "huggingface-hub",
+      "ipaddress",
+      "ipykernel",
+      "jinja2",
+      "joblib",
+      "kaleido",
+      "langdetect",
+      "langfuse",
+      "lightgbm",
+      "lxml",
+      "matplotlib",
+      "mhfp",
+      "mlflow",
+      "montility",
+      "nltk",
+      "opencv-python",
+      "opencv-python-headless",
+      "openlit",
+      "openpyxl",
+      "otpauth",
+      "passlib",
+      "pdfplumber",
+      "pickle-mixin",
+      "pillow",
+      "playwright",
+      "plotly",
+      "potracer",
+      "prophet",
+      "protobuf",
+      "psycopg",
+      "psycopg2-binary",
+      "pyarrow",
+      "pydantic-settings",
+      "pymannkendall",
+      "pymongo",
+      "pymupdf",
+      "pyodbc",
+      "pypdf2",
+      "pyproj",
+      "pysqlite3-binary",
+      "pytest",
+      "pytest-cov",
+      "pytest-timeout",
+      "python-dateutil",
+      "python-docx",
+      "python-dotenv",
+      "python-magic",
+      "python-multipart",
+      "python-telegram-bot",
+      "pyttsx3",
+      "pytz",
+      "pyyaml",
+      "qrcode",
+      "rdkit",
+      "rembg",
+      "reportlab",
+      "rsconnect-python",
+      "rtree",
+      "s3pathlib",
+      "sanitize-filename",
+      "scikit-image",
+      "scikit-learn",
+      "scipy",
+      "seaborn",
+      "sentence-transformers",
+      "sentencepiece",
+      "shap",
+      "shapely",
+      "shodan",
+      "sigfig",
+      "spacy",
+      "statsmodels",
+      "strands-agents",
+      "streamlit-aggrid",
+      "streamlit-autorefresh",
+      "streamlit-drawable-canvas",
+      "streamlit-echarts",
+      "streamlit-folium",
+      "streamlit-jodit",
+      "streamlit-lightweight-charts",
+      "streamlit-option-menu",
+      "tensorflow",
+      "tensorflow-cpu",
+      "textblob",
+      "tmap-viz",
+      "torch",
+      "transformers",
+      "trimesh",
+      "turndown",
+      "typst",
+      "ultralytics",
+      "unpdf",
+      "urllib3",
+      "uvicorn",
+      "xgboost",
+      "xlsxwriter",
+      "yfinance"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "utility"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "Bh1v1niG__Hackathon_DQ-Elevare",
+      "CeeJay1241__Movie-Recomendation-System"
+    ]
+  },
+  {
+    "title": "Response time degradation on your application",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 8x under load (1ms baseline → 5ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signif",
+    "confirmed_count": 82,
+    "severity_distribution": {
+      "warning": 82
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "flask",
+      "nextjs",
+      "streamlit",
+      "uvicorn"
+    ],
+    "load_levels": [
+      5,
+      10,
+      25
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "22AD040__smart-ai-knowledge-navigator",
+      "AbdurRahman-202416__crypto-portfolio-tracker",
+      "Akshanth07__food-court-management"
+    ]
+  },
+  {
+    "title": "General Stress Test (unrecognized dependencies)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested general usage patterns for unrecognized dependencies. 2 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 75,
+    "severity_distribution": {
+      "warning": 33,
+      "critical": 44
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "4nddrs__optician",
+      "ANSR1226__titanic-survival-prediction",
+      "AhmedKhaled007__coursaty"
+    ]
+  },
+  {
+    "title": "Silent Data Type Changes (pandas)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "unvalidated_type_crash",
+    "description": "myCode detected: silent dtype coercion.",
+    "confirmed_count": 60,
+    "severity_distribution": {
+      "warning": 25,
+      "critical": 45
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Amul-byte__Dashboard",
+      "AnshumanKumar123__streamlit_data_analytics_app",
+      "Gussnogue__dashboard-inteligente-de-orcamentos-para-engenheiros"
+    ]
+  },
+  {
+    "title": "Memory Crash on Data Operations (pandas)",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode tested managing memory over time. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 57,
+    "severity_distribution": {
+      "warning": 56,
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "Amul-byte__Dashboard",
+      "AnshumanKumar123__streamlit_data_analytics_app"
+    ]
+  },
+  {
+    "title": "Memory Profiling Over Time (pandas)",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode tested repeated data operations over time. 1 error(s) occurred during this test. This means your app will use increasingly more memory over time, eventually crashing or becoming unresponsive.",
+    "confirmed_count": 52,
+    "severity_distribution": {
+      "warning": 17,
+      "critical": 40
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "Nandini-1811__healthcare_prediction"
+    ]
+  },
+  {
+    "title": "Merge Memory Stress (pandas)",
+    "category": "data_volume_scaling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode tested combining large datasets. 1 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 49,
+    "severity_distribution": {
+      "warning": 11,
+      "critical": 38
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "Nandini-1811__healthcare_prediction"
+    ]
+  },
+  {
+    "title": "Scenario failed: pandas_iterrows_vs_vectorized",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "4 steps executed. 8 errors recorded. peak memory 177.0 MB.",
+    "confirmed_count": 49,
+    "severity_distribution": {
+      "critical": 49
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "CeeJay1241__Movie-Recomendation-System",
+      "CyborgX-hash__Genai_Midterm"
+    ]
+  },
+  {
+    "title": "Repeated Allocation Memory (numpy)",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode tested managing memory over time. 1 error(s) occurred during this test. This means your app will use increasingly more memory over time, eventually crashing or becoming unresponsive.",
+    "confirmed_count": 41,
+    "severity_distribution": {
+      "warning": 18,
+      "critical": 30
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "Nandini-1811__healthcare_prediction"
+    ]
+  },
+  {
+    "title": "Concurrent Request Load (requests)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested handling multiple users at once. 1 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 36,
+    "severity_distribution": {
+      "warning": 28,
+      "critical": 14
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "AbelJSanchez__TarpaulinAPI",
+      "Abhimanue-dev__crypto-price-tracker",
+      "BWESETKA__scheddss-app"
+    ]
+  },
+  {
+    "title": "Large Download Memory (requests)",
+    "category": "data_volume_scaling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "large_payload_oom",
+    "description": "myCode tested downloading large responses. 10 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 32,
+    "severity_distribution": {
+      "warning": 6,
+      "critical": 28
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "web_app"
+    ],
+    "example_repos": [
+      "Saiful07__ecommerce-backend-api",
+      "Vasyl-Ch__telegram_shop_bot",
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Timeout Behavior (requests)",
+    "category": "blocking_io",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "cascading_timeout",
+    "description": "myCode tested calling external APIs that respond slowly. 10 error(s) occurred during this test. This means your app will freeze or become very slow when waiting for external services while handling re",
+    "confirmed_count": 29,
+    "severity_distribution": {
+      "warning": 6,
+      "critical": 23
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1000
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "web_app"
+    ],
+    "example_repos": [
+      "Saiful07__ecommerce-backend-api",
+      "Vasyl-Ch__telegram_shop_bot",
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Computation Coupling (Clear timeout)",
+    "category": "data_volume_scaling",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "cascading_timeout",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 28,
+    "severity_distribution": {
+      "warning": 29
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "Amit-chouhan__bulwark",
+      "Baoleeza__lettabot",
+      "CherryPod__sentinel"
+    ]
+  },
+  {
+    "title": "Session Vs Individual Performance (requests)",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode tested making many API calls. 10 error(s) occurred during this test. This means your app will use increasingly more memory over time, eventually crashing or becoming unresponsive.",
+    "confirmed_count": 27,
+    "severity_distribution": {
+      "warning": 5,
+      "critical": 22
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "web_app"
+    ],
+    "example_repos": [
+      "Saiful07__ecommerce-backend-api",
+      "Vasyl-Ch__telegram_shop_bot",
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Validation Throughput (pydantic)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "throughput_plateau",
+    "description": "myCode tested validation throughput. 5 steps executed. 22 errors recorded. peak memory 89.5 MB. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 22,
+    "severity_distribution": {
+      "critical": 18,
+      "warning": 5
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "web_app"
+    ],
+    "example_repos": [
+      "1tsadityaraj__INSIGHTAI",
+      "DinsangaRenthlei__luminamed-ai",
+      "Goggymon__creed"
+    ]
+  },
+  {
+    "title": "13 dependencies without stress profiles",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "@emailjs/browser, @react-spring/parallax, @tailwindcss/vite, axios, framer-motion, and 8 more are declared in your project but don't have myCode stress profiles yet. These dependencies were tested wit",
+    "confirmed_count": 20,
+    "severity_distribution": {
+      "info": 20
+    },
+    "affected_dependencies": [
+      "@ai-sdk/amazon-bedrock",
+      "@ai-sdk/anthropic",
+      "@ai-sdk/azure",
+      "@ai-sdk/cerebras",
+      "@ai-sdk/google-vertex",
+      "@ai-sdk/groq",
+      "@ai-sdk/huggingface",
+      "@ai-sdk/moonshotai",
+      "@ai-sdk/openai",
+      "@ai-sdk/openai-compatible",
+      "@angular/animations",
+      "@angular/cdk",
+      "@angular/common",
+      "@angular/compiler",
+      "@angular/core",
+      "@angular/forms",
+      "@angular/material",
+      "@angular/platform-browser",
+      "@angular/platform-browser-dynamic",
+      "@angular/platform-server",
+      "@apollo/server",
+      "@as-integrations/express5",
+      "@aws-sdk/client-polly",
+      "@better-auth/electron",
+      "@codemirror/autocomplete",
+      "@codemirror/commands",
+      "@codemirror/lang-css",
+      "@codemirror/lang-html",
+      "@codemirror/lang-javascript",
+      "@codemirror/lang-json",
+      "@codemirror/lang-python",
+      "@codemirror/language",
+      "@codemirror/lint",
+      "@codemirror/search",
+      "@coral-xyz/anchor",
+      "@cosmjs/proto-signing",
+      "@cosmjs/stargate",
+      "@cosmostation/cosmos-client",
+      "@cosmostation/extension-client",
+      "@emailjs/browser",
+      "@emotion/is-prop-valid",
+      "@faker-js/faker",
+      "@fastify/static",
+      "@ffprobe-installer/ffprobe",
+      "@getbrevo/brevo",
+      "@hookform/resolvers",
+      "@keplr-wallet/cosmos",
+      "@keplr-wallet/types",
+      "@keyv/redis",
+      "@monaco-editor/react",
+      "@nest-lab/throttler-storage-redis",
+      "@nestjs/apollo",
+      "@nestjs/bullmq",
+      "@nestjs/cache-manager",
+      "@nestjs/common",
+      "@nestjs/core",
+      "@nestjs/platform-express",
+      "@neutron-org/neutronjsplus",
+      "@nirholas/pump-sdk",
+      "@noble/hashes",
+      "@opentelemetry/api",
+      "@opentelemetry/auto-instrumentations-node",
+      "@opentelemetry/core",
+      "@prisma/client",
+      "@privy-io/react-auth",
+      "@pump-fun/pump-swap-sdk",
+      "@radix-ui/react-accordion",
+      "@radix-ui/react-alert-dialog",
+      "@radix-ui/react-aspect-ratio",
+      "@radix-ui/react-avatar",
+      "@radix-ui/react-checkbox",
+      "@radix-ui/react-collapsible",
+      "@radix-ui/react-context-menu",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-dropdown-menu",
+      "@react-spring/parallax",
+      "@rekog/mcp-nest",
+      "@solana-program/memo",
+      "@solana-program/system",
+      "@solana-program/token",
+      "@solana/kit",
+      "@solana/spl-token",
+      "@solana/web3.js",
+      "@streamdown/math",
+      "@tailwindcss/vite",
+      "@tanstack/react-query",
+      "@tanstack/react-virtual",
+      "@tauri-apps/api",
+      "@tauri-apps/plugin-dialog",
+      "@tauri-apps/plugin-fs",
+      "@tauri-apps/plugin-opener",
+      "@tauri-apps/plugin-os",
+      "@tauri-apps/plugin-shell",
+      "@xterm/addon-fit",
+      "@xterm/xterm",
+      "axios",
+      "bcrypt",
+      "better-auth",
+      "blakejs",
+      "bn.js",
+      "buffer",
+      "clsx",
+      "cors",
+      "cryptonight-hashing",
+      "date-fns",
+      "dotenv",
+      "express",
+      "express-rate-limit",
+      "framer-motion",
+      "gray-matter",
+      "html-to-image",
+      "jsonwebtoken",
+      "lenis",
+      "lucide-react",
+      "next",
+      "pg",
+      "playwright",
+      "prisma",
+      "puppeteer-extra-plugin-stealth",
+      "react",
+      "react-dom",
+      "react-intersection-observer",
+      "react-markdown",
+      "reflect-metadata",
+      "remark-gfm",
+      "rxjs",
+      "tsx",
+      "zod"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "Aadarsh-Sharma-7197__Kreovix",
+      "Developers-LLC__collab-code-editor",
+      "GPT-Engineer-App__bear-battlefield"
+    ]
+  },
+  {
+    "title": "Async Concurrent Load (httpx)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested handling simultaneous operations. 6 steps executed. 1665 errors recorded. peak memory 132.3 MB. In practice, this means your app will become unusable when multiple people use it at the s",
+    "confirmed_count": 19,
+    "severity_distribution": {
+      "critical": 7,
+      "warning": 12
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      10,
+      500
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "AdamSmithOrlik__dovercourt-ladder",
+      "Addisu-Amare__Health_app",
+      "AkritiKuri__greatkart-django"
+    ]
+  },
+  {
+    "title": "Scenario failed: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "3 steps executed. 6 errors recorded. peak memory 138.1 MB.",
+    "confirmed_count": 19,
+    "severity_distribution": {
+      "critical": 19
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "CyborgX-hash__Genai_Midterm",
+      "Darvin-V__AI_Study_Buddy",
+      "DevByAsfiya__Voyage-Analytics-Integrating-MLOps-in-Travel"
+    ]
+  },
+  {
+    "title": "N Plus One Detection (sqlalchemy)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested n plus one detection. 4 steps executed. 5 errors recorded. peak memory 35.1 MB. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 16,
+    "severity_distribution": {
+      "critical": 11,
+      "warning": 5
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "dashboard",
+      "data_pipeline",
+      "web_app"
+    ],
+    "example_repos": [
+      "23f2001809__parking_app_23f2001809",
+      "AnvayGhare22__StaySync",
+      "Doca2003__pharmacy-management-api"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_dtype_edge_cases",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "unvalidated_type_crash",
+    "description": "Harness did not produce structured output. Exit code: 1.",
+    "confirmed_count": 15,
+    "severity_distribution": {
+      "critical": 15
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Drake9098__FFmpeg_web_app",
+      "Lazizbek1120__Football-streamlit-app",
+      "MalkAle__German-Cars-Price-Prediction"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: numpy_numpy_2_breaking_changes_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "Triggered: numpy_2_breaking_changes",
+    "confirmed_count": 15,
+    "severity_distribution": {
+      "warning": 14,
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Drake9098__FFmpeg_web_app",
+      "MalkAle__German-Cars-Price-Prediction",
+      "OmamaHassan__Weather-App---Streamlit"
+    ]
+  },
+  {
+    "title": "Dependency installation failed",
+    "category": "http_load_testing",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "dependency_install_failure",
+    "description": "npm install failed for this project: npm error code EUSAGE\nnpm error\nnpm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Pleas",
+    "confirmed_count": 14,
+    "severity_distribution": {
+      "critical": 14
+    },
+    "affected_dependencies": [
+      "npm-start"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "Aadarsh-Sharma-7197__Kreovix",
+      "Baoleeza__lettabot",
+      "Developers-LLC__collab-code-editor"
+    ]
+  },
+  {
+    "title": "Scenario failed: pandas_concurrent_dataframe_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 steps executed. 16 errors recorded. peak memory 173.3 MB.",
+    "confirmed_count": 14,
+    "severity_distribution": {
+      "critical": 14
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Adithya-vinayak-saji__climate-anomaly-dashboard",
+      "DevByAsfiya__Voyage-Analytics-Integrating-MLOps-in-Travel",
+      "Jks2467__loan-approval-streamlit"
+    ]
+  },
+  {
+    "title": "NumPy 2.0 Compatibility (numpy)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: numpy 2 breaking changes.",
+    "confirmed_count": 13,
+    "severity_distribution": {
+      "warning": 14
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Amul-byte__Dashboard",
+      "Nandini-1811__healthcare_prediction",
+      "aman-chhetri__MediCare"
+    ]
+  },
+  {
+    "title": "Chain Length Scaling (langchain)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "cascade_degradation",
+    "description": "myCode tested processing larger amounts of data. 5 steps executed. 23 errors recorded. peak memory 238.8 MB. 1 function(s) skipped (runtime context). This means your app will slow down or crash when h",
+    "confirmed_count": 13,
+    "severity_distribution": {
+      "critical": 12,
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [
+      1,
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Anjli-cdhry__Healthcare-LLM-LoRA",
+      "Biswajeet111__healthcare-monitoring-agent",
+      "Efhbbhu__AI-BOOKING-AGENT"
+    ]
+  },
+  {
+    "title": "Errors during: pandas_concurrent_dataframe_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "8 error(s) occurred during this test.",
+    "confirmed_count": 11,
+    "severity_distribution": {
+      "warning": 11
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Bh1v1niG__Hackathon_DQ-Elevare",
+      "PeteHass94__parkrun-app",
+      "kjw26__wood-loss-app"
+    ]
+  },
+  {
+    "title": "Rate Limit Stress (openai)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested rate limit stress. 4 steps executed. 18 errors recorded. peak memory 40.1 MB. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "critical": 6,
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "JoncyKeda__code-assistant-agent",
+      "LukaszNasilowski__Applied_AI-solvro-MVP",
+      "aiswaryap2408__document-qa"
+    ]
+  },
+  {
+    "title": "No Timeout Set (requests)",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "cascading_timeout",
+    "description": "myCode tested no timeout set behavior. 10 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "warning": 10
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model",
+      "web_app"
+    ],
+    "example_repos": [
+      "Saiful07__ecommerce-backend-api",
+      "anupamlab__ETL_API-data_Trend-Analysis_Dashboard",
+      "chris-asianzu__community-fever-surveillance"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_error_handling_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "12 steps executed. 12 errors recorded. peak memory 80.8 MB.",
+    "confirmed_count": 9,
+    "severity_distribution": {
+      "critical": 9
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "PeteHass94__parkrun-app",
+      "SirinBaba92__sportwetten-analyse",
+      "YsnJbr__HazSnap"
+    ]
+  },
+  {
+    "title": "Concurrent Request Load (axios)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested handling multiple users at once. 1 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 8,
+    "severity_distribution": {
+      "warning": 5,
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "web_app"
+    ],
+    "example_repos": [
+      "Developers-LLC__collab-code-editor",
+      "GPT-Engineer-App__colorful-nutri-scan",
+      "Manohar-777__CryptoWeather-Nexus-App"
+    ]
+  },
+  {
+    "title": "Memory Crash on Array Allocation (numpy)",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode detected: memory error on allocation.",
+    "confirmed_count": 8,
+    "severity_distribution": {
+      "warning": 9
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "aman-chhetri__MediCare",
+      "amatussabur21-dotcom__hhs-care-demand-forecast",
+      "bhoomivrma207-bv__healthcare-disease-prediction-system"
+    ]
+  },
+  {
+    "title": "Env Validation (dotenv)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "format_boundary_failure",
+    "description": "myCode tested env validation. 10 steps executed. 10 errors recorded. peak memory 26.3 MB. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 7,
+    "severity_distribution": {
+      "critical": 2,
+      "warning": 7
+    },
+    "affected_dependencies": [
+      "dotenv"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "WasamApp__pumpfunTokenLauncher",
+      "Zerbo505__security_with_file_uploads",
+      "daviheros__pumpLauncherV2"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_concurrent_array_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "4 steps executed. 19 errors recorded. peak memory 108.8 MB.",
+    "confirmed_count": 7,
+    "severity_distribution": {
+      "critical": 7
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Lazizbek1120__Football-streamlit-app",
+      "MalkAle__German-Cars-Price-Prediction",
+      "RicardoMBorges__MVA_course"
+    ]
+  },
+  {
+    "title": "Errors during: requests_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 7,
+    "severity_distribution": {
+      "warning": 7
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "PeteHass94__parkrun-app",
+      "SirinBaba92__sportwetten-analyse",
+      "Vinayak-Bajoria__israel-iran-war-crude-tracker"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "6 steps executed. 93 errors recorded. peak memory 58.9 MB.",
+    "confirmed_count": 7,
+    "severity_distribution": {
+      "critical": 7
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Vansh7206__ecommerce-rfm-analysis",
+      "YsnJbr__HazSnap",
+      "blacktalenthubs__oya-ai-workflows"
+    ]
+  },
+  {
+    "title": "1 unrecognized dependency",
+    "category": "",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "python-dotenv — this dependency has no profile in the component library, so generic stress testing was applied. Results may be less targeted.",
+    "confirmed_count": 7,
+    "severity_distribution": {
+      "info": 7
+    },
+    "affected_dependencies": [
+      "openpyxl",
+      "plotly",
+      "pytest",
+      "python-dotenv",
+      "reportlab",
+      "scikit-learn"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Vansh7206__ecommerce-rfm-analysis",
+      "arnaldomariano__rijksmuseum-explorer-submission",
+      "chi777__snop-monte-carlo"
+    ]
+  },
+  {
+    "title": "Scenario failed: pydantic_dynamic_model_creation_stress",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 150 errors recorded. peak memory 97.3 MB.",
+    "confirmed_count": 7,
+    "severity_distribution": {
+      "critical": 7
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "blacktalenthubs__oya-ai-workflows",
+      "chiranjibsahoo29__Insurance_Premium_Prediction",
+      "mohd-abdul-razzaque__streamlit-bedrock-app"
+    ]
+  },
+  {
+    "title": "Iterrows Vs Vectorized (pandas)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested processing rows of data. 1 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 6,
+    "severity_distribution": {
+      "warning": 6
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "Nandini-1811__healthcare_prediction"
+    ]
+  },
+  {
+    "title": "Unusual Data Format Handling (pandas)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "unsupported_input_format",
+    "description": "myCode tested handling unusual data formats. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 6,
+    "severity_distribution": {
+      "warning": 6
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "Nandini-1811__healthcare_prediction"
+    ]
+  },
+  {
+    "title": "Concurrent Dataframe Access (pandas)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested accessing data from multiple places at once. 1 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 6,
+    "severity_distribution": {
+      "warning": 6
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "Nandini-1811__healthcare_prediction"
+    ]
+  },
+  {
+    "title": "Silent Data Corruption Risk (pandas)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "malformed_input_crash",
+    "description": "myCode detected: settingwithcopy warning ignored.",
+    "confirmed_count": 6,
+    "severity_distribution": {
+      "warning": 6
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "AstickAxl__Vehicle-dashboard-streamlitApp",
+      "NichyaRaghav__AI-Healthcare-Prediction",
+      "Vasyl-Ch__telegram_shop_bot"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_large_response_streaming",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "5 steps executed. 25 errors recorded. peak memory 84.0 MB.",
+    "confirmed_count": 6,
+    "severity_distribution": {
+      "critical": 6
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      1000
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker",
+      "samshad__rag-app-frontend",
+      "vmegea__OLAP"
+    ]
+  },
+  {
+    "title": "Unusual Data Format Handling (numpy)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "unsupported_input_format",
+    "description": "myCode tested dtype edge cases. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "warning": 5
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "Nandini-1811__healthcare_prediction"
+    ]
+  },
+  {
+    "title": "Concurrent Array Access (numpy)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested accessing data from multiple threads. 1 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "warning": 5
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "Nandini-1811__healthcare_prediction"
+    ]
+  },
+  {
+    "title": "Collection Size Scaling (chromadb)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "myCode tested processing larger amounts of data. 5 steps executed. 19 errors recorded. peak memory 177.3 MB. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "critical": 4,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "chromadb"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "AhmedAbdelhamed01__Symptom-Guide-AI",
+      "anselmoAJ__Multimodal-Clinical-RAG-Assistant-Medical-Text-Image-Retrieval-System-",
+      "damleyminh__agentic_vs_vanilla_rag"
+    ]
+  },
+  {
+    "title": "Application degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your application becomes unresponsive at 100 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "critical": 5
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "flask",
+      "nextjs",
+      "uvicorn"
+    ],
+    "load_levels": [
+      1,
+      10,
+      50,
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "web_app"
+    ],
+    "example_repos": [
+      "Dumpsterfirefire__Voice-Powered-AI-SQL-Assistant-Python-GPT-LangChain",
+      "ImSudhakar07__RivalReview-Evals",
+      "Sagar-9918__Ecommerce_Backend-System"
+    ]
+  },
+  {
+    "title": "Get Root (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading your application's main page. 100 error(s) occurred during this test.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "warning": 5
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1,
+      10,
+      25,
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "web_app"
+    ],
+    "example_repos": [
+      "Dumpsterfirefire__Voice-Powered-AI-SQL-Assistant-Python-GPT-LangChain",
+      "ImSudhakar07__RivalReview-Evals",
+      "Sagar-9918__Ecommerce_Backend-System"
+    ]
+  },
+  {
+    "title": "Long Running Memory Profile (httpx)",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode tested managing memory over time. 10 error(s) occurred during this test. This means your app will use increasingly more memory over time, eventually crashing or becoming unresponsive.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "warning": 1,
+      "critical": 4
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard",
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway",
+      "Strikezor__SDMaker",
+      "devmedeiros__cotai"
+    ]
+  },
+  {
+    "title": "Dependency installation failed",
+    "category": "http_load_testing",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "dependency_install_failure",
+    "description": "npm install failed for this project: npm error code ETARGET\nnpm error notarget No matching version found for cryptonight-hashing@^0.3.4.\nnpm error notarget In most cases you or one of your dependencie",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "critical": 5
+    },
+    "affected_dependencies": [
+      "express"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "portfolio",
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "iG-VirtuoZz__Korvex",
+      "mosmduali__cv-website",
+      "nirholas__pump-fun-sdk"
+    ]
+  },
+  {
+    "title": "Errors during: pandas_iterrows_vs_vectorized",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "8 error(s) occurred during this test.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "warning": 5
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Bh1v1niG__Hackathon_DQ-Elevare",
+      "kjw26__wood-loss-app",
+      "kmfxea__kmfx-empire-dashboard-2026"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_error_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 49 errors recorded. peak memory 67.0 MB.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "critical": 5
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker",
+      "samshad__rag-app-frontend",
+      "vmegea__OLAP"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: pandas_iterrows_vs_vectorized",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "warning": 5
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model"
+    ],
+    "example_repos": [
+      "VoidRay-X__Heart-Attack-prediction",
+      "rohithtr284-lgtm__credit-card-default-prediction-app",
+      "yojovane__smart-threshold-fraud-detection"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_context_window_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "3 steps executed. 15 errors recorded. peak memory 213.7 MB.",
+    "confirmed_count": 5,
+    "severity_distribution": {
+      "critical": 5
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant",
+      "vmegea__OLAP"
+    ]
+  },
+  {
+    "title": "Silent Number Overflow (numpy)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: silent overflow.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "warning": 5
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Amul-byte__Dashboard",
+      "Nandini-1811__healthcare_prediction",
+      "nikhil-kumarrr__Diabetes-Prediction"
+    ]
+  },
+  {
+    "title": "Validation Throughput (zod)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "throughput_plateau",
+    "description": "myCode tested validation throughput. 11 steps executed. 55 errors recorded. peak memory 17.6 MB. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "critical": 3,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "zod"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "utility",
+      "web_app"
+    ],
+    "example_repos": [
+      "GPT-Engineer-App__audio-wizard",
+      "GPT-Engineer-App__nextjs-ssr-bot-auth",
+      "GPT-Engineer-App__web-3d-portfolio"
+    ]
+  },
+  {
+    "title": "Error Handling Resilience (requests)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode tested dealing with unexpected API responses. 10 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "warning": 4
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "web_app"
+    ],
+    "example_repos": [
+      "Saiful07__ecommerce-backend-api",
+      "Vasyl-Ch__telegram_shop_bot",
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Large Result Memory (supabase)",
+    "category": "data_volume_scaling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "large_payload_oom",
+    "description": "myCode tested managing memory over time. 10 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "warning": 1,
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "dashboard",
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway",
+      "WILSON220374__TECNIC",
+      "jakubjanb__fragrantica-app"
+    ]
+  },
+  {
+    "title": "Errors during: sqlalchemy_session_memory_growth",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "8 error(s) occurred during this test.",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "warning": 2,
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Bh1v1niG__Hackathon_DQ-Elevare",
+      "CeeJay1241__Movie-Recomendation-System",
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "Triggered: crash",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "warning": 4
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model"
+    ],
+    "example_repos": [
+      "Drake9098__FFmpeg_web_app",
+      "MalkAle__German-Cars-Price-Prediction",
+      "darylalim__embedding-pipeline"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 4,
+    "severity_distribution": {
+      "warning": 4
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "SirinBaba92__sportwetten-analyse",
+      "Vansh7206__ecommerce-rfm-analysis",
+      "Vinayak-Bajoria__israel-iran-war-crude-tracker"
+    ]
+  },
+  {
+    "title": "Array Shape Mismatch (numpy)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode tested broadcasting shape mismatch behavior. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "ml_model"
+    ],
+    "example_repos": [
+      "ANSR1226__titanic-survival-prediction",
+      "InquietoPartho__HTXAI",
+      "apoorvrajdev__restaurant-sentiment-analysis"
+    ]
+  },
+  {
+    "title": "Get Health (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /health endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1,
+      100
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot",
+      "web_app"
+    ],
+    "example_repos": [
+      "Dumpsterfirefire__Voice-Powered-AI-SQL-Assistant-Python-GPT-LangChain",
+      "Sagar-9918__Ecommerce_Backend-System",
+      "TnTivanTnT__ShieldTrade-CE"
+    ]
+  },
+  {
+    "title": "Version Compatibility (react)",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "version_incompatibility",
+    "description": "myCode tested react version compatibility. 11 steps executed. 22 errors recorded. peak memory 16.7 MB. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "react"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "GPT-Engineer-App__shift-roster-solver",
+      "Manohar-777__CryptoWeather-Nexus-App",
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "V0 To V1 Migration Break (openai)",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "myCode detected: v0 to v1 migration break.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Gussnogue__dashboard-inteligente-de-orcamentos-para-engenheiros",
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Sudden Slowdown on Large Operations (pandas)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: apply performance cliff.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Maneesha-0806__clustering-streamlit-app",
+      "bhoomivrma207-bv__healthcare-disease-prediction-system",
+      "sankar068__ai-dashboard-project"
+    ]
+  },
+  {
+    "title": "Rate Limit Stress (anthropic)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested rate limit stress. 1 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 2,
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Minh-Tam-Solution__SDLC-Orchestrator",
+      "SAMARTH2751__AgentIQ",
+      "iatoolkit__iatoolkit"
+    ]
+  },
+  {
+    "title": "Unchecked Status Codes (requests)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode tested unchecked status codes behavior. 4 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "web_app"
+    ],
+    "example_repos": [
+      "Vasyl-Ch__telegram_shop_bot",
+      "aman06700__stockway",
+      "anupamlab__ETL_API-data_Trend-Analysis_Dashboard"
+    ]
+  },
+  {
+    "title": "Query Throughput (supabase)",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "throughput_plateau",
+    "description": "myCode tested query throughput. 10 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway",
+      "gohard-lab__youtube-analytics-app",
+      "WILSON220374__TECNIC"
+    ]
+  },
+  {
+    "title": "Dependency installation failed",
+    "category": "http_load_testing",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "dependency_install_failure",
+    "description": "npm install failed for this project: npm install timed out after 120 seconds. Without installed dependencies, the nextjs server cannot start. No HTTP stress testing was attempted.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "citizenweb3__validatorinfo",
+      "dineshragunathan__Echo",
+      "fajar661__Researcher"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_connection_pool_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "connection_pool_depletion",
+    "description": "5 steps executed. 88 errors recorded. peak memory 109.2 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 2,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Lazizbek1120__Football-streamlit-app",
+      "adimStrong__ads-monitoring",
+      "perlathebian__job-application-assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_concurrent_write_conflict",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "4 steps executed. 17 errors recorded. peak memory 108.7 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      2
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Lazizbek1120__Football-streamlit-app",
+      "blacktalenthubs__oya-ai-workflows",
+      "perlathebian__job-application-assistant"
+    ]
+  },
+  {
+    "title": "Resource limit hit: requests_concurrent_request_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during requests_concurrent_request_load. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline",
+      "ml_model"
+    ],
+    "example_repos": [
+      "SirinBaba92__sportwetten-analyse",
+      "Vinayak-Bajoria__israel-iran-war-crude-tracker",
+      "witharyank__news-summarizer"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: httpx_async_client_sync_context_check",
+    "category": "edge_case_input",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: async_client_sync_context",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker",
+      "vmegea__OLAP",
+      "devmedeiros__cotai"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_conversation_turn_growth",
+    "category": "memory_profiling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "10 steps executed. 100 errors recorded. peak memory 39.7 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper",
+      "parthreddy123__oil-dashboard",
+      "rikimatsumoto__app-zetetic"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_conversation_memory_growth",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 150 errors recorded. peak memory 213.4 MB.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "critical": 3
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant",
+      "shailendrasahu668__DataWhiz"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: openai_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant",
+      "bocchinofr__app_streamlit"
+    ]
+  },
+  {
+    "title": "Errors during: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 3,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "ml_model"
+    ],
+    "example_repos": [
+      "darylalim__embedding-pipeline",
+      "jonnevuorela__streamlit-sentiment-app",
+      "rsabra2-lgtm__Web-based-GIS-Application-for-Spatial-and-Attribute-Join"
+    ]
+  },
+  {
+    "title": "Connection Scaling (socketio)",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "myCode tested processing larger amounts of data. 11 steps executed. 12 errors recorded. peak memory 8.5 MB. In practice, this means your app will become unusable when multiple people use it at the sam",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "socketio"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Amit-chouhan__bulwark",
+      "gh0ulbyte__crypto-mining-monitor"
+    ]
+  },
+  {
+    "title": "Response time degradation on /api/health",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 16x under load (1ms baseline → 12ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed sign",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Codewithezid__self-healing-code-assistant",
+      "apostleoffinance__crypto-market-agent"
+    ]
+  },
+  {
+    "title": "Get History 1 (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested get history 1. 191 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1,
+      100
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals",
+      "TnTivanTnT__ShieldTrade-CE"
+    ]
+  },
+  {
+    "title": "Large Response Memory (axios)",
+    "category": "data_volume_scaling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "large_payload_oom",
+    "description": "myCode tested managing memory over time. 1 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Manohar-777__CryptoWeather-Nexus-App",
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Timeout Behavior (axios)",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "cascading_timeout",
+    "description": "myCode tested calling external APIs that respond slowly. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 3
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Manohar-777__CryptoWeather-Nexus-App",
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Version Compatibility (react-dom)",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "version_incompatibility",
+    "description": "myCode tested react-dom version compatibility. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "react-dom"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "Manohar-777__CryptoWeather-Nexus-App",
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "Response time degradation on /About",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 10x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "MirshaMorningstar__US-Accidents-Dashboard",
+      "dgrifka__dtw-streamlit-app"
+    ]
+  },
+  {
+    "title": "Response time degradation on /status",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 8x under load (1ms baseline → 9ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "TnTivanTnT__ShieldTrade-CE",
+      "is0383kk__openclaude"
+    ]
+  },
+  {
+    "title": "Edge Case Validation (pydantic)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "format_boundary_failure",
+    "description": "myCode tested edge case validation. 10 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 1,
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway",
+      "perlathebian__job-application-assistant"
+    ]
+  },
+  {
+    "title": "Get Api Health (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /api/health endpoint. 18 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "apostleoffinance__crypto-market-agent",
+      "egwaojeangel__researchmate-ai"
+    ]
+  },
+  {
+    "title": "V1 To V2 Migration Breakage (sqlalchemy)",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "myCode detected: v1 to v2 migration breakage.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "chris-asianzu__community-fever-surveillance",
+      "Lazizbek1120__Football-streamlit-app"
+    ]
+  },
+  {
+    "title": "Unhandled Exceptions (requests)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: unhandled exceptions.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "chris-asianzu__community-fever-surveillance",
+      "jaheemedwards__Banking-Marketing-Data-Analysis-Project"
+    ]
+  },
+  {
+    "title": "Response time degradation on /health",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 6x under load (1ms baseline → 7ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signif",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "api_service",
+      "chatbot"
+    ],
+    "example_repos": [
+      "hamzahW576__cursor_iot_ingestor",
+      "saiprudhvi-d__agentic-analytics-assistant"
+    ]
+  },
+  {
+    "title": "Ssr Concurrent Load (nextjs)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested handling simultaneous operations. 1 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "nawazdevx__robert-shaw",
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "Bundle Size Analysis (nextjs)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested bundle size analysis. 1 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "nawazdevx__robert-shaw",
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "Page Render Memory (nextjs)",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode tested managing memory over time. 1 error(s) occurred during this test. This means your app will use increasingly more memory over time, eventually crashing or becoming unresponsive.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "nawazdevx__robert-shaw",
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "Edge Case Routes (nextjs)",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "",
+    "description": "myCode tested edge case routes. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio",
+      "web_app"
+    ],
+    "example_repos": [
+      "nawazdevx__robert-shaw",
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_n_plus_one_detection",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "4 steps executed. 18 errors recorded. peak memory 109.0 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Lazizbek1120__Football-streamlit-app",
+      "adimStrong__ads-monitoring"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_bulk_operation_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "5 steps executed. 23 errors recorded. peak memory 112.4 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Lazizbek1120__Football-streamlit-app",
+      "perlathebian__job-application-assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: sqlalchemy_pool_timeout_check",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "connection_pool_depletion",
+    "description": "12 steps executed. 58 errors recorded. peak memory 110.6 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Lazizbek1120__Football-streamlit-app",
+      "adimStrong__ads-monitoring"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_large_download_oom_check",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "large_payload_oom",
+    "description": "Triggered: large_download_oom",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard",
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "OmamaHassan__Weather-App---Streamlit",
+      "SirinBaba92__sportwetten-analyse"
+    ]
+  },
+  {
+    "title": "Errors during: supabase_realtime_subscription_load",
+    "category": "memory_profiling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "6 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "WILSON220374__TECNIC",
+      "kmfxea__kmfx-empire-dashboard-2026"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 steps executed. 16 errors recorded. peak memory 39.2 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper",
+      "rikimatsumoto__app-zetetic"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_context_window_scaling",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "3 steps executed. 12 errors recorded. peak memory 39.9 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper",
+      "rikimatsumoto__app-zetetic"
+    ]
+  },
+  {
+    "title": "Resource limit hit: openai_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during openai_rate_limit_stress. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_streaming_reliability",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 45 errors recorded. peak memory 215.6 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_error_handling_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 45 errors recorded. peak memory 215.6 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Errors during: openai_rate_limit_stress",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot",
+      "dashboard"
+    ],
+    "example_repos": [
+      "cwilharm__pdf-to-anki-cards",
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Resource limit hit: unrecognized_deps_generic_stress",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during unrecognized_deps_generic_stress. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "ml_model"
+    ],
+    "example_repos": [
+      "darylalim__embedding-pipeline",
+      "jonnevuorela__streamlit-sentiment-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: supabase_realtime_subscription_load",
+    "category": "memory_profiling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "11 steps executed. 64 errors recorded. peak memory 45.4 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "jakubjanb__fragrantica-app",
+      "marcosbarbosa__NotaFacil-App"
+    ]
+  },
+  {
+    "title": "Scenario failed: pydantic_nested_model_depth",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "4 steps executed. 16 errors recorded. peak memory 207.7 MB.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "tyzclj-bot__zdfpcl",
+      "perlathebian__job-application-assistant"
+    ]
+  },
+  {
+    "title": "Resource limit hit: pandas_concurrent_dataframe_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during pandas_concurrent_dataframe_access. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "bocchinofr__app_streamlit",
+      "rajusanganiraju-collab__streamlit-app"
+    ]
+  },
+  {
+    "title": "Resource limit hit: httpx_async_concurrent_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during httpx_async_concurrent_load. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "critical": 2
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "devmedeiros__cotai",
+      "shailendrasahu668__DataWhiz"
+    ]
+  },
+  {
+    "title": "Errors during: httpx_async_concurrent_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 2,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "devmedeiros__cotai",
+      "shailendrasahu668__DataWhiz"
+    ]
+  },
+  {
+    "title": "Response time degradation on /Ladder",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 12x under load (0ms baseline → 5ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "AdamSmithOrlik__dovercourt-ladder"
+    ]
+  },
+  {
+    "title": "Response time degradation on /Disease-Prediction-and-medical-recommendation",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 11x under load (0ms baseline → 5ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Addisu-Amare__Health_app"
+    ]
+  },
+  {
+    "title": "Endpoint /customer degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /customer endpoint becomes unresponsive at 1 concurrent connection. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "flask"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Akshanth07__food-court-management"
+    ]
+  },
+  {
+    "title": "Get Login (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /login endpoint. 40 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Akshanth07__food-court-management"
+    ]
+  },
+  {
+    "title": "Get Customer (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /customer endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Akshanth07__food-court-management"
+    ]
+  },
+  {
+    "title": "API Coupling (Public js views github hub api)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Amit-chouhan__bulwark"
+    ]
+  },
+  {
+    "title": "API Coupling (Skills linear scripts linear get issue)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Baoleeza__lettabot"
+    ]
+  },
+  {
+    "title": "API Coupling (Client src pages bitcoin price fetch crypto price)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "BillyGoatTales__Bitcoin-Live-Tracker"
+    ]
+  },
+  {
+    "title": "API Coupling (Scripts red team b4 v2 b4runner  record)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested connecting components together. 4 error(s) occurred during this test. This means connected components may fail together when external services are slow or unavailable.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "CherryPod__sentinel"
+    ]
+  },
+  {
+    "title": "API Coupling (Sentinel planner orchestrator orchestrator  execute plan)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "CherryPod__sentinel"
+    ]
+  },
+  {
+    "title": "Endpoint /api/keys degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /api/keys endpoint becomes unresponsive at 1 concurrent connection. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Codewithezid__self-healing-code-assistant"
+    ]
+  },
+  {
+    "title": "Get Api Keys (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /api/keys endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Codewithezid__self-healing-code-assistant"
+    ]
+  },
+  {
+    "title": "Endpoint /demo degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /demo endpoint becomes unresponsive at 25 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      25
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "FegElysium45__AI_Code_Review_Assistant"
+    ]
+  },
+  {
+    "title": "Get Demo (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /demo endpoint. 25 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      25
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "FegElysium45__AI_Code_Review_Assistant"
+    ]
+  },
+  {
+    "title": "Api Key Exposure (openai)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: api key exposure.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Gussnogue__dashboard-inteligente-de-orcamentos-para-engenheiros"
+    ]
+  },
+  {
+    "title": "Response time degradation on /PREDICTOR",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 11x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Hussnain-Nazir__Cryptocurrency-Price-Predictor"
+    ]
+  },
+  {
+    "title": "API Coupling (App analyzers package fetcher  fetch from github)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested connecting components together. 2 error(s) occurred during this test. This means connected components may fail together when external services are slow or unavailable.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      50
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "HutCh1E__Skills-check"
+    ]
+  },
+  {
+    "title": "Get Versions (http)",
+    "category": "http_load_testing",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "version_incompatibility",
+    "description": "myCode tested get versions. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals"
+    ]
+  },
+  {
+    "title": "Post History 1 Delete (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested post history 1 delete. 100 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals"
+    ]
+  },
+  {
+    "title": "Response time degradation on /history",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 6x under load (3ms baseline → 17ms at 100 concurrent users). At 25 concurrent connections, response time begins degrading significantly. Results showed sign",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      25
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "ImSudhakar07__RivalReview-Evals"
+    ]
+  },
+  {
+    "title": "Endpoint /productos degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /productos endpoint becomes unresponsive at 10 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Iostream10081__cafeteria-ai"
+    ]
+  },
+  {
+    "title": "Get Productos (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /productos endpoint. 10 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Iostream10081__cafeteria-ai"
+    ]
+  },
+  {
+    "title": "Get Ventas (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /ventas endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Iostream10081__cafeteria-ai"
+    ]
+  },
+  {
+    "title": "Response time degradation on /Welcome",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 10x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "JBaptisteAll__France_Adventure_Planner"
+    ]
+  },
+  {
+    "title": "API Coupling (Src gmail get access token)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "JasonMakes801__universal-memory-mcp"
+    ]
+  },
+  {
+    "title": "Endpoint /inicio degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /inicio endpoint becomes unresponsive at 1 concurrent connection. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "flask"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Luis000007__InversioTrack-Real-Time-Metal-Asset-Intelligence"
+    ]
+  },
+  {
+    "title": "Get Inicio (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /inicio endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Luis000007__InversioTrack-Real-Time-Metal-Asset-Intelligence"
+    ]
+  },
+  {
+    "title": "Error Response Handling (axios)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode tested error response handling behavior. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Manohar-777__CryptoWeather-Nexus-App"
+    ]
+  },
+  {
+    "title": "Baseurl Override Vulnerability (axios)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode tested baseurl override vulnerability behavior. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Manohar-777__CryptoWeather-Nexus-App"
+    ]
+  },
+  {
+    "title": "Endpoint /manage-products degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /manage-products endpoint becomes unresponsive at 50 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "flask"
+    ],
+    "load_levels": [
+      50
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Mr-HECKER147__Grocery-Store-Management-System"
+    ]
+  },
+  {
+    "title": "Get Manage-Products (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /manage-products endpoint. 26 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      50
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Mr-HECKER147__Grocery-Store-Management-System"
+    ]
+  },
+  {
+    "title": "Endpoint /narratives/1 degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /narratives/1 endpoint becomes unresponsive at 50 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      50
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "MukundaKatta__opinionpulse"
+    ]
+  },
+  {
+    "title": "Get Narratives 1 (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /narratives/1 endpoint. 21 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      50
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "MukundaKatta__opinionpulse"
+    ]
+  },
+  {
+    "title": "Get Trends 1 (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /trends/1 endpoint. 25 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      50
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "MukundaKatta__opinionpulse"
+    ]
+  },
+  {
+    "title": "Endpoint /menu degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /menu endpoint becomes unresponsive at 1 concurrent connection. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "flask"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "MukundaKatta__order-management-system"
+    ]
+  },
+  {
+    "title": "Get Tables (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /tables endpoint. 37 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "MukundaKatta__order-management-system"
+    ]
+  },
+  {
+    "title": "Get Menu (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /menu endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "MukundaKatta__order-management-system"
+    ]
+  },
+  {
+    "title": "Concurrent User Load (gradio)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested handling simultaneous operations. 6 steps executed. 93 errors recorded. peak memory 227.9 MB. In practice, this means your app will become unusable when multiple people use it at the sam",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "gradio"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "NikhilKrishna2003__GenAI-Data-Analytics-Copilot"
+    ]
+  },
+  {
+    "title": "Endpoint /incidents degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /incidents endpoint becomes unresponsive at 10 concurrent connections.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Oxxaijer__healthops-monitor"
+    ]
+  },
+  {
+    "title": "Get Incidents (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /incidents endpoint. 10 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Oxxaijer__healthops-monitor"
+    ]
+  },
+  {
+    "title": "Get Summary (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /summary endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "Oxxaijer__healthops-monitor"
+    ]
+  },
+  {
+    "title": "API Coupling (Dist server server storage database storage update wallet balan)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "Paul-Briman__CryptoPay"
+    ]
+  },
+  {
+    "title": "API Coupling (App admin dashboard page load dashboard)",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "RAYDENFLY__quantumterminal"
+    ]
+  },
+  {
+    "title": "Dependency installation failed",
+    "category": "http_load_testing",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "dependency_install_failure",
+    "description": "npm install failed for this project: npm error code ERESOLVE\nnpm error ERESOLVE could not resolve\nnpm error\nnpm error While resolving: react-router-dom@7.13.1\nnpm error Found: react@18.3.1\nnpm error n",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "RanaHeet24__VisionX"
+    ]
+  },
+  {
+    "title": "Endpoint /checkout/success degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /checkout/success endpoint becomes unresponsive at 10 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "RisaLuthor__enterprise-ai-operations-assistant"
+    ]
+  },
+  {
+    "title": "Get Checkout Success (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /checkout/success endpoint. 10 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "RisaLuthor__enterprise-ai-operations-assistant"
+    ]
+  },
+  {
+    "title": "Get Checkout Cancel (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /checkout/cancel endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "RisaLuthor__enterprise-ai-operations-assistant"
+    ]
+  },
+  {
+    "title": "Response time degradation on /pricing",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 25x under load (1ms baseline → 18ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed sign",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "RisaLuthor__enterprise-ai-operations-assistant"
+    ]
+  },
+  {
+    "title": "Response time degradation on /Market_overview",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 9x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "ShravaniKavle07__AI_Powered_Cryptocurrency_Intelligence_Dashboard"
+    ]
+  },
+  {
+    "title": "Endpoint /health degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /health endpoint becomes unresponsive at 1 concurrent connection.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "TnTivanTnT__ShieldTrade-CE"
+    ]
+  },
+  {
+    "title": "Response time degradation on /localhost:55069",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 7x under load (0ms baseline → 3ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signif",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "WintryWind7__Polaris"
+    ]
+  },
+  {
+    "title": "API Coupling (App ai generator  generate async)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested connecting components together. 4 error(s) occurred during this test. This means connected components may fail together when external services are slow or unavailable.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "alfredang__wsq-casl-cp-generator"
+    ]
+  },
+  {
+    "title": "Sync Vs Async Comparison (httpx)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested sync vs async comparison. 10 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Connection Pool Exhaustion (httpx)",
+    "category": "concurrent_execution",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "connection_pool_depletion",
+    "description": "myCode tested connection pool exhaustion. 10 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Large Response Streaming (httpx)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested streaming large responses. 10 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Error Resilience (httpx)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode tested error resilience. 10 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Async Client Sync Context (httpx)",
+    "category": "edge_case_input",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested async client sync context behavior. 10 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Nested Model Depth (pydantic)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested nested model depth. 10 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Dynamic Model Creation Stress (pydantic)",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "",
+    "description": "myCode tested dynamic model creation stress. 10 error(s) occurred during this test. This means your app will use increasingly more memory over time, eventually crashing or becoming unresponsive.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Validation Error Information Leak (pydantic)",
+    "category": "edge_case_input",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "myCode tested managing memory over time. 10 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Network Resilience (supabase)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode tested network resilience. 10 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Auth Token Expiry (supabase)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode tested auth token expiry. 10 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Realtime Subscription Load (supabase)",
+    "category": "memory_profiling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested realtime subscription load. 10 error(s) occurred during this test. This means your app will use increasingly more memory over time, eventually crashing or becoming unresponsive.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "aman06700__stockway"
+    ]
+  },
+  {
+    "title": "Response time degradation on /main_page",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 11x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "amith-67968__Resume-Analyser"
+    ]
+  },
+  {
+    "title": "Silent Data Corruption Risk (pandas)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "empty_input_crash",
+    "description": "myCode tested settingwithcopy warning ignored behavior. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "anupamlab__ETL_API-data_Trend-Analysis_Dashboard"
+    ]
+  },
+  {
+    "title": "Ssl Verification Disabled (requests)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: ssl verification disabled.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "anupamlab__ETL_API-data_Trend-Analysis_Dashboard"
+    ]
+  },
+  {
+    "title": "Endpoint /api/quarters degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /api/quarters endpoint becomes unresponsive at 1 concurrent connection. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "apostleoffinance__crypto-market-agent"
+    ]
+  },
+  {
+    "title": "Get Api Quarters (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /api/quarters endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "apostleoffinance__crypto-market-agent"
+    ]
+  },
+  {
+    "title": "Response time degradation on /module_home",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 10x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "baumanis__RealEstateFeedApp"
+    ]
+  },
+  {
+    "title": "Detached Instance Error (sqlalchemy)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: detached instance error.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "chris-asianzu__community-fever-surveillance"
+    ]
+  },
+  {
+    "title": "API Coupling (Src app api skip      path   route proxy to skip api)",
+    "category": "concurrent_execution",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "citizenweb3__validatorinfo"
+    ]
+  },
+  {
+    "title": "Endpoint /log/download degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /log/download endpoint becomes unresponsive at 25 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      25
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "corrupt0303__dating-agent"
+    ]
+  },
+  {
+    "title": "Get Log Download (http)",
+    "category": "http_load_testing",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /log/download endpoint. 25 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      25
+    ],
+    "verticals": [
+      "api_service"
+    ],
+    "example_repos": [
+      "corrupt0303__dating-agent"
+    ]
+  },
+  {
+    "title": "API Coupling (Admin portal client easy kanban admin client request)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "drenlia__easy-kanban"
+    ]
+  },
+  {
+    "title": "Response time degradation on /1_Chat",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 11x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "federicogerardi__streamlit-agent-app-1"
+    ]
+  },
+  {
+    "title": "API Coupling (Fagent channels dingtalk ding talk channel  guess filename)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested connecting components together. 8 error(s) occurred during this test. This means connected components may fail together when external services are slow or unavailable.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "fresed05__fagent"
+    ]
+  },
+  {
+    "title": "API Coupling (Tests test graph ui  http json)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode tested connecting components together. 3 error(s) occurred during this test. This means connected components may fail together when external services are slow or unavailable.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      50
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "fresed05__fagent"
+    ]
+  },
+  {
+    "title": "Response time degradation on /home",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 10x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "gabrielvicino__IntensivaCalculator"
+    ]
+  },
+  {
+    "title": "API Coupling (App load mining data)",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "gh0ulbyte__crypto-mining-monitor"
+    ]
+  },
+  {
+    "title": "Response time degradation on /superadmin",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 11x under load (0ms baseline → 5ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "hscheema1979__myhealthteam"
+    ]
+  },
+  {
+    "title": "API Coupling (Frontend src api fetch json)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "iG-VirtuoZz__Korvex"
+    ]
+  },
+  {
+    "title": "Computation Coupling (Src iatoolkit infra call service call service client  normaliz)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "iatoolkit__iatoolkit"
+    ]
+  },
+  {
+    "title": "API Coupling (Src iatoolkit services configuration service configuration se)",
+    "category": "concurrent_execution",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "runtime_service_unavailable",
+    "description": "myCode tested connecting components together. 2 error(s) occurred during this test. This means connected components may fail together when external services are slow or unavailable.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "iatoolkit__iatoolkit"
+    ]
+  },
+  {
+    "title": "Response time degradation on /backtesting_results",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 11x under load (0ms baseline → 5ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "jptsantossilva__BEC"
+    ]
+  },
+  {
+    "title": "Response time degradation on /Leaderboard",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 10x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "kdinh9__DivaSchedule"
+    ]
+  },
+  {
+    "title": "Response time degradation on /industries",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 9x under load (0ms baseline → 3ms at 100 concurrent users). At 10 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "kogunlowo123__multi-industry-ai-assistant"
+    ]
+  },
+  {
+    "title": "Response time degradation on /0_Executive_Summary",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 11x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "kylefisher4d__healthcare_streamlit"
+    ]
+  },
+  {
+    "title": "Response time degradation on /metrics",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 10x under load (0ms baseline → 5ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "lavanya1402__Realtime-Voice-Intelligence-Dashboard-Version2"
+    ]
+  },
+  {
+    "title": "API Coupling (Src components projects submission wizard submit project)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "mativiaggio__aiprojectgallery"
+    ]
+  },
+  {
+    "title": "API Coupling (Admin script load experience)",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "mosmduali__cv-website"
+    ]
+  },
+  {
+    "title": "API Coupling (Src cursorx download and extract)",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "naveenpoddar__CursorScript"
+    ]
+  },
+  {
+    "title": "Api Route Throughput (nextjs)",
+    "category": "concurrent_execution",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "throughput_plateau",
+    "description": "myCode tested api route throughput. 1 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "nawazdevx__robert-shaw"
+    ]
+  },
+  {
+    "title": "Pages Vs App Router Confusion (nextjs)",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "",
+    "description": "myCode tested pages vs app router confusion behavior. 1 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "nextjs"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "nawazdevx__robert-shaw"
+    ]
+  },
+  {
+    "title": "Env Validation (dotenv)",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "unvalidated_type_crash",
+    "description": "myCode tested env validation. 5 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "dotenv"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "nikolapolic__openclaw-assistant-mvp"
+    ]
+  },
+  {
+    "title": "API Coupling (Electron main call mini max tts)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "nikolapolic__openclaw-assistant-mvp"
+    ]
+  },
+  {
+    "title": "API Coupling (Channel bot src github client fetch git hub user)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "nirholas__pump-fun-sdk"
+    ]
+  },
+  {
+    "title": "Endpoint /sse degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /sse endpoint becomes unresponsive at 1 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "express"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "oktayelipek__design-mcp"
+    ]
+  },
+  {
+    "title": "Get Sse (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested get sse. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "oktayelipek__design-mcp"
+    ]
+  },
+  {
+    "title": "Interceptor Overhead (axios)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "",
+    "description": "myCode tested interceptor overhead. 7 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "axios"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Env File Not Found (dotenv)",
+    "category": "edge_case_input",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "",
+    "description": "myCode tested env file not found behavior. 7 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "dotenv"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Client Side Env Exposure (dotenv)",
+    "category": "edge_case_input",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "platform_incompatibility",
+    "description": "myCode tested client side env exposure behavior. 7 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "dotenv"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Query Scaling (mongoose)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "myCode tested processing larger amounts of data. 7 error(s) occurred during this test. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "mongoose"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Connection Pool Stress (mongoose)",
+    "category": "concurrent_execution",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "connection_pool_depletion",
+    "description": "myCode tested connection pool stress. 7 error(s) occurred during this test. In practice, this means your app will become unusable when multiple people use it at the same time.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "mongoose"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Env File Committed To Git (dotenv)",
+    "category": "edge_case_input",
+    "failure_domain": "configuration_environment_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: env file committed to git.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "dotenv"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Connection String Issues (mongoose)",
+    "category": "edge_case_input",
+    "failure_domain": "integration_failure",
+    "failure_pattern": "",
+    "description": "myCode tested connection string issues behavior. 7 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "mongoose"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Version Compatibility (mongoose)",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "version_incompatibility",
+    "description": "myCode tested mongoose version compatibility. 7 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "mongoose"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "Version Compatibility (mongodb)",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "version_incompatibility",
+    "description": "myCode tested mongodb version compatibility. 7 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "mongodb"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "only1airfemzy-lgtm__trade_venue_x_backend"
+    ]
+  },
+  {
+    "title": "API Coupling (Src lib api fetch api)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "pavneet-singh-code__crypto-price-tracker"
+    ]
+  },
+  {
+    "title": "Version Compatibility (tailwindcss)",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "version_incompatibility",
+    "description": "myCode tested tailwindcss version compatibility. 2 error(s) occurred during this test. This means unexpected input from users could crash your app instead of showing an error message.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "tailwindcss"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "portfolio"
+    ],
+    "example_repos": [
+      "prudhvi1519__Prudhvi-Portfolio"
+    ]
+  },
+  {
+    "title": "API Coupling (Src cluster v2 services discord oauth exchange token)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "qianwan__mono-pilot"
+    ]
+  },
+  {
+    "title": "Response time degradation on /Login",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 10x under load (0ms baseline → 4ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "streamlit"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "ritikmanocha__AI-Powered-Real-Estate-Price-Prediction-Model"
+    ]
+  },
+  {
+    "title": "Index Build Scaling (llamaindex)",
+    "category": "data_volume_scaling",
+    "failure_domain": "scaling_collapse",
+    "failure_pattern": "linear_to_exponential_transition",
+    "description": "myCode tested processing larger amounts of data. 6 steps executed. 20 errors recorded. peak memory 103.9 MB. This means your app will slow down or crash when handling larger amounts of data.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "llamaindex"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "rizkythegreat__ai-recruiter-assistant"
+    ]
+  },
+  {
+    "title": "Endpoint /orders degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /orders endpoint becomes unresponsive at 100 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "flask"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "rizwimohdaltamash__Kotak-Neo"
+    ]
+  },
+  {
+    "title": "Post Orders (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /orders endpoint. 100 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "rizwimohdaltamash__Kotak-Neo"
+    ]
+  },
+  {
+    "title": "Get Orders (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /orders endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "rizwimohdaltamash__Kotak-Neo"
+    ]
+  },
+  {
+    "title": "Response time degradation on /quotes/ltp",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 8x under load (1ms baseline → 8ms at 100 concurrent users). At 10 concurrent connections, response time begins degrading significantly. Results showed signi",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "flask"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "rizwimohdaltamash__Kotak-Neo"
+    ]
+  },
+  {
+    "title": "Endpoint /localhost:58619 degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /localhost:58619 endpoint becomes unresponsive at 1 concurrent connection. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "flask"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "saurabhiiitm062__order-invoice-management-oracle"
+    ]
+  },
+  {
+    "title": "Get Localhost:58619 (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /localhost:58619 endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "web_app"
+    ],
+    "example_repos": [
+      "saurabhiiitm062__order-invoice-management-oracle"
+    ]
+  },
+  {
+    "title": "Endpoint /api/report degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /api/report endpoint becomes unresponsive at 1 concurrent connection. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "flask"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "socks-1__crypto-threat-intel-brief"
+    ]
+  },
+  {
+    "title": "Get Api Report (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /api/report endpoint. 1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "socks-1__crypto-threat-intel-brief"
+    ]
+  },
+  {
+    "title": "API Coupling (Apps update server src github fetch releases)",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "myCode detected: timeout.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [],
+    "verticals": [
+      "utility"
+    ],
+    "example_repos": [
+      "stagewise-io__stagewise"
+    ]
+  },
+  {
+    "title": "Endpoint /api/projects degrades under concurrent load",
+    "category": "http_load_testing",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Your /api/projects endpoint becomes unresponsive at 100 concurrent connections. Results showed significant variance between test rounds — infrastructure conditions may affect these measurements.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      100
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "timmeck__deepresearch"
+    ]
+  },
+  {
+    "title": "Get Api Projects (http)",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "myCode tested loading the /api/projects endpoint. 57 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 2
+    },
+    "affected_dependencies": [
+      "http"
+    ],
+    "load_levels": [
+      1,
+      100
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "timmeck__deepresearch"
+    ]
+  },
+  {
+    "title": "Response time degradation on /api/status",
+    "category": "http_load_testing",
+    "failure_domain": "unclassified",
+    "failure_pattern": "",
+    "description": "Response time on your application increases 20x under load (1ms baseline → 15ms at 100 concurrent users). At 5 concurrent connections, response time begins degrading significantly. Results showed sign",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "fastapi",
+      "uvicorn"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "timmeck__deepresearch"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: pandas_settingwithcopy_warning_ignored_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: settingwithcopy_warning_ignored",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pandas"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "PeteHass94__parkrun-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: langchain_agent_iteration_limit",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 49 errors recorded. peak memory 67.0 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker"
+    ]
+  },
+  {
+    "title": "Scenario failed: langchain_conversation_memory_growth",
+    "category": "memory_profiling",
+    "failure_domain": "resource_exhaustion",
+    "failure_pattern": "memory_accumulation_over_sessions",
+    "description": "10 steps executed. 50 errors recorded. peak memory 65.0 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [
+      5
+    ],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: langchain_api_key_exposure_in_chain_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: api_key_exposure_in_chain",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "langchain"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "Strikezor__SDMaker"
+    ]
+  },
+  {
+    "title": "Scenario failed: supabase_network_resilience",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "12 steps executed. 54 errors recorded. peak memory 117.7 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "WILSON220374__TECNIC"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: supabase_missing_or_invalid_credentials_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "empty_input_crash",
+    "description": "Triggered: missing_or_invalid_credentials",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "supabase"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "WILSON220374__TECNIC"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_unhandled_exceptions_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: unhandled_exceptions",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "YsnJbr__HazSnap"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_tool_use_stress",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 42 errors recorded. peak memory 41.8 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper"
+    ]
+  },
+  {
+    "title": "Scenario failed: anthropic_streaming_reliability",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 42 errors recorded. peak memory 41.8 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: anthropic_completions_to_messages_migration_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "Triggered: completions_to_messages_migration",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "adambenmouloud__job-hunting-ai-helper"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_silent_overflow_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 55 errors recorded. peak memory 120.9 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "facusabino__power-analysis-app"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: numpy_silent_overflow_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: silent_overflow",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "facusabino__power-analysis-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_api_key_exposure_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 44 errors recorded. peak memory 75.8 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: openai_rate_limit_no_retry_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 44 errors recorded. peak memory 77.4 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: openai_api_key_exposure_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: api_key_exposure",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "openai"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "chatbot"
+    ],
+    "example_repos": [
+      "gauthamkun__Appointment-Booking-Assistant"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_ssl_verification_disabled_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: ssl_verification_disabled",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "kitswas__fdroid-metrics-dashboard"
+    ]
+  },
+  {
+    "title": "Scenario failed: pydantic_v1_to_v2_migration_break_check",
+    "category": "edge_case_input",
+    "failure_domain": "dependency_failure",
+    "failure_pattern": "api_breaking_change",
+    "description": "12 steps executed. 36 errors recorded. peak memory 149.3 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1,
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "pydantic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "mohd-abdul-razzaque__streamlit-bedrock-app"
+    ]
+  },
+  {
+    "title": "Scenario failed: requests_unchecked_status_codes_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "12 steps executed. 36 errors recorded. peak memory 149.3 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "mohd-abdul-razzaque__streamlit-bedrock-app"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: requests_unchecked_status_codes_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: unchecked_status_codes",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "requests"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "mohd-abdul-razzaque__streamlit-bedrock-app"
+    ]
+  },
+  {
+    "title": "Errors during: coupling_api_src_gmail_oauth_get_credentials",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "3 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "picc-ai__ar-email-automation"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: coupling_api_src_gmail_oauth_get_credentials",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "Triggered: timeout, cascade_failure",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "picc-ai__ar-email-automation"
+    ]
+  },
+  {
+    "title": "Scenario failed: numpy_broadcasting_shape_mismatch_check",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "11 steps executed. 48 errors recorded. peak memory 102.5 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "x04z__WhoisApp"
+    ]
+  },
+  {
+    "title": "Errors during: numpy_concurrent_array_access",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "4 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "numpy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "data_pipeline"
+    ],
+    "example_repos": [
+      "Shabana2002__YOLO26n-Streamlit-App"
+    ]
+  },
+  {
+    "title": "Errors during: sqlalchemy_concurrent_write_conflict",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "sqlalchemy"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "adimStrong__ads-monitoring"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_async_concurrent_load",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "6 steps executed. 1669 errors recorded. peak memory 183.1 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      10
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "perlathebian__job-application-assistant"
+    ]
+  },
+  {
+    "title": "Scenario failed: httpx_sync_vs_async_comparison",
+    "category": "concurrent_execution",
+    "failure_domain": "concurrency_failure",
+    "failure_pattern": "",
+    "description": "4 steps executed. 25 errors recorded. peak memory 174.0 MB.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "httpx"
+    ],
+    "load_levels": [
+      1
+    ],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "perlathebian__job-application-assistant"
+    ]
+  },
+  {
+    "title": "Resource limit hit: anthropic_tool_use_stress",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "The test hit a resource cap during anthropic_tool_use_stress. This means the code exceeded safe operating limits under stress.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "critical": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "rikimatsumoto__app-zetetic"
+    ]
+  },
+  {
+    "title": "Errors during: anthropic_tool_use_stress",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "1 error(s) occurred during this test.",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "rikimatsumoto__app-zetetic"
+    ]
+  },
+  {
+    "title": "Failure indicators triggered: anthropic_tool_use_stress",
+    "category": "edge_case_input",
+    "failure_domain": "input_handling_failure",
+    "failure_pattern": "",
+    "description": "Triggered: timeout",
+    "confirmed_count": 1,
+    "severity_distribution": {
+      "warning": 1
+    },
+    "affected_dependencies": [
+      "anthropic"
+    ],
+    "load_levels": [],
+    "verticals": [
+      "dashboard"
+    ],
+    "example_repos": [
+      "rikimatsumoto__app-zetetic"
+    ]
+  }
+]

@@ -46,7 +46,7 @@ mycode = "mycode.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mycode = ["profiles/**/*.json"]
+mycode = ["profiles/**/*.json", "data/*.json"]
 
 [tool.pytest.ini_options]
 markers = [
