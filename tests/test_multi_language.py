@@ -12,9 +12,12 @@ import pytest
 from mycode.ingester import DependencyInfo, FileAnalysis, IngestionResult
 from mycode.pipeline import (
     LanguageDetectionError,
+    _has_real_js_deps,
+    _has_real_python_deps,
     detect_language,
     detect_languages,
     determine_primary_language,
+    find_dep_dir_for_language,
     merge_ingestion_results,
 )
 from mycode.scenario import (
@@ -93,6 +96,43 @@ def root_level_mix(tmp_path):
     return tmp_path
 
 
+@pytest.fixture
+def workspace_monorepo(tmp_path):
+    """Mimics fastapi/full-stack-fastapi-template: workspace wrappers at root,
+    real deps in subdirectories."""
+    # Root: workspace config files (NOT real dep files)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.uv.workspace]\nmembers = ["backend"]\n'
+    )
+    (tmp_path / "package.json").write_text(
+        '{"name":"monorepo","private":true,"workspaces":["frontend"]}'
+    )
+
+    # backend/ — real Python deps
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    (backend / "pyproject.toml").write_text(
+        '[project]\nname = "app"\ndependencies = [\n'
+        '    "fastapi>=0.114",\n    "sqlmodel>=0.0.21",\n'
+        '    "pydantic>2.0",\n]\n'
+    )
+    (backend / "app.py").write_text("from fastapi import FastAPI\napp = FastAPI()\n")
+    (backend / "models.py").write_text("from sqlmodel import SQLModel\n")
+    (backend / "crud.py").write_text("def get_items(): pass\n")
+
+    # frontend/ — real JS deps
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text(
+        '{"name":"frontend","dependencies":{"react":"^18","vite":"^5"}}'
+    )
+    (frontend / "index.js").write_text("import React from 'react';\n")
+    (frontend / "App.tsx").write_text("export default function App() {}\n")
+    (frontend / "main.tsx").write_text("ReactDOM.render(<App/>, root);\n")
+
+    return tmp_path
+
+
 # ── Phase 1: detect_languages() ──
 
 
@@ -118,6 +158,11 @@ class TestDetectLanguages:
         result = detect_languages(root_level_mix)
         assert result == {"python", "javascript"}
 
+    def test_workspace_monorepo(self, workspace_monorepo):
+        """Workspace wrappers at root, real deps in subdirectories."""
+        result = detect_languages(workspace_monorepo)
+        assert result == {"python", "javascript"}
+
     def test_empty_directory_raises(self, tmp_path):
         with pytest.raises(LanguageDetectionError):
             detect_languages(tmp_path)
@@ -127,6 +172,73 @@ class TestDetectLanguages:
         f.write_text("hello")
         with pytest.raises(LanguageDetectionError):
             detect_languages(f)
+
+
+class TestDepFileValidation:
+    """Test _has_real_python_deps and _has_real_js_deps."""
+
+    def test_pyproject_with_project_deps(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname="app"\ndependencies=["flask"]\n'
+        )
+        assert _has_real_python_deps(tmp_path) is True
+
+    def test_pyproject_workspace_only(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.uv.workspace]\nmembers = ["backend"]\n'
+        )
+        assert _has_real_python_deps(tmp_path) is False
+
+    def test_requirements_with_content(self, tmp_path):
+        (tmp_path / "requirements.txt").write_text("flask\npandas\n")
+        assert _has_real_python_deps(tmp_path) is True
+
+    def test_requirements_empty(self, tmp_path):
+        (tmp_path / "requirements.txt").write_text("# no deps\n\n")
+        assert _has_real_python_deps(tmp_path) is False
+
+    def test_setup_py_presence(self, tmp_path):
+        (tmp_path / "setup.py").write_text("from setuptools import setup\n")
+        assert _has_real_python_deps(tmp_path) is True
+
+    def test_package_json_with_deps(self, tmp_path):
+        (tmp_path / "package.json").write_text(
+            '{"dependencies":{"react":"^18"}}'
+        )
+        assert _has_real_js_deps(tmp_path) is True
+
+    def test_package_json_workspaces_only(self, tmp_path):
+        (tmp_path / "package.json").write_text(
+            '{"workspaces":["frontend"]}'
+        )
+        assert _has_real_js_deps(tmp_path) is False
+
+    def test_no_dep_files(self, tmp_path):
+        assert _has_real_python_deps(tmp_path) is False
+        assert _has_real_js_deps(tmp_path) is False
+
+
+class TestFindDepDirForLanguage:
+    """Test find_dep_dir_for_language with workspace monorepos."""
+
+    def test_workspace_monorepo_python(self, workspace_monorepo):
+        result = find_dep_dir_for_language(workspace_monorepo, "python")
+        assert result.name == "backend"
+
+    def test_workspace_monorepo_javascript(self, workspace_monorepo):
+        result = find_dep_dir_for_language(workspace_monorepo, "javascript")
+        assert result.name == "frontend"
+
+    def test_simple_project_returns_root(self, python_only_project):
+        result = find_dep_dir_for_language(python_only_project, "python")
+        assert result == python_only_project
+
+    def test_root_level_mix_returns_root(self, root_level_mix):
+        """Root has real deps for both — should return root."""
+        py_dir = find_dep_dir_for_language(root_level_mix, "python")
+        js_dir = find_dep_dir_for_language(root_level_mix, "javascript")
+        assert py_dir == root_level_mix
+        assert js_dir == root_level_mix
 
 
 class TestDetectLanguageBackwardCompat:

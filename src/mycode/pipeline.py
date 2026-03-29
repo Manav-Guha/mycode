@@ -377,20 +377,115 @@ _JS_DEP_FILES = frozenset({
 })
 
 
-def find_dep_dir_for_language(project_dir: Path, language: str) -> Path:
-    """Find the directory containing dependency files for a specific language.
+def _has_real_python_deps(directory: Path) -> bool:
+    """Check whether a directory contains a Python dep file with actual deps.
 
-    Checks root, then one level of subdirectories.  Returns the first
-    directory that has a dep file for the given language.  Falls back to
-    the project root.
+    Validates content, not just filename:
+    - pyproject.toml: must have [project] with dependencies, or
+      [tool.poetry.dependencies]. A uv/hatch workspace-only file is skipped.
+    - requirements.txt: must have ≥1 non-comment, non-empty line.
+    - setup.py, setup.cfg, Pipfile: presence is sufficient.
     """
-    dep_files = _PYTHON_DEP_FILES if language == "python" else _JS_DEP_FILES
+    # pyproject.toml — validate content
+    pyproject = directory / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            text = pyproject.read_text(encoding="utf-8", errors="replace")
+            has_project_deps = (
+                "[project]" in text and "dependencies" in text
+            )
+            has_poetry_deps = "[tool.poetry.dependencies]" in text
+            if has_project_deps or has_poetry_deps:
+                return True
+        except OSError:
+            pass
+
+    # requirements.txt variants — validate content
+    for name in ("requirements.txt", "requirement.txt", "requirements-dev.txt"):
+        req_file = directory / name
+        if req_file.is_file():
+            try:
+                lines = req_file.read_text(
+                    encoding="utf-8", errors="replace",
+                ).splitlines()
+                has_content = any(
+                    ln.strip() and not ln.strip().startswith("#")
+                    for ln in lines
+                )
+                if has_content:
+                    return True
+            except OSError:
+                pass
+
+    # setup.py, setup.cfg, Pipfile — presence is sufficient
+    for name in ("setup.py", "setup.cfg", "Pipfile"):
+        if (directory / name).is_file():
+            return True
+
+    return False
+
+
+def _has_real_js_deps(directory: Path) -> bool:
+    """Check whether a directory contains a JS dep file with actual deps.
+
+    Validates content, not just filename:
+    - package.json: must have "dependencies" or "devDependencies" with
+      ≥1 entry. A workspaces-only file is skipped.
+    - Lock files (package-lock.json, yarn.lock, pnpm-lock.yaml):
+      presence is sufficient.
+    """
+    pkg = directory / "package.json"
+    if pkg.is_file():
+        try:
+            import json as _json
+            data = _json.loads(
+                pkg.read_text(encoding="utf-8", errors="replace"),
+            )
+            deps = data.get("dependencies", {})
+            dev_deps = data.get("devDependencies", {})
+            if deps or dev_deps:
+                return True
+        except (OSError, ValueError):
+            pass
+
+    # Lock files — presence is sufficient
+    for name in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"):
+        if (directory / name).is_file():
+            return True
+
+    return False
+
+
+def find_dep_dir_for_language(project_dir: Path, language: str) -> Path:
+    """Find the directory containing validated dependency files for a language.
+
+    Checks root first. If the root file exists but is a workspace/config
+    file without actual dependencies (e.g., uv workspace pyproject.toml,
+    npm workspaces package.json), skips it and searches subdirectories.
+
+    Falls back to the project root when no validated dep file is found.
+    """
+    validator = _has_real_python_deps if language == "python" else _has_real_js_deps
 
     # Check root
-    if any((project_dir / name).is_file() for name in dep_files):
+    if validator(project_dir):
         return project_dir
 
-    # Check subdirectories
+    # Check subdirectories — prioritise common names
+    _py_subdirs = ("backend", "server", "api", "src", "app")
+    _js_subdirs = ("frontend", "client", "web", "app", "ui")
+    priority = _py_subdirs if language == "python" else _js_subdirs
+
+    # Check priority dirs first
+    for name in priority:
+        child = project_dir / name
+        if child.is_dir() and validator(child):
+            logger.info(
+                "Dep dir for %s: %s/ (priority subdir)", language, name,
+            )
+            return child
+
+    # Then scan remaining subdirectories
     try:
         children = sorted(project_dir.iterdir())
     except OSError:
@@ -399,9 +494,14 @@ def find_dep_dir_for_language(project_dir: Path, language: str) -> Path:
     for child in children:
         if not child.is_dir() or child.name.startswith("."):
             continue
-        if child.name == "node_modules":
+        if child.name in ("node_modules", "__pycache__", ".git"):
             continue
-        if any((child / name).is_file() for name in dep_files):
+        if child.name in priority:
+            continue  # already checked
+        if validator(child):
+            logger.info(
+                "Dep dir for %s: %s/ (scanned subdir)", language, child.name,
+            )
             return child
 
     return project_dir
