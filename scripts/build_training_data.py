@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Add src to path so we can import prediction constants
@@ -195,6 +196,22 @@ def main():
                          if os.path.isdir(CORPUS_DIR / d))
     print(f"  {len(report_dirs)} report directories found")
 
+    # First pass: collect repo ages to compute median for imputation
+    repo_ages: list[int] = []
+    now = datetime.now(timezone.utc)
+    for dirname in report_dirs:
+        meta_path = CORPUS_DIR / dirname / "github_metadata.json"
+        if meta_path.is_file():
+            try:
+                meta = json.loads(meta_path.read_text())
+                created = meta.get("created_at")
+                if created and meta.get("status") != "not_found":
+                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    repo_ages.append((now - dt).days)
+            except (json.JSONDecodeError, OSError, ValueError):
+                pass
+    median_age = sorted(repo_ages)[len(repo_ages) // 2] if repo_ages else None
+
     rows = []
     errors = 0
     # Also collect per-architecture pattern counts
@@ -215,6 +232,21 @@ def main():
             continue
 
         features = _extract_project_features(report)
+
+        # Repo age from github_metadata.json
+        age_days = median_age  # default to median
+        meta_path = CORPUS_DIR / dirname / "github_metadata.json"
+        if meta_path.is_file():
+            try:
+                meta = json.loads(meta_path.read_text())
+                created = meta.get("created_at")
+                if created and meta.get("status") != "not_found":
+                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    age_days = (now - dt).days
+            except (json.JSONDecodeError, OSError, ValueError):
+                pass
+        features["repo_age_days"] = age_days if age_days is not None else 0
+
         targets = _extract_targets(report, target_patterns)
         row = {**features, **targets}
         rows.append(row)

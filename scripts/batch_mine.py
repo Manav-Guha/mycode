@@ -863,6 +863,22 @@ def mine(
             # Run mycode
             returncode, stdout, stderr = _run_mycode(clone_dest, timeout=timeout)
 
+            # Save GitHub metadata from the discovered repos entry
+            _parts = repo_url.rstrip("/").split("/")
+            _full_name = f"{_parts[-2]}/{_parts[-1]}" if len(_parts) >= 2 else ""
+            github_meta = {
+                "full_name": _full_name,
+                "created_at": repo.get("created_at"),
+                "stars": repo.get("stars"),
+                "language": repo.get("language"),
+                "description": repo.get("description"),
+                "topics": repo.get("topics"),
+                "mined_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            (repo_result_dir / "github_metadata.json").write_text(
+                json.dumps(github_meta, indent=2) + "\n"
+            )
+
             # Collect JSON report
             report_path = clone_dest / "mycode-report.json"
             report: dict = {}
