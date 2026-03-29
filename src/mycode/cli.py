@@ -91,11 +91,47 @@ def _build_json_report(result: PipelineResult, project_path: Path) -> dict:
             "growth_expectation": c.growth_expectation,
         }
 
-    return {
+    # Predictions (best-effort — never crash if prediction module fails)
+    predictions_section: dict = {}
+    try:
+        from mycode.prediction import (
+            predict_issues,
+            build_predictions_dict,
+        )
+        if result.ingestion:
+            dep_names = [d.name for d in result.ingestion.dependencies]
+            arch = report_dict.get("architectural_pattern")
+            constraints_obj = (
+                result.interface_result.constraints
+                if result.interface_result else None
+            )
+            pred_result = predict_issues(
+                dep_names,
+                constraints=constraints_obj,
+                ingestion=result.ingestion,
+                architectural_pattern=arch,
+            )
+            if pred_result.predictions:
+                finding_titles = [
+                    f.get("title", "") for f in report_dict.get("findings", [])
+                ]
+                finding_cats = [
+                    f.get("category", "") for f in report_dict.get("findings", [])
+                ]
+                predictions_section = build_predictions_dict(
+                    pred_result, finding_titles, finding_cats,
+                )
+    except Exception:
+        pass
+
+    out: dict = {
         "project": project_meta,
         "constraints": constraints_dict,
         **report_dict,
     }
+    if predictions_section:
+        out["predictions"] = predictions_section
+    return out
 
 
 _UNTRUSTED_CODE_WARNING = (

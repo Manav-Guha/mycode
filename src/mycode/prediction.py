@@ -703,3 +703,58 @@ def match_prediction_to_findings(
             return True
 
     return False
+
+
+def build_predictions_dict(
+    result: PredictionResult,
+    finding_titles: Optional[list[str]] = None,
+    finding_categories: Optional[list[str]] = None,
+) -> dict:
+    """Build a JSON-serializable predictions dict from a PredictionResult.
+
+    Includes confirmed/not-observed status when finding data is provided.
+    """
+    ft = finding_titles or []
+    fc = finding_categories or []
+
+    def _item_dicts(items: list[PredictionItem]) -> list[dict]:
+        out = []
+        for p in items:
+            d: dict = {
+                "title": p.title,
+                "probability_pct": p.probability_pct,
+                "severity": p.severity,
+                "confirmed_count": p.confirmed_count,
+            }
+            if ft or fc:
+                d["confirmed"] = match_prediction_to_findings(
+                    p.title, ft, fc,
+                )
+            out.append(d)
+        return out
+
+    d: dict = {}
+
+    if result.arch_filtered and result.architectural_type:
+        d["architecture_specific"] = {
+            "architecture": result.architectural_type,
+            "project_count": result.total_similar_projects,
+            "items": _item_dicts(result.predictions),
+        }
+        if result.tech_wide_predictions:
+            d["technology_wide"] = {
+                "project_count": result.tech_wide_total,
+                "items": _item_dicts(result.tech_wide_predictions),
+            }
+    else:
+        d["technology_wide"] = {
+            "project_count": result.total_similar_projects,
+            "items": _item_dicts(result.predictions),
+        }
+        if result.architectural_type and result.architectural_type != "general":
+            d["architecture_note"] = (
+                f"Limited {result.architectural_type.replace('_', ' ')}"
+                f"-specific data available"
+            )
+
+    return d
