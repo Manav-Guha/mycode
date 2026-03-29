@@ -962,10 +962,12 @@ class ExecutionEngine:
 
         # Build harness script and config — route to correct runtime
         # JS-specific categories always use Node.js; shared categories
-        # use the project language to pick the right harness.
+        # use the scenario's execution_language (multi-language) or the
+        # project language (single-language) to pick the right harness.
         is_js = (
             scenario.category in _JS_CATEGORIES
-            or self.language == "javascript"
+            or scenario.execution_language == "javascript"
+            or (not scenario.execution_language and self.language == "javascript")
         )
         harness_config = self._build_harness_config(scenario)
 

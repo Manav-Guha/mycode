@@ -16,7 +16,13 @@ from mycode.ingester import IngestionResult, ProjectIngester
 from mycode.interface import ConversationalInterface, InterfaceResult, OperationalIntent
 from mycode.js_ingester import JsProjectIngester
 from mycode.library import ComponentLibrary
-from mycode.pipeline import detect_language, _infer_project_name
+from mycode.pipeline import (
+    detect_language,
+    detect_languages,
+    determine_primary_language,
+    merge_ingestion_results,
+    _infer_project_name,
+)
 from mycode.scenario import LLMConfig
 from mycode.session import SessionManager
 from mycode.viability import ViabilityResult, run_viability_gate
@@ -104,9 +110,11 @@ def handle_preflight(
         # Log job start to analytics
         log_job_started(job.id, source, repo_url)
 
-        # Stage 1: Language detection
+        # Stage 1: Language detection (multi-language aware)
+        languages = detect_languages(project_path)
         language = detect_language(project_path)
         job.language = language
+        job.detected_languages = languages
 
         # Stage 2: Session setup
         session = SessionManager(
@@ -116,37 +124,90 @@ def handle_preflight(
         session.setup()
         job.session = session
 
-        # Stage 3: Ingestion
-        # Use venv packages (where deps were actually installed), not host
+        # Stage 3: Ingestion (run both ingesters for multi-language)
         installed = session.get_venv_packages()
         dep_file_dir = session.find_dep_file_dir()
 
-        if language == "python":
-            ingester = ProjectIngester(
-                project_path=session.project_copy_dir,
-                installed_packages=installed,
-                skip_pypi_check=True,
-                dep_file_dir=dep_file_dir,
+        py_ingestion = None
+        js_ingestion = None
+
+        if "python" in languages:
+            try:
+                py_ingester = ProjectIngester(
+                    project_path=session.project_copy_dir,
+                    installed_packages=installed,
+                    skip_pypi_check=True,
+                    dep_file_dir=dep_file_dir,
+                )
+                py_ingestion = py_ingester.ingest()
+                py_ingestion.language = "python"
+            except Exception as exc:
+                logger.warning("Python ingestion failed: %s", exc)
+                warnings.append(f"Python analysis failed: {exc}")
+
+        if "javascript" in languages:
+            try:
+                js_ingester = JsProjectIngester(
+                    project_path=session.project_copy_dir,
+                    installed_packages=None,
+                    skip_npm_check=True,
+                    dep_file_dir=dep_file_dir,
+                )
+                js_ingestion = js_ingester.ingest()
+                js_ingestion.language = "javascript"
+            except Exception as exc:
+                logger.warning("JavaScript ingestion failed: %s", exc)
+                warnings.append(f"JavaScript analysis failed: {exc}")
+
+        # Merge results for multi-language, or use single result
+        if py_ingestion and js_ingestion:
+            py_deps = [d.name for d in py_ingestion.dependencies]
+            js_deps = [d.name for d in js_ingestion.dependencies]
+            primary = determine_primary_language(
+                py_deps, js_deps,
+                py_ingestion.total_lines, js_ingestion.total_lines,
             )
+            job.language = primary
+            if primary == "python":
+                ingestion = merge_ingestion_results(
+                    py_ingestion, js_ingestion, "python",
+                )
+            else:
+                ingestion = merge_ingestion_results(
+                    js_ingestion, py_ingestion, "javascript",
+                )
+        elif py_ingestion:
+            ingestion = py_ingestion
+        elif js_ingestion:
+            ingestion = js_ingestion
         else:
-            ingester = JsProjectIngester(
-                project_path=session.project_copy_dir,
-                installed_packages=None,
-                skip_npm_check=True,
-                dep_file_dir=dep_file_dir,
+            return PreflightResponse(
+                error="Could not analyse the project — both Python and "
+                "JavaScript ingestion failed.",
             )
 
-        ingestion = ingester.ingest()
         job.ingestion = ingestion
 
-        # Stage 4: Library matching
+        # Stage 4: Library matching (match each language separately, merge)
         library = ComponentLibrary()
-        dep_dicts = [
-            {"name": d.name, "installed_version": d.installed_version}
-            for d in ingestion.dependencies
-            if not d.is_dev
-        ]
-        matches = library.match_dependencies(language, dep_dicts) if dep_dicts else []
+        if py_ingestion and js_ingestion:
+            py_dicts = [
+                {"name": d.name, "installed_version": d.installed_version}
+                for d in py_ingestion.dependencies if not d.is_dev
+            ]
+            js_dicts = [
+                {"name": d.name, "installed_version": d.installed_version}
+                for d in js_ingestion.dependencies if not d.is_dev
+            ]
+            py_matches = library.match_dependencies("python", py_dicts) if py_dicts else []
+            js_matches = library.match_dependencies("javascript", js_dicts) if js_dicts else []
+            matches = py_matches + js_matches
+        else:
+            dep_dicts = [
+                {"name": d.name, "installed_version": d.installed_version}
+                for d in ingestion.dependencies if not d.is_dev
+            ]
+            matches = library.match_dependencies(language, dep_dicts) if dep_dicts else []
         job.matches = matches
 
         recognized_names = {m.dependency_name for m in matches if m.profile is not None}

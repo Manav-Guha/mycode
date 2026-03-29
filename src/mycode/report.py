@@ -184,6 +184,7 @@ class DiagnosticReport:
     vertical: str = ""
     architectural_pattern: str = ""
     business_domain: str = ""
+    secondary_languages: list[str] = field(default_factory=list)
     has_user_constraints: bool = False
     user_scale: int | None = None
     current_users: int | None = None
@@ -718,6 +719,7 @@ class DiagnosticReport:
             "vertical": self.vertical,
             "architectural_pattern": self.architectural_pattern,
             "business_domain": self.business_domain,
+            "secondary_languages": list(self.secondary_languages),
             "model_used": self.model_used,
             "token_usage": dict(self.token_usage),
         }
@@ -1608,6 +1610,8 @@ class ReportGenerator:
         report.vertical = project_cls["vertical"]
         report.architectural_pattern = project_cls["architectural_pattern"]
         report.business_domain = project_cls["business_domain"]
+        if ingestion.secondary_languages:
+            report.secondary_languages = list(ingestion.secondary_languages)
 
     def _detect_degradation(
         self,
@@ -3291,8 +3295,19 @@ def _generate_project_description(
     non_dev_deps = [d.name for d in ingestion.dependencies if not d.is_dev]
     framework = _detect_primary_framework(non_dev_deps)
 
+    # Multi-language: detect all distinct frameworks
+    all_frameworks = []
+    for dep in non_dev_deps:
+        label = _FRAMEWORK_LABELS.get(dep.lower())
+        if label and label not in all_frameworks:
+            all_frameworks.append(label)
+            if len(all_frameworks) >= 2:
+                break
+
     # Build the core description
-    if framework and human_label:
+    if len(all_frameworks) >= 2 and ingestion.secondary_languages:
+        desc = f"Your {all_frameworks[0]} + {all_frameworks[1]} {human_label or 'application'}"
+    elif framework and human_label:
         desc = f"Your {framework} {human_label}"
     elif framework:
         desc = f"Your {framework} project"

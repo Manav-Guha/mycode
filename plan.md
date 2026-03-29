@@ -1,308 +1,427 @@
-# Plan: L2 Prediction Model — Train XGBoost/LightGBM on Corpus Data
+# Plan: Multi-Language Project Support
 
-## Current State
+## Problem
 
-**What exists:**
-- `prediction.py` does corpus lookup — matches dependency names against `corpus_patterns_ranked.json`, scores by `overlap_count × confirmed_count`, returns top 5 as probability percentages.
-- 3,990 corpus reports in `corpus/reports/`, each with `mycode-report.json` containing project metadata, findings, degradation curves.
-- 3,677 reports have findings (92%), 313 have none.
-- 271 patterns in `corpus_patterns_ranked.json`, 53 with ≥10 confirmed occurrences.
-- 52 unique (category, failure_domain, failure_pattern) combinations.
-- 41 profiled dependencies (18 Python + 23 JavaScript).
-- Prediction box on the web frontend already renders probabilities — just needs better numbers.
-
-**What's wrong with the current approach:**
-- Probability = `confirmed_count / total_similar × 100` — this is a frequency ratio, not a true probability.
-- No weighting for dependency *combinations* (Flask+SQLAlchemy together is different from Flask alone).
-- No project complexity signal (LOC, file count, function count).
-- No co-occurrence signal (if pattern A appears, pattern B is more likely).
-- A trained model captures these interactions from the 3,990-project corpus.
+myCode picks one language per project. Multi-language projects (FastAPI + React, Django + Vue) get classified as one language and the other half is missed. The fastapi/full-stack-fastapi-template was classified as JavaScript due to package.json in the frontend directory — the Python backend was never analysed.
 
 ---
 
-## Architecture
+## Current Flow
 
 ```
-corpus/reports/*/mycode-report.json
-        │
-        ▼
-scripts/build_training_data.py  ──►  src/mycode/data/training_data.csv
-        │
-        ▼
-scripts/train_prediction_model.py  ──►  src/mycode/data/prediction_model.joblib
-                                        src/mycode/data/model_metadata.json
-        │
-        ▼
-src/mycode/prediction.py  (loads model at import time, predicts on new projects)
+project_path
+  │
+  ├→ detect_language(path) → "python" | "javascript"    [pipeline.py:210]
+  │   Checks indicator files (requirements.txt vs package.json),
+  │   counts .py vs .js/.ts files, Python wins ties.
+  │   Returns EXACTLY ONE language.
+  │
+  ├→ SessionManager.setup()                              [session.py:179]
+  │   Creates Python venv (always).
+  │   Installs pip deps (_install_dependencies).
+  │   Installs npm deps (_install_js_dependencies) IF package.json exists.
+  │   Session already handles both runtimes.
+  │
+  ├→ _run_ingestion(session, language)                   [pipeline.py:546]
+  │   if language == "python":
+  │       ProjectIngester(installed_packages=venv_packages)
+  │   else:
+  │       JsProjectIngester(installed_packages=None)
+  │   Returns ONE IngestionResult with deps from ONE language only.
+  │
+  ├→ library.match_dependencies(language, dep_dicts)     [pipeline.py:411]
+  │   Matches against Python OR JavaScript profiles, not both.
+  │
+  ├→ generator.generate(ingestion, matches, language=language)  [scenario.py:597]
+  │   _get_categories(language) → PYTHON_CATEGORIES or JAVASCRIPT_CATEGORIES
+  │   Generates scenarios for ONE language's categories only.
+  │
+  ├→ ExecutionEngine(session, ingestion, language=language)     [engine.py]
+  │   is_js = category in _JS_CATEGORIES or self.language == "javascript"
+  │   Routes to "python" or "node" runner per scenario.
+  │   Already handles mixed runners — if a JS-specific category appears
+  │   in a Python project, it uses node. This is correct.
+  │
+  └→ ReportGenerator.generate(execution, ingestion, matches)    [report.py:1014]
+      No language parameter. Infers from single-language execution.
 ```
 
-The model file ships as package data alongside `corpus_patterns_ranked.json`. On Railway, the model is available at `src/mycode/data/prediction_model.joblib`.
+**Key observation:** SessionManager and ExecutionEngine already handle both runtimes. The bottleneck is steps 1 (detection), 3 (ingestion), 4 (matching), and 6 (scenario generation) — they are mutually exclusive.
 
 ---
 
-## Phase 1: Feature Extraction Script
+## Proposed Flow
 
-**File:** `scripts/build_training_data.py`
-
-### Input
-Read every `corpus/reports/*/mycode-report.json`.
-
-### Feature Vector (per project)
-
-**Dependency features (41 binary columns):**
-One column per profiled dependency. Value = 1 if the project uses that dependency, 0 otherwise. Column names match profile filenames: `dep_flask`, `dep_pandas`, `dep_numpy`, etc.
-
-Use a canonical mapping from `corpus_patterns_ranked.json` `affected_dependencies` and report `project.dependencies[].name` to the 41 profile names. Handle aliases (e.g. `react-dom` → `react`, `langchain-core` → `langchain`).
-
-**Project complexity features (5 numeric columns):**
-- `dep_count`: total number of dependencies (not just profiled)
-- `loc`: total lines of code (`project.total_lines`)
-- `file_count`: number of files analysed (`project.files_analyzed`)
-- `files_failed`: number of files that couldn't be parsed
-- `has_server_framework`: 1 if any of (flask, fastapi, express, streamlit, nextjs, gradio) is present
-
-**Language feature (1 column):**
-- `language`: 0 = python, 1 = javascript
-
-### Target Labels (multi-label binary)
-
-For each of the top ~20-30 failure patterns (those with ≥10 confirmed), a binary column: did this project exhibit this pattern?
-
-Target column naming: `target_{sanitized_title}` where title is lowercased, spaces → underscores, special chars stripped.
-
-Select target patterns by confirmed_count ≥ 10 AND not purely informational (skip "Application handled HTTP load without issues", "N unrecognized dependencies", "N missing dependencies").
-
-**Filtering informational targets:**
-- Skip patterns where 100% of severity_distribution is "info"
-- Skip patterns whose title matches `r'^\d+ (missing|unrecognized) dependenc'`
-- This leaves failure patterns that actually indicate problems
-
-### Output
-`src/mycode/data/training_data.csv` — one row per project, columns = features + targets.
-
-Also output `src/mycode/data/target_columns.json` — ordered list of target column names, mapping each to its human-readable title, severity, and category. The model needs this at prediction time to label its outputs.
-
-### Edge Cases
-- Reports with no `project` key → skip.
-- Reports with no `dependencies` → dep features all 0, keep the row (complexity features still informative).
-- Reports with no findings → all target columns 0 (valid negative example).
+```
+project_path
+  │
+  ├→ detect_languages(path) → {"python", "javascript"} | {"python"} | {"javascript"}
+  │   NEW function. Returns a SET of detected languages.
+  │   Falls back to detect_language() for single-language.
+  │
+  ├→ SessionManager.setup()   [NO CHANGE]
+  │   Already installs both pip and npm deps.
+  │
+  ├→ FOR EACH detected language:                         [NEW in pipeline.py]
+  │   ├→ _run_ingestion(session, lang) → IngestionResult
+  │   └→ library.match_dependencies(lang, deps)
+  │
+  ├→ _merge_ingestion_results(py_result, js_result) → IngestionResult  [NEW]
+  │   Combined deps (tagged), combined files, combined LOC.
+  │   Primary language determined by heuristic.
+  │
+  ├→ _merge_profile_matches(py_matches, js_matches) → list[ProfileMatch]
+  │
+  ├→ generator.generate(merged_ingestion, merged_matches, language=primary)
+  │   CHANGE: accept languages: set[str] parameter alongside language.
+  │   When languages has both, use ALL_CATEGORIES (union).
+  │   Tag each scenario with its execution language.
+  │
+  ├→ ExecutionEngine(session, ingestion, language=primary)
+  │   MINIMAL CHANGE: engine already routes by category.
+  │   Scenarios tagged with execution language override self.language.
+  │
+  └→ ReportGenerator.generate(execution, ingestion, matches)
+      MINIMAL CHANGE: findings already carry category and dep info.
+      Summary generation uses primary language for server context.
+```
 
 ---
 
-## Phase 2: Model Training Script
+## Detailed Design
 
-**File:** `scripts/train_prediction_model.py`
+### 1. Language Detection
 
-### Approach: Binary Relevance with Gradient Boosting
-
-Multi-label classification via one-vs-rest: train one binary classifier per target label, wrapped in `sklearn.multioutput.MultiOutputClassifier`. Each base estimator is a gradient boosting classifier.
-
-**Model choice: scikit-learn `HistGradientBoostingClassifier`.**
-- Native to scikit-learn (no extra install — already available in any Python 3.10+).
-- Handles sparse features well (most dep columns are 0).
-- Fast enough for 3,990 samples × 47 features × 20-30 targets.
-- No need for XGBoost/LightGBM — HistGBT is scikit-learn's equivalent and avoids a dependency.
-
-### Training Pipeline
+**New function: `detect_languages()` in pipeline.py**
 
 ```python
-from sklearn.multioutput import MultiOutputClassifier
-from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.model_selection import cross_val_predict
-import joblib
+def detect_languages(project_path: Path) -> set[str]:
+    """Detect all languages present in a project.
 
-# Load training_data.csv
-# Split into X (features) and Y (targets)
-# Train
-model = MultiOutputClassifier(
-    HistGradientBoostingClassifier(max_iter=200, max_depth=4, random_state=42)
-)
-model.fit(X, Y)
-
-# Evaluate: cross-validated predictions
-Y_pred = cross_val_predict(model, X, Y, cv=5, method="predict_proba")
-# Log per-target ROC-AUC, overall accuracy
+    Returns a set: {"python"}, {"javascript"}, or {"python", "javascript"}.
+    """
 ```
 
-### Evaluation Metrics
-- Per-target ROC-AUC (skip targets with <5 positive samples — undefined AUC).
-- Per-target precision, recall at 0.5 threshold.
-- Overall mean AUC across viable targets.
-- Log all metrics to stdout and to `src/mycode/data/model_metrics.json`.
+Logic:
+- Check for Python indicators: requirements.txt, pyproject.toml, setup.py, Pipfile, *.py source files
+- Check for JavaScript indicators: package.json with actual source files (not just build tooling)
+- **Critical filter:** Only detect JavaScript if there are actual .js/.ts/.jsx/.tsx source files (not just node_modules or a lone package.json from a build dependency). Scan for ≥3 JS source files OR a package.json with a "main" or "scripts" field indicating a real JS project.
+- Return set of detected languages
 
-### Acceptance Threshold
-- Mean AUC > 0.60 across targets with ≥10 positive samples. This is a low bar — the corpus data is noisy (different projects, different dependency versions). Anything above random (0.50) is an improvement over the current frequency-ratio approach.
+**Backward compatibility:** `detect_language()` (singular) remains unchanged. It calls `detect_languages()` and picks one via the existing heuristic (Python wins ties). All single-language paths continue to use it.
 
-### Output Files
-- `src/mycode/data/prediction_model.joblib` — serialised `MultiOutputClassifier`.
-- `src/mycode/data/model_metadata.json`:
-  ```json
-  {
-    "feature_columns": ["dep_flask", "dep_pandas", ..., "dep_count", "loc", ...],
-    "target_columns": ["target_app_server_could_not_start", ...],
-    "target_info": {
-      "target_app_server_could_not_start": {
-        "title": "Application server could not start",
-        "severity": "critical",
-        "category": "http_load_testing",
-        "confirmed_count": 1218
-      },
-      ...
-    },
-    "training_samples": 3990,
-    "mean_auc": 0.XX,
-    "trained_at": "2026-03-29T..."
-  }
-  ```
-- `src/mycode/data/training_data.csv` — retained for reproducibility (but NOT shipped as package data — too large).
+**Where called:** `handle_preflight()` in routes.py and `run_pipeline()` in pipeline.py both switch to `detect_languages()`.
 
-### Dependency Column Alias Map
+### 2. IngestionResult Changes
 
-The dependency names in reports don't always match profile names exactly. Build an alias map:
+**No new dataclass.** The existing `IngestionResult` is language-agnostic by design — it has `dependencies`, `file_analyses`, `coupling_points`, etc. without any language tag.
+
+**Add one field:**
 
 ```python
-_DEP_ALIASES = {
-    "react-dom": "react",
-    "react-scripts": "react",
-    "langchain-core": "langchain",
-    "langchain-community": "langchain",
-    "npm-start": None,  # not a real dep
-    "uvicorn": "fastapi",  # co-occurs, map to framework
-    ...
-}
+@dataclass
+class IngestionResult:
+    # ... existing fields ...
+    language: str = ""  # NEW: "python", "javascript", or "multi" for merged
+    secondary_languages: list[str] = field(default_factory=list)  # NEW
 ```
 
-This map is used both in `build_training_data.py` and in `prediction.py` at prediction time. Define it once in `prediction.py` and import it from both scripts.
-
----
-
-## Phase 3: Integration into prediction.py
-
-### Changes to `predict_issues()`
+**Merging strategy:** Create a new function `merge_ingestion_results()`:
 
 ```python
-def predict_issues(dependency_names, corpus_path=None, constraints=None,
-                   ingestion=None):
+def merge_ingestion_results(
+    primary: IngestionResult,
+    secondary: IngestionResult,
+    primary_language: str,
+) -> IngestionResult:
+    """Merge two single-language IngestionResults into one."""
 ```
 
-New optional parameter: `ingestion: Optional[IngestionResult]` — provides project complexity features (LOC, file count, etc.). When `None`, use defaults (median values from training data, stored in metadata).
+- `dependencies`: concatenate both lists. DependencyInfo already has `name` — no collision risk since Python and JS deps have different names (flask vs react). Tag each with a `_language` marker.
+- `file_analyses`: concatenate. FileAnalysis has `file_path` which naturally distinguishes .py from .js files.
+- `coupling_points`: concatenate. Coupling points are intra-language — no cross-language coupling analysis.
+- `function_flows`: concatenate.
+- `files_analyzed`: sum both.
+- `total_lines`: sum both.
+- `files_failed`: sum both.
+- `warnings`: concatenate.
+- `parse_errors`: concatenate.
+- `language`: set to primary_language.
+- `secondary_languages`: set to [secondary_language].
 
-### Flow
+**Where called:** After running both ingesters in pipeline.py / routes.py.
 
-1. Try to load model + metadata from `src/mycode/data/`.
-2. If model loaded:
-   a. Extract feature vector from `dependency_names` + `ingestion`.
-   b. Call `model.predict_proba(X)` → array of probabilities per target.
-   c. Map target columns back to human-readable titles via metadata.
-   d. Sort by probability descending, take top 5.
-   e. Build `PredictionResult` with model-based probabilities.
-3. If model NOT loaded (file missing, import error, deserialization error):
-   a. Log warning once.
-   b. Fall back to current corpus lookup (existing code, unchanged).
-   c. Never crash.
-
-### Feature Extraction Function
+### 3. Primary Language Heuristic
 
 ```python
-def _extract_features(
-    dependency_names: list[str],
-    ingestion: Optional[IngestionResult] = None,
-    feature_columns: list[str] = ...,
-) -> list[float]:
-    """Build feature vector matching the training schema."""
+def _determine_primary_language(
+    py_result: Optional[IngestionResult],
+    js_result: Optional[IngestionResult],
+    py_deps: list[str],
+    js_deps: list[str],
+) -> str:
+    """Determine which language is the primary stress target."""
 ```
 
-Uses the same alias map and profile list as the training script. Returns a list of floats in the same column order as `feature_columns` from metadata.
+Rules (in priority order):
+1. If Python has a server framework (FastAPI, Flask, Django, Streamlit, Gradio) → Python is primary
+2. If JavaScript has a server framework (Express, Next.js) and Python does NOT → JavaScript is primary
+3. If neither has a server framework → language with more source lines is primary
+4. Tie → Python (matches current behavior)
 
-### Model Loading
+The primary language determines:
+- HTTP server testing target
+- Report ordering (primary findings first)
+- `language` field in the merged IngestionResult
 
-Lazy-load on first call (module-level cache):
+### 4. Scenario Generator Changes
+
+**`generate()` signature change:**
 
 ```python
-_model_cache: dict = {}
-
-def _load_model():
-    if "model" in _model_cache:
-        return _model_cache["model"], _model_cache["metadata"]
-    ...
-    _model_cache["model"] = model
-    _model_cache["metadata"] = metadata
-    return model, metadata
+def generate(
+    self,
+    ingestion_result: IngestionResult,
+    profile_matches: list[ProfileMatch],
+    operational_intent: str,
+    language: str = "python",
+    languages: Optional[set[str]] = None,  # NEW
+    constraints: Optional[OperationalConstraints] = None,
+) -> ScenarioGeneratorResult:
 ```
 
-### PredictionResult Changes
+**Behavior:**
+- If `languages` is None or has one element → existing behavior (backward compatible).
+- If `languages` has both "python" and "javascript" → use `ALL_CATEGORIES` (union of PYTHON_CATEGORIES and JAVASCRIPT_CATEGORIES).
+- Each generated scenario is tagged with an `execution_language` field:
+  - Scenarios from Python profiles → `execution_language = "python"`
+  - Scenarios from JavaScript profiles → `execution_language = "javascript"`
+  - Coupling scenarios → inherit from the coupling point's file type (.py → python, .js → javascript)
+  - Shared-category scenarios for profiled deps → tagged by the dep's language
 
-No structural changes. The `PredictionItem` fields stay the same:
-- `title` — from `target_info` in metadata
-- `probability_pct` — from `model.predict_proba()` × 100
-- `severity` — from `target_info`
-- `confirmed_count` — from `target_info`
-- `matching_deps` — deps in the user's project that match the target's typical affected_dependencies
-- `scale_note` — unchanged (computed from constraints, not model)
-
-### `total_similar_projects`
-
-Set to `metadata["training_samples"]` (3,990). This is the corpus size the model was trained on.
-
----
-
-## Phase 4: Web Integration
-
-No frontend changes needed. The prediction box already renders `PredictionResult`. The numbers just become more accurate.
-
-One change: the prediction endpoint passes `ingestion` to `predict_issues`:
+**New field on StressTestScenario:**
 
 ```python
-# routes.py handle_predict
-result = predict_issues(
-    dependency_names=dep_names,
-    constraints=job.constraints,
-    ingestion=job.ingestion,  # NEW — provides complexity features
+@dataclass
+class StressTestScenario:
+    # ... existing fields ...
+    execution_language: str = ""  # NEW: "python" or "javascript"
+```
+
+This field is advisory — the engine already routes by category. But it makes the intent explicit and allows the engine to override its default `self.language` check.
+
+### 5. Execution Engine Changes
+
+**Minimal.** The engine already handles mixed runners:
+
+```python
+is_js = (
+    scenario.category in _JS_CATEGORIES
+    or self.language == "javascript"
 )
 ```
 
+**One change:** Also check `scenario.execution_language`:
+
+```python
+is_js = (
+    scenario.category in _JS_CATEGORIES
+    or scenario.execution_language == "javascript"
+    or (not scenario.execution_language and self.language == "javascript")
+)
+```
+
+This ensures Python scenarios from the JS half of a multi-language project still use the correct runner, and vice versa.
+
+### 6. Report Generator Changes
+
+**No signature change.** The report doesn't need to know about languages directly — it operates on findings, which are produced by the execution engine from scenarios that are already correctly routed.
+
+**One enhancement:** When generating the project description and plain summary, detect multi-language projects:
+
+```python
+if ingestion.secondary_languages:
+    # "Your FastAPI + React application..."
+    # instead of "Your Python web application..."
+```
+
+This is a string formatting change in `_generate_project_description()` and `_generate_plain_summary()`.
+
+### 7. Prediction Module Changes
+
+**No model retraining needed.** The XGBoost model uses binary dependency features. If a project has both `flask` and `react`, both features are 1 — the model handles this correctly because its training data includes projects that happen to have both (even if they were classified as one language).
+
+**One change in `predict_issues()`:** The `dependency_names` list will now include both Python and JS deps. The existing code already passes all deps to the model — no change needed.
+
+**Architectural inference:** `infer_architectural_type()` already works on description keywords. For multi-language projects, the dependency-based classifier in `classifiers.py` will see both framework types and resolve correctly (e.g., FastAPI + React → the classifier sees both and picks based on scoring).
+
+### 8. Library Matching Changes
+
+Currently `library.match_dependencies(language, dep_dicts)` filters profiles by language. For multi-language projects:
+
+```python
+# Run matching for each language, merge results
+py_matches = library.match_dependencies("python", py_dep_dicts)
+js_matches = library.match_dependencies("javascript", js_dep_dicts)
+merged_matches = py_matches + js_matches
+```
+
+This happens before the merge, using each language's own dep list.
+
+### 9. HTTP Load Testing
+
+Currently `run_http_testing_phase(language=language)` determines which server to start.
+
+For multi-language projects:
+- Use the primary language for HTTP testing
+- If the primary side is Python (FastAPI/Flask), start the Python server
+- If the primary side is JS (Express/Next.js), start the Node.js server
+- Do NOT start two servers — one is enough for stress testing
+
+This requires no code change beyond passing `language=primary_language` (which is already what happens).
+
+### 10. Web Routes Changes
+
+**`handle_preflight()`:**
+
+```python
+# Current:
+language = detect_language(project_path)
+
+# New:
+languages = detect_languages(project_path)
+primary_language = _pick_primary(languages)  # for backward compat
+job.language = primary_language
+job.detected_languages = languages  # NEW field on Job
+```
+
+Then run both ingesters if both languages detected:
+
+```python
+if "python" in languages:
+    py_ingestion = _run_python_ingestion(session)
+if "javascript" in languages:
+    js_ingestion = _run_js_ingestion(session)
+
+if py_ingestion and js_ingestion:
+    ingestion = merge_ingestion_results(py_ingestion, js_ingestion, primary_language)
+elif py_ingestion:
+    ingestion = py_ingestion
+else:
+    ingestion = js_ingestion
+```
+
+**`run_analysis()` in worker.py:**
+
+```python
+# Pass languages set to scenario generator
+languages = getattr(job, 'detected_languages', {job.language})
+result = generator.generate(
+    ...,
+    language=job.language,
+    languages=languages,
+    ...
+)
+```
+
 ---
 
-## Phase 5: Tests
+## What Does NOT Change
 
-### New tests in `tests/test_prediction_model.py`:
+| Component | Why |
+|-----------|-----|
+| PythonProjectIngester internals | Works correctly for Python projects |
+| JsProjectIngester internals | Works correctly for JS projects |
+| SessionManager | Already installs both pip and npm deps |
+| Profile JSON files | Language-specific, no change needed |
+| Corpus data / extraction | Read-only |
+| XGBoost model | Handles combined dep features naturally |
+| Web frontend (app.js, index.html) | Receives report data as before |
+| PDF generation (documents.py) | Receives DiagnosticReport as before |
 
-1. **Feature extraction:**
-   - Known deps produce correct binary vector
-   - Alias mapping works (react-dom → react)
-   - Missing ingestion uses defaults
-   - Ingestion data populates complexity features
+---
 
-2. **Model loading:**
-   - Loads model from default path
-   - Returns None gracefully when file missing
-   - Caches on second call
+## Regression Risk Assessment
 
-3. **Fallback behavior:**
-   - When model is missing, `predict_issues` returns corpus-lookup results (not empty)
-   - When model is present, returns model-based results
-   - Never raises exceptions
+### High Risk
+1. **IngestionResult merge logic** — If the merge produces an invalid state (e.g., duplicate deps, mismatched coupling points), everything downstream breaks. Mitigate: extensive unit tests for merge function.
+2. **Scenario generator category expansion** — Using ALL_CATEGORIES for multi-language projects means more scenarios. If the time budget doesn't account for this, tests may time out. Mitigate: keep existing per-depth coupling caps.
+3. **Engine runner routing** — If `execution_language` is set incorrectly, Python code runs through Node.js or vice versa, producing garbage results. Mitigate: default to existing `self.language` fallback when `execution_language` is empty.
 
-4. **Prediction output:**
-   - Returns ≤5 predictions
-   - Each has probability_pct between 0 and 100
-   - Each has title, severity, confirmed_count
-   - Results are sorted by probability descending
+### Medium Risk
+4. **Library matching with merged deps** — Python deps accidentally matched against JS profiles or vice versa. Mitigate: match each language's deps separately, then merge results.
+5. **HTTP testing with wrong server** — Primary language heuristic picks wrong server framework. Mitigate: explicit priority ordering (Python server frameworks > JS server frameworks).
+
+### Low Risk
+6. **Report description strings** — "Your Python web application" when it should say "Your FastAPI + React application." Cosmetic, not functional.
+7. **Prediction accuracy** — Combined dep list may produce slightly different predictions. The model already handles this; no retraining needed.
+
+### Zero Risk (no change)
+8. Single-language Python projects — identical code path (detect_languages returns {"python"}).
+9. Single-language JS projects — identical code path (detect_languages returns {"javascript"}).
+
+---
+
+## Test Plan
+
+### New Tests
+
+1. **`test_detect_languages()`** — Fixtures with Python-only, JS-only, and mixed project structures. Verify set output.
+2. **`test_detect_languages_ignores_build_tooling()`** — A Python project with a lone package.json from a build tool should NOT detect JavaScript.
+3. **`test_merge_ingestion_results()`** — Merge two IngestionResults, verify combined deps, files, LOC, coupling points.
+4. **`test_primary_language_heuristic()`** — FastAPI+React → Python primary. Express+Python scripts → JS primary. No frameworks → more LOC wins.
+5. **`test_scenario_generator_multi_language()`** — With languages={"python", "javascript"}, verify ALL_CATEGORIES used, scenarios tagged with execution_language.
+6. **`test_engine_execution_language_routing()`** — Scenario with execution_language="python" in a JS project → uses Python runner.
+7. **`test_single_language_unchanged()`** — Regression test: single-language project produces identical results to baseline.
+
+### Existing Tests That May Need Updating
+
+- Tests that mock `detect_language()` → may need to also mock `detect_languages()`.
+- Tests that assert exact scenario counts → may get more scenarios if test fixtures trigger multi-language detection.
+- Tests that check `IngestionResult` field counts → new `language` and `secondary_languages` fields.
+
+**Approach:** Add new fields with defaults so existing tests pass without modification. Only tests that explicitly check the new behavior need updating.
 
 ---
 
 ## Implementation Order
 
-1. **Define alias map and profile list** in `prediction.py` (shared constants).
-2. **Write `scripts/build_training_data.py`** — reads corpus, outputs CSV + target_columns.json.
-3. **Run feature extraction** — verify CSV shape and target distribution.
-4. **Write `scripts/train_prediction_model.py`** — trains model, outputs joblib + metadata.
-5. **Run training** — verify AUC > 0.60, inspect metrics.
-6. **Update `prediction.py`** — add `_extract_features`, `_load_model`, model-based prediction path.
-7. **Update `routes.py`** — pass `ingestion` to `predict_issues`.
-8. **Update `pyproject.toml`** — add `"data/*.joblib"` to package-data.
-9. **Write tests** — feature extraction, loading, fallback, output validation.
-10. **Run full test suite** — 2,373 existing + new tests.
+### Phase 1: Detection (no behavior change)
+- Add `detect_languages()` function to pipeline.py
+- Add `language` and `secondary_languages` fields to IngestionResult
+- `detect_language()` calls `detect_languages()` internally, picks one
+- All existing code still uses `detect_language()` — zero behavior change
+- Tests: new detection tests only
+
+### Phase 2: Dual Ingestion (pipeline.py and routes.py)
+- Add `merge_ingestion_results()` function
+- Add `_determine_primary_language()` heuristic
+- Update `handle_preflight()` to run both ingesters when both detected
+- Update `_run_ingestion()` to accept languages set
+- Merge results before passing downstream
+- Tests: merge function tests, preflight with mixed fixtures
+
+### Phase 3: Scenario Tagging
+- Add `execution_language` field to StressTestScenario
+- Update `generate()` to accept `languages` parameter
+- Use ALL_CATEGORIES when both languages present
+- Tag each scenario with execution_language
+- Tests: multi-language scenario generation
+
+### Phase 4: Engine Routing
+- Update `_execute_scenario()` to check `scenario.execution_language`
+- Fallback to `self.language` when `execution_language` is empty
+- Tests: execution language routing
+
+### Phase 5: Report Polish
+- Update `_generate_project_description()` for multi-language
+- Update `_generate_plain_summary()` for multi-language
+- Tests: report text for multi-language projects
+
+### Phase 6: Integration Testing
+- End-to-end test with a real multi-language fixture
+- Verify single-language regression (identical output)
+- Run full test suite (2,397+)
 
 ---
 
@@ -310,61 +429,26 @@ result = predict_issues(
 
 | File | Changes |
 |------|---------|
-| `src/mycode/prediction.py` | Alias map, feature extraction, model loading, model-based predict path, fallback |
-| `src/mycode/web/routes.py` | Pass `ingestion` to `predict_issues` in `handle_predict` |
-| `pyproject.toml` | Add `"data/*.joblib"` to package-data |
-| `scripts/build_training_data.py` | **NEW** — feature extraction from corpus |
-| `scripts/train_prediction_model.py` | **NEW** — model training |
-| `src/mycode/data/prediction_model.joblib` | **NEW** — trained model artifact |
-| `src/mycode/data/model_metadata.json` | **NEW** — feature/target schema + metrics |
-| `src/mycode/data/training_data.csv` | **NEW** — training dataset (not shipped) |
-| `tests/test_prediction_model.py` | **NEW** — tests for model integration |
+| `src/mycode/pipeline.py` | `detect_languages()`, `merge_ingestion_results()`, `_determine_primary_language()`, update `_run_ingestion()` |
+| `src/mycode/ingester.py` | Add `language`, `secondary_languages` fields to IngestionResult |
+| `src/mycode/scenario.py` | Add `execution_language` to StressTestScenario, `languages` param to `generate()`, ALL_CATEGORIES routing |
+| `src/mycode/engine.py` | Check `scenario.execution_language` in runner selection |
+| `src/mycode/report.py` | Multi-language project description text |
+| `src/mycode/web/routes.py` | Dual ingestion in `handle_preflight()` |
+| `src/mycode/web/worker.py` | Pass `languages` to scenario generator |
+| `src/mycode/web/jobs.py` | Add `detected_languages` field to Job |
+| `tests/test_multi_language.py` | **NEW** — all multi-language tests |
 
 ## Files NOT Modified
 
 | File | Reason |
 |------|--------|
-| `web/app.js` | No frontend changes — prediction box already renders PredictionResult |
-| `web/index.html` | No layout changes |
-| `src/mycode/report.py` | No report framing changes |
-| `src/mycode/constraints.py` | No constraint changes |
-| `src/mycode/scenario.py` | No scenario changes |
-| `corpus/` | Read-only — no corpus data modifications |
-
----
-
-## Dependencies
-
-**No new pip dependencies.** `scikit-learn` ships `HistGradientBoostingClassifier`, `MultiOutputClassifier`, and `joblib`. scikit-learn is a standard ML package available on any data science Python install.
-
-However, scikit-learn is NOT in the current `pyproject.toml` dependencies. Two options:
-
-**Option A (preferred):** Add `scikit-learn>=1.3.0` as an optional dependency group `[project.optional-dependencies] ml = ["scikit-learn>=1.3.0"]`. The training scripts require it. The `prediction.py` runtime import is guarded — if scikit-learn isn't installed, fall back to corpus lookup.
-
-**Option B:** Add to core dependencies. This bloats the install for users who don't need ML predictions.
-
-Go with Option A. The model file is pre-trained and shipped as package data. At prediction time, `prediction.py` needs `joblib` (to load the model) and `numpy` (for the feature array). Both are transitive deps of scikit-learn. If neither is installed, the corpus lookup fallback fires.
-
-Guard the import:
-```python
-try:
-    import joblib
-    import numpy as np
-    _HAS_ML = True
-except ImportError:
-    _HAS_ML = False
-```
-
----
-
-## Risk Areas
-
-1. **Class imbalance:** Some targets have 1,000+ positives, others have 10. HistGBT handles this reasonably via its built-in loss function, but very rare targets (10-15 positives in 3,990 samples) will have poor AUC. Accept this — those targets fall back to the "worth knowing" tier anyway.
-
-2. **Overfitting on small corpus:** 3,990 samples with 47 features is modest. Cross-validation (5-fold) mitigates this. `max_depth=4` and `max_iter=200` are conservative hyperparameters.
-
-3. **Model file size:** HistGBT models are compact. ~20-30 targets × 200 trees × shallow depth = estimated 1-5 MB joblib file. Acceptable for package data.
-
-4. **scikit-learn version skew:** A model trained with scikit-learn 1.5 may not load on scikit-learn 1.3. Pin a minimum version in the optional dep, and store the scikit-learn version in metadata.json for diagnostics.
-
-5. **Alias map maintenance:** When new profiles are added, the alias map needs updating. Document this in a comment.
+| `src/mycode/ingester.py` (internals) | Python ingester works correctly |
+| `src/mycode/js_ingester.py` (internals) | JS ingester works correctly |
+| `src/mycode/session.py` | Already handles both runtimes |
+| `src/mycode/prediction.py` | Handles combined dep list naturally |
+| `src/mycode/documents.py` | Receives DiagnosticReport as before |
+| `src/mycode/constraints.py` | No language dependency |
+| `web/app.js`, `web/index.html` | Frontend is language-agnostic |
+| Profile JSON files | Language-specific, no change needed |
+| Corpus data | Read-only |

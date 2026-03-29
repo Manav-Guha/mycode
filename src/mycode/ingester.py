@@ -206,6 +206,8 @@ class IngestionResult:
     coupling_points: list[CouplingPoint] = field(default_factory=list)
     parse_errors: list[dict] = field(default_factory=list)  # [{file, error}]
     warnings: list[str] = field(default_factory=list)
+    language: str = ""  # "python", "javascript", or "multi"
+    secondary_languages: list[str] = field(default_factory=list)
 
 
 # ── Helpers ──

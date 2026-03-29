@@ -88,6 +88,9 @@ _JS_INDICATORS = frozenset({
 _PYTHON_EXTENSIONS = frozenset({".py"})
 _JS_EXTENSIONS = frozenset({".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"})
 
+# Minimum JS source files to classify as a real JS project (not just build tooling)
+_MIN_JS_SOURCE_FILES = 3
+
 
 # ── Exceptions ──
 
@@ -207,58 +210,176 @@ class PipelineResult:
 # ── Language Detection ──
 
 
-def detect_language(project_path: Path) -> str:
-    """Detect whether a project is Python or JavaScript.
+def detect_languages(project_path: Path) -> set[str]:
+    """Detect ALL languages present in a project.
 
-    Checks for indicator files first (requirements.txt, package.json, etc.),
-    then falls back to counting source file extensions.
+    Returns a set: ``{"python"}``, ``{"javascript"}``, or
+    ``{"python", "javascript"}`` for multi-language projects.
 
-    Returns:
-        "python" or "javascript"
+    Scans indicator files in root AND subdirectories.  Only detects
+    JavaScript if there are real source files (≥3 .js/.ts), not just
+    node_modules or a lone package.json from a build dependency.
 
     Raises:
-        LanguageDetectionError: If neither language can be determined.
+        LanguageDetectionError: If no language can be determined.
     """
     if not project_path.is_dir():
         raise LanguageDetectionError(
             f"Project path is not a directory: {project_path}"
         )
 
-    top_level_files = {f.name for f in project_path.iterdir() if f.is_file()}
+    detected: set[str] = set()
 
-    has_python_indicators = bool(top_level_files & _PYTHON_INDICATORS)
-    has_js_indicators = bool(top_level_files & _JS_INDICATORS)
+    # Scan for indicator files in root and immediate subdirectories
+    has_python_indicator = False
+    has_js_indicator = False
+    dirs_to_check = [project_path]
+    for child in project_path.iterdir():
+        if child.is_dir() and not child.name.startswith("."):
+            dirs_to_check.append(child)
 
-    # Unambiguous cases
-    if has_python_indicators and not has_js_indicators:
-        return "python"
-    if has_js_indicators and not has_python_indicators:
-        return "javascript"
+    for d in dirs_to_check:
+        files = {f.name for f in d.iterdir() if f.is_file()}
+        if files & _PYTHON_INDICATORS:
+            has_python_indicator = True
+        if files & _JS_INDICATORS:
+            has_js_indicator = True
 
-    # Both or neither — count source files
+    # Count source files to confirm indicators (avoid build-tool false positives)
     py_count = 0
     js_count = 0
     for f in project_path.rglob("*"):
         if not f.is_file():
             continue
+        # Skip node_modules — these are installed deps, not source
+        if "node_modules" in f.parts:
+            continue
         if f.suffix in _PYTHON_EXTENSIONS:
             py_count += 1
         elif f.suffix in _JS_EXTENSIONS:
             js_count += 1
-        # Stop early once we have enough signal
-        if py_count + js_count > 200:
+        if py_count + js_count > 500:
             break
 
-    if py_count > js_count:
-        return "python"
+    # Python: indicator OR source files
+    if has_python_indicator or py_count > 0:
+        detected.add("python")
+
+    # JavaScript: indicator AND enough source files (not just build tooling)
+    if has_js_indicator and js_count >= _MIN_JS_SOURCE_FILES:
+        detected.add("javascript")
+    elif js_count >= _MIN_JS_SOURCE_FILES and not has_python_indicator:
+        # JS source files without indicator but no Python either
+        detected.add("javascript")
+
+    if not detected:
+        raise LanguageDetectionError(
+            "Could not determine project language — no Python or JavaScript "
+            "files found."
+        )
+
+    return detected
+
+
+def detect_language(project_path: Path) -> str:
+    """Detect the primary language of a project.
+
+    Returns ``"python"`` or ``"javascript"``.  For multi-language projects,
+    uses the existing heuristic (Python wins ties).
+
+    This is the backward-compatible wrapper around ``detect_languages()``.
+
+    Raises:
+        LanguageDetectionError: If neither language can be determined.
+    """
+    languages = detect_languages(project_path)
+    if len(languages) == 1:
+        return next(iter(languages))
+    # Multi-language — pick primary using existing heuristic
+    # Count source files for tie-breaking
+    py_count = 0
+    js_count = 0
+    for f in project_path.rglob("*"):
+        if not f.is_file() or "node_modules" in f.parts:
+            continue
+        if f.suffix in _PYTHON_EXTENSIONS:
+            py_count += 1
+        elif f.suffix in _JS_EXTENSIONS:
+            js_count += 1
+        if py_count + js_count > 200:
+            break
     if js_count > py_count:
         return "javascript"
-    if py_count > 0:
-        return "python"  # Tie-break: Python (arbitrary but deterministic)
+    return "python"  # Python wins ties
 
-    raise LanguageDetectionError(
-        "Could not determine project language — no Python or JavaScript "
-        "files found."
+
+# ── Multi-Language Merge ──
+
+_PYTHON_SERVER_FRAMEWORKS = frozenset({
+    "flask", "fastapi", "django", "streamlit", "gradio",
+})
+_JS_SERVER_FRAMEWORKS = frozenset({
+    "express", "next", "nextjs", "next.js", "nuxt",
+})
+
+
+def determine_primary_language(
+    py_deps: list[str],
+    js_deps: list[str],
+    py_lines: int = 0,
+    js_lines: int = 0,
+) -> str:
+    """Determine which language is the primary stress-testing target.
+
+    Rules (in priority order):
+    1. Python has server framework → Python primary
+    2. JavaScript has server framework (and Python doesn't) → JS primary
+    3. Neither has server framework → language with more source lines
+    4. Tie → Python
+    """
+    py_dep_lower = {d.lower() for d in py_deps}
+    js_dep_lower = {d.lower() for d in js_deps}
+
+    py_has_server = bool(py_dep_lower & _PYTHON_SERVER_FRAMEWORKS)
+    js_has_server = bool(js_dep_lower & _JS_SERVER_FRAMEWORKS)
+
+    if py_has_server:
+        return "python"
+    if js_has_server:
+        return "javascript"
+    if js_lines > py_lines:
+        return "javascript"
+    return "python"
+
+
+def merge_ingestion_results(
+    primary: IngestionResult,
+    secondary: IngestionResult,
+    primary_language: str,
+) -> IngestionResult:
+    """Merge two single-language IngestionResults into one.
+
+    The *primary* result's ``project_path`` is used for the merged output.
+    Dependencies, files, functions, and coupling points are concatenated.
+    """
+    secondary_language = (
+        "javascript" if primary_language == "python" else "python"
+    )
+
+    return IngestionResult(
+        project_path=primary.project_path,
+        files_analyzed=primary.files_analyzed + secondary.files_analyzed,
+        files_failed=primary.files_failed + secondary.files_failed,
+        total_lines=primary.total_lines + secondary.total_lines,
+        file_analyses=list(primary.file_analyses) + list(secondary.file_analyses),
+        dependencies=list(primary.dependencies) + list(secondary.dependencies),
+        dependency_tree={**primary.dependency_tree, **secondary.dependency_tree},
+        function_flows=list(primary.function_flows) + list(secondary.function_flows),
+        coupling_points=list(primary.coupling_points) + list(secondary.coupling_points),
+        parse_errors=list(primary.parse_errors) + list(secondary.parse_errors),
+        warnings=list(primary.warnings) + list(secondary.warnings),
+        language=primary_language,
+        secondary_languages=[secondary_language],
     )
 
 

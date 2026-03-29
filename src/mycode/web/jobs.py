@@ -65,6 +65,7 @@ class Job:
     github_url: str = ""
     source: str = "public"
     language: str = ""
+    detected_languages: set = field(default_factory=set)
     project_name: str = ""
 
     # Stage results (accumulated during lifecycle)

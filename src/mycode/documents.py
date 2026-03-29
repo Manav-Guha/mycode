@@ -1971,11 +1971,38 @@ def render_understanding_pdf(
     pdf.cell(0, 4, f"Edition {edition}  |  {date}")
     pdf.ln(5)
 
-    # Technology stack summary
+    # Technology stack summary — group by language for multi-language projects
     if report.recognized_dep_names:
-        stack_text = "Stack: " + ", ".join(report.recognized_dep_names[:12])
-        if len(report.recognized_dep_names) > 12:
-            stack_text += "..."
+        if (hasattr(report, "secondary_languages")
+                and report.secondary_languages):
+            # Multi-language: group deps
+            from mycode.prediction import PROFILED_DEPS, DEP_ALIASES
+            _js_known = {
+                "react", "express", "nextjs", "axios", "mongoose",
+                "prisma", "socketio", "svelte", "tailwindcss", "threejs",
+                "zod", "chartjs", "dotenv", "supabase_js", "openai_node",
+                "anthropic_node", "langchainjs", "node_core", "vue",
+                "angular", "d3", "stripe", "plotlyjs", "react_chartjs_2",
+                "react_plotlyjs", "google_auth_library",
+            }
+            py_deps = []
+            js_deps = []
+            for d in report.recognized_dep_names:
+                d_norm = d.lower().replace("-", "_")
+                if d_norm in _js_known or d.lower() in _js_known:
+                    js_deps.append(d)
+                else:
+                    py_deps.append(d)
+            parts = []
+            if py_deps:
+                parts.append(", ".join(py_deps[:6]) + " (Python)")
+            if js_deps:
+                parts.append(", ".join(js_deps[:6]) + " (JavaScript)")
+            stack_text = "Stack: " + " + ".join(parts)
+        else:
+            stack_text = "Stack: " + ", ".join(report.recognized_dep_names[:12])
+            if len(report.recognized_dep_names) > 12:
+                stack_text += "..."
         pdf.set_font("Helvetica", "", 9)
         pdf.set_text_color(*_SUBTLE)
         pdf.cell(0, 4, _safe_text(stack_text))

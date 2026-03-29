@@ -239,6 +239,7 @@ class StressTestScenario:
     failure_indicators: list[str] = field(default_factory=list)
     priority: str = "medium"
     source: str = "offline"
+    execution_language: str = ""  # "python" or "javascript"; empty = use project default
 
 
 @dataclass
@@ -601,6 +602,7 @@ class ScenarioGenerator:
         operational_intent: str,
         language: str = "python",
         constraints: Optional[OperationalConstraints] = None,
+        languages: Optional[set[str]] = None,
     ) -> ScenarioGeneratorResult:
         """Generate stress test scenarios for the analyzed project.
 
@@ -609,15 +611,21 @@ class ScenarioGenerator:
             profile_matches: Dependency matches from the Component Library (C4).
             operational_intent: User's description of what the project does,
                 who it's for, and under what conditions it operates.
-            language: Target language ('python' or 'javascript').
+            language: Primary target language ('python' or 'javascript').
+            languages: All detected languages.  When both Python and JS
+                are present, scenarios for both language categories are
+                generated and tagged with ``execution_language``.
             constraints: Structured constraints extracted from user
-                conversation.  Shapes scale boundaries, template selection,
-                and termination conditions.
+                conversation.
 
         Returns:
             ScenarioGeneratorResult with generated scenarios and metadata.
         """
-        valid_categories = self._get_categories(language)
+        # Multi-language: use ALL categories (union)
+        if languages and len(languages) > 1:
+            valid_categories = ALL_CATEGORIES
+        else:
+            valid_categories = self._get_categories(language)
         recognized = [m for m in profile_matches if m.profile is not None]
         unrecognized = [m.dependency_name for m in profile_matches if m.profile is None]
 
@@ -626,6 +634,7 @@ class ScenarioGenerator:
                 ingestion_result, recognized, unrecognized,
                 operational_intent, language, valid_categories,
                 constraints=constraints,
+                languages=languages,
             )
 
         return self._generate_with_llm(
@@ -906,6 +915,7 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
         language: str,
         valid_categories: frozenset[str],
         constraints: Optional[OperationalConstraints] = None,
+        languages: Optional[set[str]] = None,
     ) -> ScenarioGeneratorResult:
         """Generate scenarios from component library templates without LLM.
 
@@ -1336,6 +1346,41 @@ Generate 5-15 scenarios covering different categories. Prioritize high-impact sc
 
         if constraint_notes:
             warnings.extend(constraint_notes)
+
+        # Tag each scenario with execution_language for multi-language routing
+        if languages and len(languages) > 1:
+            _js_only = JAVASCRIPT_CATEGORIES - SHARED_CATEGORIES
+            _py_only = PYTHON_CATEGORIES - SHARED_CATEGORIES
+            # Build set of JS dep names from profile matches
+            _js_profile_names = frozenset({
+                m.dependency_name.lower() for m in recognized
+                if m.profile is not None
+                and m.profile.raw.get("identity", {}).get("language") == "javascript"
+            })
+            # Fallback: check if profile dir was javascript/
+            # (profiles don't always have identity.language)
+            _js_dep_names = _js_profile_names | frozenset({
+                "react", "express", "next", "nextjs", "vue", "angular",
+                "svelte", "axios", "three", "socket.io", "prisma",
+                "mongoose", "stripe", "zod", "d3", "chart.js",
+            })
+
+            for s in scenarios:
+                if s.execution_language:
+                    continue  # already set
+                if s.category in _js_only:
+                    s.execution_language = "javascript"
+                elif s.category in _py_only:
+                    s.execution_language = "python"
+                elif s.target_dependencies:
+                    # Shared category — determine by dep
+                    dep_lower = {d.lower() for d in s.target_dependencies}
+                    if dep_lower & _js_dep_names:
+                        s.execution_language = "javascript"
+                    else:
+                        s.execution_language = "python"
+                else:
+                    s.execution_language = language  # primary
 
         return ScenarioGeneratorResult(
             scenarios=scenarios,

@@ -56,6 +56,7 @@ def run_analysis(job: Job) -> None:
     matches = job.matches
     session = job.session
     language = job.language
+    languages = getattr(job, "detected_languages", None) or {language}
 
     if ingestion is None or session is None:
         job.status = "failed"
@@ -79,6 +80,7 @@ def run_analysis(job: Job) -> None:
             profile_matches=matches,
             operational_intent=intent_string,
             language=language,
+            languages=languages if len(languages) > 1 else None,
             constraints=constraints,
         )
 
