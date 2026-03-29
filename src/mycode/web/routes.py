@@ -540,6 +540,66 @@ def handle_report(job_id: str) -> ReportResponse:
         "total_errors": job.result.report.total_errors,
     }
 
+    # Compute predictions once — used for JSON report, PDF, and web
+    predictions_dict = None
+    if job.ingestion:
+        try:
+            from mycode.prediction import predict_issues
+            dep_names = [d.name for d in job.ingestion.dependencies]
+            arch = getattr(
+                job.result.report, "architectural_pattern", None,
+            )
+            pred_result = predict_issues(
+                dep_names, constraints=job.constraints,
+                ingestion=job.ingestion,
+                architectural_pattern=arch,
+            )
+            if pred_result.predictions:
+                def _pred_dicts(items):
+                    return [
+                        {
+                            "title": p.title,
+                            "probability_pct": p.probability_pct,
+                            "severity": p.severity,
+                            "confirmed_count": p.confirmed_count,
+                            "matching_deps": p.matching_deps,
+                            "scale_note": p.scale_note,
+                        }
+                        for p in items
+                    ]
+                predictions_dict = {
+                    "total_similar_projects": pred_result.total_similar_projects,
+                    "matching_deps": pred_result.matching_deps,
+                    "architectural_type": pred_result.architectural_type,
+                    "arch_filtered": pred_result.arch_filtered,
+                    "predictions": _pred_dicts(pred_result.predictions),
+                    "tech_wide_total": pred_result.tech_wide_total,
+                    "tech_wide_predictions": _pred_dicts(
+                        pred_result.tech_wide_predictions,
+                    ),
+                }
+        except Exception:
+            pass  # predictions are best-effort
+
+    # Add predictions to JSON report output with confirmed/not-observed status
+    if predictions_dict:
+        from mycode.prediction import match_prediction_to_findings
+        finding_titles = [
+            f.get("title", "") for f in report_dict.get("findings", [])
+        ]
+        finding_cats = [
+            f.get("category", "") for f in report_dict.get("findings", [])
+        ]
+        for pred in predictions_dict.get("predictions", []):
+            pred["confirmed"] = match_prediction_to_findings(
+                pred["title"], finding_titles, finding_cats,
+            )
+        for pred in predictions_dict.get("tech_wide_predictions", []):
+            pred["confirmed"] = match_prediction_to_findings(
+                pred["title"], finding_titles, finding_cats,
+            )
+        report_dict["predictive_analysis"] = predictions_dict
+
     # Render edition documents and cache PDF bytes on the job
     understanding_md = ""
     edition = 0
@@ -557,48 +617,9 @@ def handle_report(job_id: str) -> ReportResponse:
 
         if _HAS_FPDF:
             project_name = job.result.report.project_name or "Project"
-            # Gather predictions for the PDF
-            pdf_predictions = None
-            if job.ingestion:
-                try:
-                    from mycode.prediction import predict_issues
-                    dep_names = [d.name for d in job.ingestion.dependencies]
-                    arch = getattr(
-                        job.result.report, "architectural_pattern", None,
-                    )
-                    pred_result = predict_issues(
-                        dep_names, constraints=job.constraints,
-                        ingestion=job.ingestion,
-                        architectural_pattern=arch,
-                    )
-                    if pred_result.predictions:
-                        def _pred_dicts(items):
-                            return [
-                                {
-                                    "title": p.title,
-                                    "probability_pct": p.probability_pct,
-                                    "severity": p.severity,
-                                    "confirmed_count": p.confirmed_count,
-                                    "scale_note": p.scale_note,
-                                }
-                                for p in items
-                            ]
-                        pdf_predictions = {
-                            "total_similar_projects": pred_result.total_similar_projects,
-                            "matching_deps": pred_result.matching_deps,
-                            "architectural_type": pred_result.architectural_type,
-                            "arch_filtered": pred_result.arch_filtered,
-                            "predictions": _pred_dicts(pred_result.predictions),
-                            "tech_wide_total": pred_result.tech_wide_total,
-                            "tech_wide_predictions": _pred_dicts(
-                                pred_result.tech_wide_predictions,
-                            ),
-                        }
-                except Exception:
-                    pass  # predictions are best-effort
             job._understanding_pdf = render_understanding_pdf(
                 job.result.report, edition, project_name,
-                predictions=pdf_predictions,
+                predictions=predictions_dict,
                 constraints=job.constraints,
             )
             job._understanding_filename = pdf_filename(project_name, "Results")
