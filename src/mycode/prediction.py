@@ -88,6 +88,64 @@ _DATA_DIR = Path(__file__).parent / "data"
 _MODEL_PATH = _DATA_DIR / "prediction_model.joblib"
 _METADATA_PATH = _DATA_DIR / "model_metadata.json"
 
+# ── Architecture Type Inference ──
+
+_ARCH_KEYWORDS: dict[str, list[str]] = {
+    "dashboard": [
+        "dashboard", "admin panel", "analytics", "visualization",
+        "monitoring", "chart", "graph", "report viewer",
+    ],
+    "api_service": [
+        "api", "backend", "server", "endpoint", "rest",
+        "microservice", "webhook",
+    ],
+    "data_pipeline": [
+        "pipeline", "etl", "data processing", "batch",
+        "ingestion", "transformation",
+    ],
+    "cli_tool": [
+        "cli", "command line", "script", "tool", "utility",
+    ],
+    "chatbot": [
+        "bot", "chatbot", "assistant", "conversational",
+    ],
+    "web_app": [
+        "web app", "web application", "website", "portal",
+        "platform", "marketplace",
+    ],
+    "ml_model": [
+        "model", "machine learning", "ml", "prediction",
+        "training", "inference", "classifier",
+    ],
+}
+
+KNOWN_ARCHITECTURES = list(_ARCH_KEYWORDS.keys()) + ["general"]
+
+
+def infer_architectural_type(
+    ingestion_pattern: Optional[str] = None,
+    project_description: Optional[str] = None,
+) -> str:
+    """Determine the project's architectural type.
+
+    Uses the ingester's classification first; falls back to keyword
+    matching on the user's project description.
+    """
+    # Prefer ingester classification
+    if ingestion_pattern and ingestion_pattern != "general":
+        return ingestion_pattern
+
+    if not project_description:
+        return "general"
+
+    desc_lower = project_description.lower()
+    for arch_type, keywords in _ARCH_KEYWORDS.items():
+        for kw in keywords:
+            if kw in desc_lower:
+                return arch_type
+
+    return "general"
+
 # Guarded ML imports — fall back to corpus lookup when unavailable.
 try:
     import joblib
@@ -260,6 +318,8 @@ class PredictionResult:
     predictions: list[PredictionItem] = field(default_factory=list)
     total_similar_projects: int = 0
     matching_deps: list[str] = field(default_factory=list)
+    architectural_type: str = ""
+    arch_filtered: bool = False
 
 
 def _load_corpus(corpus_path: Optional[str] = None) -> list[dict]:
@@ -291,11 +351,13 @@ def predict_issues(
     corpus_path: Optional[str] = None,
     constraints: Optional[OperationalConstraints] = None,
     ingestion=None,
+    architectural_pattern: Optional[str] = None,
 ) -> PredictionResult:
     """Predict likely failure patterns for a project.
 
     Uses a trained XGBoost model when available, falls back to corpus
-    pattern lookup otherwise.
+    pattern lookup otherwise.  When *architectural_pattern* is available,
+    filters predictions to patterns relevant to that architecture type.
 
     Args:
         dependency_names: List of dependency names from ingestion.
@@ -303,18 +365,28 @@ def predict_issues(
         constraints: User's operational constraints for scale-relative
             framing.
         ingestion: Optional IngestionResult for project complexity features.
-            Improves model accuracy when available.
+        architectural_pattern: Project architecture (e.g. ``"dashboard"``,
+            ``"api_service"``).  Used to filter predictions.
 
     Returns:
         PredictionResult with top predictions and metadata.
     """
+    # Resolve architectural type
+    desc = (
+        constraints.project_description
+        if constraints and constraints.project_description else None
+    )
+    arch_type = infer_architectural_type(architectural_pattern, desc)
+
     # Try model-based prediction first
     model, metadata = _load_model()
     if model is not None and metadata is not None:
         try:
-            return _predict_with_model(
+            result = _predict_with_model(
                 model, metadata, dependency_names, constraints, ingestion,
             )
+            result.architectural_type = arch_type
+            return result
         except Exception as exc:
             logger.warning("Model prediction failed, falling back to corpus: %s", exc)
 
@@ -326,6 +398,17 @@ def predict_issues(
     dep_set = {d.lower() for d in dependency_names}
     if not dep_set:
         return PredictionResult()
+
+    # Architecture filter: prefer patterns seen in this arch type
+    arch_filtered = False
+    if arch_type and arch_type != "general":
+        arch_patterns = [
+            p for p in patterns
+            if arch_type in p.get("verticals", [])
+        ]
+        if len(arch_patterns) >= 20:
+            patterns = arch_patterns
+            arch_filtered = True
 
     # Score each pattern by dependency overlap × confirmed_count
     scored: list[tuple[float, dict, list[str]]] = []
@@ -345,7 +428,6 @@ def predict_issues(
         if len(overlap) < _MIN_DEP_OVERLAP:
             continue
 
-        # Score: overlap count × log-ish of confirmed count
         score = len(overlap) * confirmed
         matched_deps = sorted(overlap)
         scored.append((score, pattern, matched_deps))
@@ -354,26 +436,18 @@ def predict_issues(
     if not scored:
         return PredictionResult()
 
-    # Sort by score descending, take top N
     scored.sort(key=lambda x: x[0], reverse=True)
     top = scored[:_MAX_PREDICTIONS]
 
-    # Compute total similar projects (sum of confirmed across all matching)
     total_similar = sum(p.get("confirmed_count", 0) for _, p, _ in scored)
-
-    # Build all matching deps (union)
     all_matching = sorted({d for _, _, deps in scored for d in deps})
 
-    # Build prediction items
     predictions: list[PredictionItem] = []
     for _score, pattern, matched_deps in top:
         confirmed = pattern.get("confirmed_count", 0)
         severity_dist = pattern.get("severity_distribution", {})
         severity = _dominant_severity(severity_dist)
-
-        # Probability: what fraction of total matching patterns is this one
         prob_pct = (confirmed / total_similar * 100) if total_similar > 0 else 0
-
         scale_note = _build_scale_note(constraints)
 
         predictions.append(PredictionItem(
@@ -389,6 +463,8 @@ def predict_issues(
         predictions=predictions,
         total_similar_projects=total_similar,
         matching_deps=all_matching,
+        architectural_type=arch_type,
+        arch_filtered=arch_filtered,
     )
 
 

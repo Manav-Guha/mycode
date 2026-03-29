@@ -179,6 +179,7 @@ class DiagnosticReport:
     total_errors: int = 0
     operational_context: str = ""
     project_description: str = ""
+    user_project_description: str = ""
     confidence_note: str = ""
     vertical: str = ""
     architectural_pattern: str = ""
@@ -693,6 +694,7 @@ class DiagnosticReport:
             "summary": self.summary,
             "plain_summary": self.plain_summary,
             "project_description": self.project_description,
+            "user_project_description": self.user_project_description,
             "confidence_note": self.confidence_note,
             "data_type_note": self._data_type_note,
             "statistics": {
@@ -1058,6 +1060,14 @@ class ReportGenerator:
             vertical=report.vertical,
             architectural_pattern=report.architectural_pattern,
         )
+
+        # 0b2. Prefer user's stated description when available
+        if (constraints is not None
+                and constraints.project_description
+                and constraints.project_description.strip()):
+            report.user_project_description = (
+                constraints.project_description.strip()
+            )
 
         # 0c. Build confidence note from incomplete tests
         report.confidence_note = _build_confidence_note(

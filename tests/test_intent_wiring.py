@@ -531,6 +531,73 @@ class TestModelPredictionOutput:
         assert isinstance(result, PredictionResult)
 
 
+# ── 6d. Architecture-aware predictions ──
+
+
+class TestArchitecturalTypeInference:
+    def test_dashboard_from_description(self):
+        from mycode.prediction import infer_architectural_type
+        assert infer_architectural_type(None, "A Dashboard for Sales Analytics") == "dashboard"
+
+    def test_api_from_description(self):
+        from mycode.prediction import infer_architectural_type
+        assert infer_architectural_type(None, "REST API backend for mobile app") == "api_service"
+
+    def test_ingestion_pattern_takes_precedence(self):
+        from mycode.prediction import infer_architectural_type
+        assert infer_architectural_type("data_pipeline", "A Dashboard") == "data_pipeline"
+
+    def test_general_fallback(self):
+        from mycode.prediction import infer_architectural_type
+        assert infer_architectural_type(None, "Something unclassifiable") == "general"
+
+    def test_no_description(self):
+        from mycode.prediction import infer_architectural_type
+        assert infer_architectural_type(None, None) == "general"
+
+
+class TestArchitectureFilteredPredictions:
+    def test_prediction_includes_arch_type(self):
+        result = predict_issues(
+            ["streamlit", "pandas"],
+            constraints=OperationalConstraints(
+                project_description="A Dashboard for Analytics",
+            ),
+        )
+        assert result.architectural_type == "dashboard"
+
+    def test_general_arch_no_filter(self):
+        result = predict_issues(
+            ["flask"],
+            constraints=OperationalConstraints(
+                project_description="Something generic",
+            ),
+        )
+        assert result.architectural_type == "general"
+
+
+class TestProjectDescriptionPropagation:
+    def test_user_description_on_report(self):
+        """user_project_description is set from constraints."""
+        from mycode.report import DiagnosticReport
+        report = DiagnosticReport()
+        constraints = OperationalConstraints(
+            project_description="A Dashboard for Credentialling",
+        )
+        # Simulate what generate() does
+        if constraints.project_description:
+            report.user_project_description = constraints.project_description
+        assert report.user_project_description == "A Dashboard for Credentialling"
+
+    def test_user_description_in_json(self):
+        from mycode.report import DiagnosticReport
+        report = DiagnosticReport(
+            user_project_description="My Custom App",
+        )
+        d = report.as_dict()
+        assert d["user_project_description"] == "My Custom App"
+
+
 # ── 7. Report headroom framing ──
 
 

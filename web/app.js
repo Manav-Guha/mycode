@@ -242,11 +242,40 @@ function _selectedPill(name) {
     return el ? el.value : "";
 }
 
+const _perUserItems = {small: 50, medium: 500, large: 5000};
+const _maxTotalItems = {small: 1000, medium: 100000, large: 1000000};
+
+function _validateDataInputs() {
+    // Warn (don't block) when per_user × users > max_total
+    const warn = $("data-validation-warning");
+    if (warn) warn.classList.add("hidden");
+
+    const perUser = ($("q-per-user-data") || {}).value || "";
+    const maxTotal = ($("q-max-total-data") || {}).value || "";
+    const users = parseInt(($("q-current-users") || {}).value) || 0;
+    if (!perUser || !maxTotal || !users) return true;
+
+    const puItems = _perUserItems[perUser];
+    const mtItems = _maxTotalItems[maxTotal];
+    if (!puItems || !mtItems) return true;
+
+    const projected = puItems * users;
+    if (projected > mtItems) {
+        if (warn) {
+            warn.textContent = `Your per-user data volume (${puItems.toLocaleString()} items \u00d7 ${users} users = ${projected.toLocaleString()} items) exceeds your stated maximum total data (~${mtItems.toLocaleString()} items). Please check these values.`;
+            warn.classList.remove("hidden");
+        }
+    }
+    return true;
+}
+
 async function submitIntentForm() {
     if (!currentJobId) {
         alert("No active job. Please submit a project first.");
         return;
     }
+    _validateDataInputs();
+
     const btn = $("run-btn");
     btn.disabled = true;
     btn.textContent = "Starting...";
@@ -298,7 +327,16 @@ async function fetchPredictions() {
 
 function renderPredictions(data) {
     const el = $("prediction-content");
-    let html = `<div class="prediction-header">Based on <strong>${data.total_similar_projects}</strong> projects with similar technology stack (${escapeHtml(data.matching_deps.slice(0, 5).join(", "))}):</div>`;
+    const archType = data.architectural_type || "";
+    const archLabel = archType && archType !== "general" ? archType.replace(/_/g, " ") + " " : "";
+    const deps = data.matching_deps.slice(0, 5).join(", ");
+    const qualifier = archLabel
+        ? `Based on <strong>${data.total_similar_projects}</strong> ${escapeHtml(archLabel)}projects using ${escapeHtml(deps)}:`
+        : `Based on <strong>${data.total_similar_projects}</strong> projects with similar technology stack (${escapeHtml(deps)}):`;
+    const limitNote = (archType && archType !== "general" && !data.arch_filtered)
+        ? ` <span class="pred-note-inline">(limited ${escapeHtml(archLabel)}data available)</span>`
+        : "";
+    let html = `<div class="prediction-header">${qualifier}${limitNote}</div>`;
     html += '<div class="prediction-list">';
     for (const p of data.predictions) {
         const sevClass = p.severity === "critical" ? "pred-critical" : p.severity === "warning" ? "pred-warning" : "pred-info";
@@ -461,6 +499,11 @@ function renderReport(report, summary, understandingMd, fixesMd, edition, hasPdf
     content.dataset.edition = edition || "0";
     content.dataset.hasPdf = hasPdf ? "true" : "";
     let html = "";
+
+    // Project description (from user form input)
+    if (report.user_project_description) {
+        html += `<div class="report-project-desc">${escapeHtml(report.user_project_description)}</div>`;
+    }
 
     // Stats
     const incompleteCount = summary.scenarios_incomplete || 0;

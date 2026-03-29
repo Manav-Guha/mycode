@@ -1037,11 +1037,11 @@ def generate_finding_prompt(f: Finding) -> str:
 
 _FIX_OBJECTIVES: dict[str, str] = {
     "memory_profiling": (
-        "eliminate unbounded memory growth so the function stays "
-        "within safe limits under repeated calls."
+        "eliminate unbounded memory growth so the application stays "
+        "within safe limits under repeated use."
     ),
     "concurrent_execution": (
-        "ensure thread safety so the function behaves correctly "
+        "ensure thread safety so the application behaves correctly "
         "under concurrent access."
     ),
     "data_volume_scaling": (
@@ -1071,7 +1071,7 @@ def _fix_objective(f: Finding) -> str:
     """Return a one-sentence fix goal based on the finding's category."""
     return _FIX_OBJECTIVES.get(
         f.category,
-        "resolve the issue described above so the function behaves "
+        "resolve the issue described above so the application behaves "
         "correctly under the tested conditions.",
     )
 
@@ -1301,7 +1301,7 @@ def _pat_requests_concurrent(f, framework, fields):
 def _pat_data_volume(f, framework, fields):
     if f.category == "data_volume_scaling":
         return (
-            "Your function's execution time grows with input size. At "
+            "Your application's processing time grows with input size. At "
             "large inputs, this becomes the bottleneck.",
             "Use chunked or streaming processing instead of loading all "
             "data into memory, add pagination for large result sets, and "
@@ -1337,7 +1337,7 @@ def _build_fix(f: Finding) -> str:
         return match[1]
     return _FIX_OBJECTIVES.get(
         f.category,
-        "resolve the issue described above so the function behaves "
+        "resolve the issue described above so the application behaves "
         "correctly under the tested conditions.",
     )
 
@@ -1640,8 +1640,10 @@ def _make_pdf_class():
                 n_lines = max(1, -(-len(safe) // chars_per_line))
                 box_h = n_lines * line_h + 2 * pad
 
-                # Widow/orphan: need heading + at least 25mm of content
-                min_after = box_h + 25
+                # Widow/orphan: need heading + at least 80mm of content
+                # so the first finding's title + "What we found" stays
+                # with the section header.
+                min_after = box_h + 80
                 remaining = self.h - self.get_y() - 20
                 if remaining < min_after:
                     self.add_page()
@@ -1831,7 +1833,12 @@ def _render_predictive_analysis_pdf(pdf, predictions: dict) -> None:
     deps_str = ", ".join(deps[:8])
     if len(deps) > 8:
         deps_str += "..."
-    intro = f"Based on {total} projects with similar technology stack ({deps_str}):"
+    arch_type = predictions.get("architectural_type", "")
+    arch_label = (
+        arch_type.replace("_", " ") + " "
+        if arch_type and arch_type != "general" else ""
+    )
+    intro = f"Based on {total} {arch_label}projects using {deps_str}:"
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(*_BODY)
     pdf.multi_cell(0, 4.5, _safe_text(intro))
@@ -1906,12 +1913,16 @@ def render_understanding_pdf(
     pdf.add_page()
 
     # ── Cover-page header block ──
-    # Project name (large, bold, brand)
-    if project_name:
-        pdf.set_font("Helvetica", "B", 18)
-        pdf.set_text_color(*_BRAND)
-        pdf.multi_cell(0, 8, _safe_text(project_name))
-        pdf.ln(1)
+    # Use user's description if available, fall back to project name
+    display_title = (
+        report.user_project_description
+        or project_name
+        or "Your Project"
+    )
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_text_color(*_BRAND)
+    pdf.multi_cell(0, 8, _safe_text(display_title))
+    pdf.ln(1)
 
     # Date and edition in subtle text
     pdf.set_font("Helvetica", "", 9)
@@ -1949,6 +1960,11 @@ def render_understanding_pdf(
     # ── Assessment Context section ──
     if constraints is not None:
         pdf.body_label("Assessment Context")
+        # Project type from user description
+        if report.user_project_description:
+            pdf.bullet(
+                f"Project type: {report.user_project_description}"
+            )
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(*_BODY)
         pdf.multi_cell(0, 4.5, "Results assessed relative to:")

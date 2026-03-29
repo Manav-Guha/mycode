@@ -563,14 +563,19 @@ def handle_report(job_id: str) -> ReportResponse:
                 try:
                     from mycode.prediction import predict_issues
                     dep_names = [d.name for d in job.ingestion.dependencies]
+                    arch = getattr(
+                        job.result.report, "architectural_pattern", None,
+                    )
                     pred_result = predict_issues(
                         dep_names, constraints=job.constraints,
                         ingestion=job.ingestion,
+                        architectural_pattern=arch,
                     )
                     if pred_result.predictions:
                         pdf_predictions = {
                             "total_similar_projects": pred_result.total_similar_projects,
                             "matching_deps": pred_result.matching_deps,
+                            "architectural_type": pred_result.architectural_type,
                             "predictions": [
                                 {
                                     "title": p.title,
@@ -721,15 +726,22 @@ def handle_predict(job_id: str) -> dict:
         return {"error": "No ingestion data — run preflight first."}
 
     dep_names = [d.name for d in job.ingestion.dependencies]
+    # Resolve architectural pattern from job result or constraints
+    arch_pattern = None
+    if hasattr(job, "result") and job.result and hasattr(job.result, "report"):
+        arch_pattern = getattr(job.result.report, "architectural_pattern", None)
     result = predict_issues(
         dependency_names=dep_names,
         constraints=job.constraints,
         ingestion=job.ingestion,
+        architectural_pattern=arch_pattern,
     )
 
     return {
         "total_similar_projects": result.total_similar_projects,
         "matching_deps": result.matching_deps,
+        "architectural_type": result.architectural_type,
+        "arch_filtered": result.arch_filtered,
         "predictions": [
             {
                 "title": p.title,

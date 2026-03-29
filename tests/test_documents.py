@@ -1834,7 +1834,7 @@ class TestBuildRemediation:
             affected_dependencies=["pandas"],
         )
         diagnosis = _build_diagnosis(f)
-        assert "execution time grows" in diagnosis
+        assert "processing time grows" in diagnosis
         fix = _build_fix(f)
         assert "chunked" in fix or "streaming" in fix
         assert "pagination" in fix

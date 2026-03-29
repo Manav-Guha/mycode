@@ -112,6 +112,14 @@ def _extract_project_features(report: dict) -> dict:
     lang = proj.get("language", "python").lower()
     features["language"] = 1 if lang == "javascript" else 0
 
+    # Architectural pattern (one-hot encoded for future retraining)
+    arch = report.get("architectural_pattern", "general") or "general"
+    for arch_name in (
+        "dashboard", "api_service", "data_pipeline",
+        "cli_tool", "chatbot", "web_app", "ml_model", "general",
+    ):
+        features[f"arch_{arch_name}"] = 1 if arch == arch_name else 0
+
     return features
 
 

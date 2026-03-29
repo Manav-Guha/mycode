@@ -965,6 +965,29 @@ footer {
     font-weight: 600;
 }
 
+/* ── Report Project Description ── */
+
+.report-project-desc {
+    font-size: 1rem;
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-bottom: 0.6rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* ── Data Validation Warning ── */
+
+.data-warning {
+    background: rgba(210, 153, 34, 0.15);
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    margin-bottom: 0.6rem;
+}
+
 /* ── Prediction Box ── */
 
 #prediction-section {
