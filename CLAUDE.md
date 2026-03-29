@@ -1,223 +1,226 @@
-# myCode — Architectural Constraints & Product Boundaries (CLAUDE.md)
-# Version: 3.5 — March 22, 2026
-# This file contains ONLY what cannot be discovered from source code.
-# Read source files directly for implementation details.
-# Do not override architectural decisions without explicit human approval.
-
----
-
-## Build Principle
-
-myCode is not a finished product, but a sophisticated and intelligent rendition of a critical and growing problem. Do not defer obvious capability. If the data exists to make a classification, make it. If the logic is straightforward, build it. The distinction from feature creep: feature creep adds scope; this principle says execute defined scope to its intelligent conclusion.
-
----
-
-## Session Protocol
-
-1. Read MEMORY.md first
-2. Read the latest session record in project knowledge
-3. Check filesystem state before planning — do not infer from conversation history
-4. Do not add functionality, abstractions, or interfaces beyond what is explicitly tasked
-5. If a task requires supporting changes, list them before implementing
-6. Maintain the passing test baseline (currently 2,152+ passing, 5 skipped, 0 failures)
+# myCode — Product Specification (CLAUDE.md)
+# Version: 3.5 — March 26, 2026
+# This is the authoritative build specification. Do not override architectural decisions without explicit human approval.
+# Current state (test counts, corpus numbers, infrastructure, completed tracks) is in MEMORY.md. Read BOTH at session start.
 
 ---
 
 ## Parent Company
-
 Machine Adjacent Systems (MAS)
-Incorporation: ADGM (Abu Dhabi Global Market)
+Incorporation: ADGM (Abu Dhabi Global Market).
 
-## Product Position
+## Product Position within MAS
+myCode is MAS's first product. MAS builds verification and analysis infrastructure for AI-generated software. myCode leads, MIAF is product 2. Funding is led by MAS (dual-product portfolio), not myCode alone.
 
-myCode is MAS's consumer-facing product. It verifies AI-generated code behaviour under real operational conditions. Take human intent, generate adversarial conditions, report the gap between intent and reality.
-
-**Tagline:** "Built it with AI? Test it before it breaks."
-
----
-
-## Architectural Decisions — Do Not Override
-
-1. ALL tests run inside a temporary sandbox (venv/node_modules). User's host environment is NEVER at risk.
-2. User's original files are NEVER touched. Working copy created by Session Manager.
-3. myCode NEVER generates code patches or modifies user code.
-4. v1 supports Python AND JavaScript/Node.js.
-5. CLI mode is LOCAL projects ONLY. Web interface accepts GitHub URLs (clone + test). HTTP-level stress testing for web frameworks is the current top priority.
-6. The conversational interface is LLM-mediated — user speaks domain language, not engineering language.
-7. Stress scenarios derived from intersection of user intent + parsed codebase + component library.
-8. User calibrates stress parameters in their own terms.
-9. Component library profiles are LLM-generated then human-reviewed.
-10. Interaction data recorded ONLY with explicit consent, anonymised.
-11. The report diagnoses — it does NOT prescribe. No fix suggestions. No patches.
-12. Liability stays with the user at every point.
-13. LLM calls confined to THREE components only: Conversational Interface, Scenario Generator, Report Generator. All others are deterministic.
-14. Human remains in directional role. AI executes and reports, does not steer.
-15. Free tier is anonymous — no registration, no account, no email.
-16. Cleanup runs ALWAYS — on success, failure, or interrupt.
-17. Ingester checks dependency versions against latest stable, flags discrepancies.
-18. Scenario generator tests dependency interaction chains as systems, not individual components.
+## Tagline
+"Built it with AI? Test it before it breaks."
 
 ---
 
-## LLM Backend Configuration
+## What myCode Is
+A stress-testing tool that lets non-engineer builders verify their AI-generated code before deployment. The user points myCode at their project, describes what it does and how they intend to use it in a conversational exchange (domain language, not engineering language), and receives a plain-language degradation report showing where and how their code breaks under realistic future conditions.
 
-### Free Tier:
-- Default (no key): Gemini Flash via MAS proxy (zero config)
-- BYOK: User sets API key in config → myCode calls API directly
-- Auto-detection: check for local key at launch. Found → direct. Not found → MAS proxy.
-- Three free LLM-powered reports included before falling back to offline-only (implementation pending)
-- **DeepSeek is NOT an option. Do not add DeepSeek references anywhere.**
-
-### Freemium Tier (post-funding):
-- Claude via MAS backend, metered via Stripe token billing
-- Token usage logged per user
-
-### Model Selection:
-- Free: Gemini Flash
-- Freemium: Claude Sonnet (Opus for complex Scenario Generator calls)
-- Enterprise: Claude Opus
+## What myCode Is NOT
+- Not a linter, code reviewer, or static analysis tool
+- Not a security scanner (v1) — passive security assessment added in freemium tier
+- Not a code generator or patch creator — myCode NEVER modifies user code
+- Not a replacement for the user's coding tool — it complements Claude Code, Cursor, ChatGPT, Copilot
+- Not a guarantee of code quality — diagnostic tool only, liability stays with user
 
 ---
 
 ## Three-Tier Product Architecture
 
 ### FREE TIER
-- Distribution: GitHub (open source), pip install, community channels
-- Registration: None required
-- Languages: Python AND JavaScript/Node.js
-- Scope: Local projects only
-- Features: Full stress testing, conversational interface, diagnostic report, component library
-- Data: Interaction recorder with explicit consent, anonymised
+- **Distribution:** GitHub (open source), pip install, community channels
+- **LLM Backend:** Gemini Flash via MAS proxy (anonymous, zero config, default) OR bring-your-own-key (any OpenAI-compatible endpoint including Gemini, Claude, local Ollama)
+- **Registration:** None required. No account, no email, no payment.
+- **Languages:** Python AND JavaScript/Node.js
+- **Scope:** Local projects only. No remote repo integration. No API stress testing.
+- **Features:** Full stress testing across all five categories, conversational interface, diagnostic report, component library (stock profiles)
+- **Data:** Interaction recorder with explicit consent, anonymized, feeds component library improvement
+- **Cost to MAS:** Gemini Flash API cost absorbed, negligible at early volumes
+- **Rate limiting:** Hashed machine ID to prevent abuse, no auth system
+- **NOTE:** DeepSeek is PERMANENTLY PROHIBITED from any myCode architecture, plan, or document. Do not suggest it under any circumstances.
 
-### FREEMIUM TIER (post-funding)
-- Account required. Stripe via ADGM.
-- Claude-powered scenario generation and reporting
-- Passive security assessment layer
-- GitHub Action integration
-- "myCode tested" badge
-- External API stress testing
-- Docker containerisation option
+### FREEMIUM TIER
+- **Distribution:** Account required. Stripe via ADGM.
+- **LLM Backend:** TBD — quality testing required across Gemini 2.5 Pro, GPT-5, Claude Sonnet. BYOK dual-pricing structure.
+- **Pricing:** Monthly subscription with included runs + per-run overage. Exact pricing set post-build using real token consumption data.
+- **Languages:** Python AND JavaScript/Node.js
+- **Additions over free tier:**
+  - Premium LLM-powered scenario generation and reporting (quality gate — same tool, better brain)
+  - Passive security assessment layer (flags vulnerabilities, does NOT attack)
+  - Richer diagnostic explanations (plain language fix categories, still no patches)
+  - Structured config input alongside conversational interface
+  - GitHub Action integration (stress test on push/PR)
+  - "myCode tested" badge for repo READMEs
+  - External API stress testing (real API calls under controlled escalating conditions)
+  - Shared component library access (contribute data, get enriched library)
+  - Docker containerization option for stronger isolation
 
-### ENTERPRISE TIER (post-funding)
-- Organisational accounts. Custom pricing. Sales-led.
-- Web interface (browser-based, no CLI required)
-- Aggregate risk profiles across repos (CISO/CTO dashboard)
-- Team management with role-based access
-- Custom component library profiles
-- Compliance and audit reporting
-
----
-
-## Report Output Requirements
-
-The report must:
-- Answer "so what?" for every finding — consequences, not just facts
-- Use user's constraint context: "you said 20 users, the app fails at 15" (critical) vs "the app fails at 200 users" (informational)
-- Include confidence indicators per finding — note when sandbox limitations may affect accuracy
-- Frame unrecognised dependencies positively: "tested 7/9 with targeted scenarios, 2 with usage-based analysis"
-- Not parrot user input strings as project descriptions — interpret and summarise
-- Distinguish environment errors (incomplete_tests) from project failures
-- Not prescribe fixes
-
----
-
-## Library Taxonomy & Classification
-
-The component library uses a formal failure taxonomy defined in `myCode-Library-Taxonomy-Schema-v1.md` (project knowledge). Key points for CC:
-
-- **8 failure domains:** Resource exhaustion, Concurrency failure, Scaling collapse, Input handling failure, Dependency failure, Integration failure, Configuration and environment failure, Unclassified
-- **Every library entry must be classified** against this taxonomy on ingestion — not deferred
-- **Auto-classifiers required:** vertical (from dependency + structure), architectural_pattern (from framework + files), failure_domain and failure_pattern (from scenario + error type), operational_trigger (from scenario category)
-- **Unclassified entries** trigger automatic review at 3+ similar entries; human confirms promotion
-- **The library is the moat.** The LLM is interchangeable. The library is not. Every design decision about the library is a decision about competitive durability.
+### ENTERPRISE TIER
+- **Distribution:** Organizational accounts. Custom pricing. Sales-led. Annual contracts.
+- **LLM Backend:** Unmetered premium LLM. Dedicated MAS infrastructure.
+- **Additions over freemium:**
+  - Aggregate risk profiles across organizational repos (CISO/CTO dashboard)
+  - Web interface (browser-based, no CLI required)
+  - Team management with role-based access
+  - Custom component library profiles (organization-specific dependencies)
+  - Compliance and audit reporting
+  - Orchestra integration (v3 roadmap — surfaces what the project could become)
+  - Server-side execution in MAS-controlled containers (maximum isolation)
+  - Priority support and SLA
 
 ---
 
-## Tiered Compute Model (Web Interface)
+## V1 Build Scope (Free Tier)
 
-Progressive disclosure — each tier creates demand for the next:
+### Eight Core Components
 
-- **Tier 1 (≤30s):** Static analysis + library pattern matching. No tests executed. Always free.
-- **Tier 2 (3-7 min):** 8-12 targeted stress tests on highest-risk patterns from Tier 1. Three free, then BYOK/subscription.
-- **Tier 3 (15-30 min):** Full scenario suite. Async delivery ("we'll notify you"). Freemium/enterprise.
+#### 1. Session Manager
+- Creates temporary virtual environment (venv) replicating the user's environment
+- Reads user's Python version, installed packages, environment variables, dependency versions
+- Creates venv, installs same dependencies, copies project working copy into venv workspace
+- ALL stress tests run inside this venv with resource caps (memory ceiling, process limits, timeouts)
+- Destroys venv and all temporary files on completion (including on crash, interrupt, or Ctrl+C)
+- Signal handlers for interrupt signals
+- Startup check that cleans orphaned temp environments from previous incomplete runs
+- For JavaScript: equivalent isolation using temporary node_modules and sandboxed execution
+- User's original files are NEVER touched
+- User's host environment is NEVER at risk
 
----
+#### 2. Project Ingester
+- AST parsing for Python (Python ast module). JavaScript uses regex-based extraction (12+ patterns — weaker than Python path, known weakness)
+- Dependency extraction from requirements.txt, package.json, package-lock.json
+- Full dependency tree resolution (transitive dependencies, not just declared ones)
+- Function flow mapping — how data and control flow between components
+- Coupling point identification — where one component's failure cascades into another
+- Version detection — reads installed versions, checks against latest stable via PyPI/npm registry
+- Flags version discrepancies in report
+- Handles partial parsing gracefully — "analyzed 12 of 15 files, 3 couldn't be parsed, here's why"
+- Deterministic Python/JS code. No LLM dependency.
 
-## Current Priorities (as of March 18, 2026)
+#### 3. Component Library
+- Pre-built profiles for common vibe coding dependencies
+- Each profile contains: identity, scaling characteristics, memory behavior, known failure modes, edge case sensitivities, interaction patterns, stress test templates
+- Profiles are version-aware — document current stable version characteristics, flag when user's version differs
 
-### Completed (do not re-implement):
-- ~~Report quality rework~~ — DONE (Session 11)
-- ~~Harness syntax validation~~ — DONE (Session 11)
-- ~~Three free LLM reports~~ — DONE (Session 11)
-- ~~Docker containerisation~~ — DONE (Session 12)
-- ~~Library taxonomy classifiers~~ — DONE (Session 13, 5 auto-classifiers)
-- ~~L5 corpus migration~~ — DONE (Session 13, 171 reports → 2,157 entries)
-- ~~Web interface~~ — DONE (Session 15, Vercel frontend + Railway backend, 5 endpoints)
-- ~~Track A: JS/TS project support~~ — DONE (Session 22, 7 fixes A–G)
-- ~~Track B: Node.js callable harness~~ — DONE (Session 23, B1–B4)
-- ~~Corpus aggregator~~ — DONE (Session 23, --xlsx and --reclassify flags)
-- ~~business_domain classifier~~ — DONE (Session 24, commit 4c7294b)
-- ~~Lovable corpus mining~~ — DONE (Session 23, 500 repos from GPT-Engineer-App org)
-- ~~HTTP-level stress testing~~ — DONE (Session 19, confirmed Session 24). Server lifecycle, endpoint discovery, request generation, load driving all working. 232 tests passing.
-- ~~Analysis depth selector~~ — DONE (Session 25). Replaces raw timeout question with quick/standard/deep choice. Maps to time budget, coupling cap, priority filtering.
-- ~~Per-scenario time budgets~~ — DONE (Session 25). Total timeout distributed by priority weight (high=2x, medium=1x, low=0.5x). Hard wall-clock deadline. budget_exceeded failure reason.
-- ~~Web UI two-column layout~~ — DONE (Session 25). URL input top, questions left (40%, sticky), results right (60%). Responsive collapse at 768px.
-- ~~Performance table + SVG charts in web~~ — DONE (Session 25). Fixed degradation_curves JSON key, finding-aware verdicts, inline SVG charts with hover tooltips.
-- ~~Verdict logic parity~~ — DONE (Session 25). JS _findingSeverityForDp matches Python exactly (fallbackBest, Rule 4 metric compatibility).
-- ~~Pip install timeout cap~~ — DONE (Session 25). 120s overall budget prevents native compilation hangs.
+**Python profiles (18 files, 41 dependencies):**
+1. Flask
+2. FastAPI
+3. Streamlit
+4. Gradio
+5. Pandas
+6. NumPy
+7. SQLite3
+8. SQLAlchemy
+9. Supabase Python SDK
+10. LangChain
+11. LlamaIndex
+12. ChromaDB
+13. OpenAI SDK
+14. Anthropic SDK
+15. requests
+16. httpx
+17. Pydantic
+18. os/pathlib
 
-### Critical Path (blocks HN launch):
-1. Corpus rerun post-fix — subset of 50-100 repos to validate updated failure rates
-2. Capstone demo (Track E) — undeniable proof-of-capability for HN and Hub71
+**JavaScript/Node.js profiles (23 files):**
+1. React
+2. Next.js
+3. Express
+4. Node.js core (fs, path, http)
+5. Tailwind CSS
+6. Three.js
+7. Svelte
+8. OpenAI Node SDK
+9. Anthropic Node SDK
+10. LangChain.js
+11. Supabase JS SDK
+12. Prisma
+13. Axios/fetch
+14. Mongoose/MongoDB driver
+15. Stripe SDK
+16. dotenv
+17. Zod
+18. Socket.io
+19. Vue.js
+20. Angular
+21. D3.js
+22. Chart.js
+23. Puppeteer
 
-### Should Do Before HN:
-- L5 repo reclassification (110 unclassified repos)
-- FAQ.md generation
-- Warning description quality improvement
+**Profile generation and enrichment:**
+- Source 1 (launch): LLM-generated from official documentation, known issues, Stack Overflow failure reports. Human-reviewed and corrected.
+- Source 2 (pre-launch): Corpus mining — run myCode against public GitHub vibe-coded repos to discover real failure patterns and refine profiles. Profiles enriched with corpus_confirmed counts.
+- Source 3 (post-launch): Interaction recorder anonymized data continuously enriches profiles.
 
-### Post-HN:
-- Track C: Intelligent corpus pipeline (scikit-learn clustering, automated profile generation)
-- Track D: Adversarial multi-LLM evaluation
-- Constraint extraction wiring (E1–E4) — top priority for Hub71 investor credibility
-- Automated failure mining pipeline
-- Reliability report v1
+**Unrecognized dependency handling:**
+- Flag as untested in report
+- Attempt generic stress testing based on ingester analysis of how the code uses it
+- Log as candidate for future profile development
 
-### Secondary (after beta):
-- Library expansion (scikit-learn, matplotlib, joblib, pillow profiles)
-- Historical comparison / regression mode
-- Freemium tier implementation (Stripe token billing)
-- GitHub Action integration
+#### 4. Conversational Interface
+- LLM-mediated (Gemini Flash for free tier, premium LLM for freemium/enterprise)
+- User describes in plain language: what the project does, who it's for, what conditions it operates under
+- 3-5 minute exchange to extract operational intent
+- User speaks in domain language, not engineering language
+- User calibrates stress parameters in their own terms
+- Presents generated stress scenarios for user review before execution
+- User approves, calibrates, or adjusts before tests run
 
----
+#### 5. Scenario Generator
+- Core LLM layer. Takes ingester output + component library matches + operational intent.
+- Tests dependency interaction chains as systems, not individual components in isolation
+- Generates stress test configurations across categories:
 
-## Product Vision — Post-Funding Architecture
+**Shared (Python and JavaScript):**
+  1. Data volume scaling — progressively larger inputs
+  2. Memory profiling over time — repeated runs, track accumulation
+  3. Edge case input generation — malformed, empty, unexpected type data
+  4. Concurrent execution — multiple instances against shared resources
 
-### Discovery-Driven Decomposition (v2)
+**Python-specific:**
+  5. Blocking I/O under load
+  6. GIL contention
 
-1. **Runtime discovery** — run code in a container, observe actual behaviour, map functional units and interactions
-2. **Intelligent decomposition** — split into testable units along observed boundaries
-3. **Dependency and invocation simulation** — simulate interfaces so each unit thinks it's in the complete system
-4. **Static stress testing** — existing myCode categories against each unit independently
-5. **Aggregation** — combine findings, flag cross-unit interaction risks
+**JavaScript-specific:**
+  5. Async/promise chain failures under load
+  6. Event listener accumulation (memory leaks)
+  7. State management degradation in long-running apps
 
-This enables:
-- 100K+ LOC projects (never analyse whole codebase at once)
-- Layer 2: intent-behaviour divergence detection
-- General-purpose reliability testing beyond vibe coding (enterprise, legacy, migrations)
+- Sonnet 4.6 default model. Opus 4.6 available for complex multi-component dependency chains.
 
-### Layer 2: Intent-Behaviour Divergence Detection
+#### 6. Execution Engine
+- Runs user's actual code inside the Session Manager's venv/sandbox
+- Synthetic data generation based on scenario configurations
+- Resource monitoring: memory, CPU, timing, process count
+- Error capture: full traceback, error type, load level at failure
+- Resource caps enforced: memory ceiling, process limit, timeout
+- Controlled termination when caps exceeded — recorded as finding, not crash
+- Handles user code crashes gracefully — catches, records, continues to next test
+- Pure Python/Node.js. No LLM dependency.
 
-Compare runtime behaviour against user's stated intent. The gap is the divergence. This is "semantic conformance testing." The technical moat — requires solving runtime discovery, intelligent decomposition, and faithful interface simulation simultaneously.
+#### 7. Report Generator
+- LLM-powered (Gemini Flash for free tier, premium LLM for freemium/enterprise)
+- Takes raw execution data, produces plain-language diagnostic report
+- Two downloadable documents: Understanding Your Results (PDF via fpdf2) + JSON for Coding Agent
+- Per-finding prompts embedded in both documents
+- Degradation curves where relevant
+- Identifies breaking points in terms the user understands based on their stated intent
+- Flags version discrepancies found by ingester
+- Flags unrecognized dependencies
+- Reports dependency combination failures
+- Does NOT prescribe fixes. Does NOT generate patches. Diagnoses only.
 
----
-
-## Security — Open Source Repository
-
-- Sole merge authority (Manabrata only)
-- Every PR reviewed line by line
-- Branch protection: require review, signed commits, no force push to main
-- Pin all dependency versions. No version ranges. Hash verification.
-- MAS backend, Claude integration, freemium/enterprise logic NOT in public repo
+#### 8. Interaction Recorder
+- Explicit user consent required (opt-in, not opt-out)
+- Stores anonymized: conversation, test configuration, results, dependency combinations encountered
+- No personally identifiable information
+- Feeds component library improvement
+- Logs unrecognized dependencies for future profile development
+- Logs failure patterns for scenario generator improvement
 
 ---
 
@@ -225,19 +228,126 @@ Compare runtime behaviour against user's stated intent. The gap is the divergenc
 
 myCode NEVER shows raw errors to the user. Every failure is caught, translated into plain language, and either reported as a finding or reported as an operational issue with clear next steps.
 
+1. **User's code crashes during stress test** — Expected finding. Catch, record, continue to next test.
+2. **Venv creation fails** — Graceful message with explanation and fix steps.
+3. **Ingester can't parse project** — Partial analysis, explain what couldn't be parsed, proceed.
+4. **LLM API call fails** — Retry with backoff. Save work done so far even if report can't generate.
+5. **Execution engine exceeds resource caps** — Controlled termination. Recorded as finding.
+6. **myCode itself has a bug** — Cleanup routine runs regardless (finally block). Never leave environment worse.
+7. **User interrupts (Ctrl+C)** — Signal handlers trigger cleanup. Startup check cleans orphans.
+8. **Potentially malicious code detected** — Basic pre-execution scan, flag to user, proceed with restrictions.
+
+---
+
+## Security — Open Source Repository
+
+- Sole merge authority (Manav only)
+- Every PR reviewed line by line
+- Branch protection: require review, signed commits, no force push to main
+- Pin all dependency versions. No version ranges. Hash verification.
+- pip-audit / npm audit for vulnerability scanning
+- GitHub secret scanning and Dependabot alerts
+- Signed releases
+- MAS backend, premium LLM integration, freemium/enterprise logic NOT in public repo
+
+---
+
+## LLM API Architecture
+
+### Components that call LLM:
+- Conversational Interface (4) — YES
+- Scenario Generator (5) — YES
+- Report Generator (7) — YES
+- All others — NO
+
+### Free Tier Routing:
+- Default (no key): myCode → MAS proxy → Gemini Flash → return
+- BYOK: User sets API key in config → myCode calls API directly via any OpenAI-compatible endpoint
+- Auto-detection: check for local key at launch. Found → direct. Not found → MAS proxy.
+
+### Freemium/Enterprise Routing:
+- All calls through MAS backend → premium LLM API
+- Token usage logged per user for billing
+
+### Model Selection:
+- Free: Gemini Flash
+- Freemium: TBD (quality testing across Gemini 2.5 Pro, GPT-5, Claude Sonnet)
+- Enterprise: TBD (highest quality available)
+- Local SLMs via BYOK (Ollama etc.) are supported by the architecture but unsuitable for Scenario Generator — requires genuine reasoning capability
+
+### PROHIBITED:
+- DeepSeek is permanently excluded from all tiers, all plans, all documents. Do not reference or suggest.
+
+---
+
+## Key Architectural Decisions — Do Not Override
+
+1. myCode creates a temporary venv/sandbox replicating the user's environment. ALL tests run inside this sandbox. User's host environment is NEVER at risk.
+2. User's original files are NEVER touched. Working copy created by Session Manager.
+3. myCode NEVER generates code patches or modifies user code.
+4. v1 supports Python AND JavaScript/Node.js.
+5. v1 is LOCAL projects ONLY — no remote repo integration, no API stress testing.
+6. The conversational interface is LLM-mediated — user speaks domain language, not engineering language.
+7. Stress scenarios derived from intersection of user intent + parsed codebase + component library.
+8. User calibrates stress parameters in their own terms.
+9. Component library is LLM-generated then human-reviewed, enriched by corpus data.
+10. Interaction data recorded ONLY with explicit consent, anonymized.
+11. The report diagnoses — it does not prescribe.
+12. Liability stays with the user at every point.
+13. LLM calls confined to THREE components only. All others are pure Python/JS.
+14. Human remains in directional role. AI executes and reports, does not steer.
+15. Free tier is anonymous — no registration, no account, no email.
+16. Cleanup runs ALWAYS — on success, failure, or interrupt.
+17. Ingester checks dependency versions against latest stable, flags discrepancies.
+18. Scenario generator tests dependency interaction chains as systems, not individual components.
+19. Product integrity is non-negotiable — do not reduce stress parameters to fit infrastructure constraints.
+20. A stress-testing tool cannot skip its own tests — fix first, then commit.
+21. DeepSeek is permanently prohibited.
+22. Web interface is the product for target market. CLI is developer/power-user interface.
+
 ---
 
 ## Liability Disclaimer
-
 "myCode is a diagnostic tool. It does not guarantee code correctness, security, or fitness for purpose. All stress test results are informational. You are responsible for interpreting results and for all deployment decisions."
 
 ---
 
 ## Build Method
-
-- Builder: Manabrata + Claude Code
+- Builder: Manav + Claude Code
 - Languages: Python (tool + Python testing), JavaScript/Node.js (JS testing)
+- Version control: GitHub with local backups
 - Machine: MacBook Pro M4 Pro, 24GB RAM
-- PyPI: Published as `mycode-ai`, currently v0.1.2
-- Codebase: ~/Desktop/mycode/
-- LOC: 28,437 Python source lines, 41 profiles (18 Python + 23 JavaScript)
+- Claude Code: Opus 4.6 for development
+- Safety: git commit before unsupervised Claude Code sessions; Time Machine backup before starting
+
+---
+
+## Current Build State
+- Test baseline: 2,368 passing
+- E1-E4 constraint wiring: COMPLETE (commit 357c58c)
+- New module: prediction.py (corpus-backed prediction)
+- Web frontend: grouped intake form replacing sequential Q&A
+- New endpoints: /api/submit-intent, /api/predict
+- OperationalConstraints new fields: current_users, max_users, per_user_data, max_total_data, project_description
+
+## Test Running Instructions
+- Fast suite: `pytest tests/ --ignore=tests/test_integration.py --ignore=tests/test_session.py --ignore=tests/test_pipeline.py -k "not (TestPipelineIntegration or TestCLIExitCode)"`
+- Use `pytest -q --tb=short` to keep context window clean — only surface failures
+- Slow tests (integration/session/pipeline) require venv creation, ~10min
+
+---
+
+## Payment Infrastructure
+- Stripe via ADGM
+- Freemium tier only
+- Account creation at freemium boundary only
+- Token usage logged per user at MAS proxy
+- Pricing set post-build from real token consumption data
+
+---
+
+## License
+- Business Source License 1.1
+- Licensor: Manabrata Guha
+- Change License: Apache 2.0 after four years
+- No Additional Use Grant. All production use requires commercial license.
