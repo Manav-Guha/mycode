@@ -733,10 +733,14 @@ def handle_predict(job_id: str) -> dict:
         return {"error": "No ingestion data — run preflight first."}
 
     dep_names = [d.name for d in job.ingestion.dependencies]
-    # Resolve architectural pattern from job result or constraints
+    # Resolve architectural pattern — use the same classifier the report uses
     arch_pattern = None
     if hasattr(job, "result") and job.result and hasattr(job.result, "report"):
         arch_pattern = getattr(job.result.report, "architectural_pattern", None)
+    if not arch_pattern:
+        # Analysis hasn't run yet — classify from ingestion data directly
+        from mycode.classifiers import architectural_pattern_classifier
+        arch_pattern = architectural_pattern_classifier(dep_names)
     result = predict_issues(
         dependency_names=dep_names,
         constraints=job.constraints,

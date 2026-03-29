@@ -114,8 +114,9 @@ _ARCH_KEYWORDS: dict[str, list[str]] = {
         "platform", "marketplace",
     ],
     "ml_model": [
-        "model", "machine learning", "ml", "prediction",
-        "training", "inference", "classifier",
+        "machine learning", "ml model", "ml pipeline",
+        "training pipeline", "inference", "classifier",
+        "neural network",
     ],
 }
 
