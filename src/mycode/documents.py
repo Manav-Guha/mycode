@@ -1808,6 +1808,288 @@ def _extract_memory_capacity(text: str) -> str:
     return ""
 
 
+# ── Content helpers (pure logic, no PDF rendering) ──
+
+
+def _load_corpus_for_pdf() -> list[dict]:
+    """Load corpus patterns for PDF content sections.
+
+    Tries the same paths as prediction.py.  Returns empty list on failure.
+    """
+    from mycode.prediction import _CORPUS_PATHS
+    for p in _CORPUS_PATHS:
+        if p.exists():
+            try:
+                with open(p) as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+    return []
+
+
+def _build_executive_summary(
+    report: DiagnosticReport,
+    predictions: Optional[dict] = None,
+    constraints: Optional["OperationalConstraints"] = None,
+) -> str:
+    """Build a 2-3 sentence executive summary for the PDF header.
+
+    Uses report findings, scenario stats, and constraints to produce
+    a concise overview.
+    """
+    parts: list[str] = []
+
+    project_label = report.user_project_description or "project"
+    n_critical = sum(1 for f in report.findings if f.severity == "critical")
+    n_warning = sum(1 for f in report.findings if f.severity == "warning")
+
+    # Reliability statement
+    max_users = (
+        getattr(constraints, "max_users", None) if constraints else None
+    )
+    if max_users and n_critical == 0:
+        parts.append(
+            f"Your {project_label} handled stress testing up to "
+            f"{max_users:,} users with no priority issues identified."
+        )
+    elif max_users and n_critical > 0:
+        parts.append(
+            f"Your {project_label} was stress tested up to "
+            f"{max_users:,} users."
+        )
+    else:
+        parts.append(
+            f"myCode tested {report.scenarios_run} scenarios across "
+            f"{report.recognized_dep_count} dependencies."
+        )
+
+    # Findings count
+    if n_critical > 0:
+        top_title = next(
+            (f.title for f in report.findings if f.severity == "critical"),
+            "",
+        )
+        parts.append(
+            f"{n_critical} priority improvement"
+            f"{'s' if n_critical != 1 else ''} identified."
+        )
+        if top_title:
+            parts.append(f"Most critical: {top_title}.")
+    elif n_warning > 0:
+        parts.append(
+            f"No priority issues found. {n_warning} improvement "
+            f"opportunit{'ies' if n_warning != 1 else 'y'} to consider."
+        )
+    else:
+        parts.append(
+            "No priority improvements identified — your project handled "
+            "the tested conditions."
+        )
+
+    return " ".join(parts)
+
+
+def _build_corpus_context(
+    finding: Finding,
+    predictions: Optional[dict],
+) -> str:
+    """Build a neutral corpus-context paragraph for a finding.
+
+    Matches the finding against prediction items.  Returns factual
+    comparison text or empty string if no match.
+    """
+    if not predictions:
+        return ""
+
+    from mycode.prediction import match_prediction_to_findings
+
+    # Collect all prediction layers to search
+    layers: list[tuple[str, dict]] = []
+    arch_spec = predictions.get("architecture_specific") if isinstance(
+        predictions, dict,
+    ) else None
+    # predictions_pdf_dict is flat — check for nested JSON-report style too
+    if arch_spec and isinstance(arch_spec, dict):
+        layers.append(("arch", arch_spec))
+    tw = predictions.get("technology_wide") if isinstance(
+        predictions, dict,
+    ) else None
+    if tw and isinstance(tw, dict):
+        layers.append(("tech", tw))
+
+    # Also handle flat predictions_pdf_dict from routes.py
+    if not layers:
+        flat_preds = predictions.get("predictions", [])
+        arch_type = predictions.get("architectural_type", "")
+        total = predictions.get("total_similar_projects", 0)
+        if flat_preds and total:
+            layer_dict = {"project_count": total, "items": flat_preds}
+            label = arch_type.replace("_", " ") if arch_type else ""
+            layers.append(("flat", layer_dict))
+
+    for layer_key, layer in layers:
+        items = layer.get("items", [])
+        project_count = layer.get("project_count", 0)
+        for item in items:
+            title = item.get("title", "")
+            matched = match_prediction_to_findings(
+                title, [finding.title], [finding.category],
+            )
+            if not matched:
+                continue
+            prob = item.get("probability_pct", 0)
+            confirmed = item.get("confirmed_count", 0)
+            if prob <= 0 and confirmed <= 0:
+                continue
+            # Neutral factual statement (annotation: no alarming language)
+            result = (
+                f"Of {project_count:,} similar projects analysed, "
+                f"{prob:.0f}% experienced this issue "
+                f"({confirmed:,} confirmed)."
+            )
+            return result
+
+    return ""
+
+
+def _build_dependency_profile(
+    report: DiagnosticReport,
+    corpus_patterns: list[dict],
+) -> list[dict]:
+    """Build dependency risk profile from corpus data.
+
+    Returns list of {"dep": name, "patterns": [{"title": str, "count": int}]}
+    for the user's recognised dependencies.  Capped at 6 deps, 3 patterns each.
+    """
+    if not corpus_patterns or not report.recognized_dep_names:
+        return []
+
+    from mycode.prediction import normalize_dep_name
+
+    # Normalise user deps
+    user_deps = set()
+    for raw in report.recognized_dep_names:
+        canon = normalize_dep_name(raw)
+        if canon:
+            user_deps.add(canon)
+
+    dep_profiles: dict[str, list[tuple[int, str]]] = {}
+    skip = frozenset({
+        "Application handled HTTP load without issues",
+    })
+
+    for pattern in corpus_patterns:
+        title = pattern.get("title", "")
+        if title in skip:
+            continue
+        confirmed = pattern.get("confirmed_count", 0)
+        if confirmed < 3:
+            continue
+        affected = {d.lower() for d in pattern.get("affected_dependencies", [])}
+        for dep in user_deps:
+            if dep in affected or dep.replace("_", "-") in affected:
+                if dep not in dep_profiles:
+                    dep_profiles[dep] = []
+                dep_profiles[dep].append((confirmed, title))
+
+    # Sort deps by total confirmed count, cap at 6
+    result: list[dict] = []
+    sorted_deps = sorted(
+        dep_profiles.items(),
+        key=lambda kv: sum(c for c, _ in kv[1]),
+        reverse=True,
+    )
+    for dep, patterns in sorted_deps[:6]:
+        # Deduplicate and sort patterns, top 3
+        seen_titles: set[str] = set()
+        unique: list[tuple[int, str]] = []
+        for count, title in sorted(patterns, reverse=True):
+            if title not in seen_titles:
+                seen_titles.add(title)
+                unique.append((count, title))
+        top = unique[:3]
+        if top:
+            result.append({
+                "dep": dep,
+                "patterns": [
+                    {"title": t, "count": c} for c, t in top
+                ],
+            })
+
+    return result
+
+
+def _build_architecture_assessment(
+    report: DiagnosticReport,
+    predictions: Optional[dict],
+) -> str:
+    """Build architecture assessment paragraph.
+
+    Returns factual sentence about the project's architectural classification
+    and corpus context, or empty string if no data.
+    """
+    if not predictions:
+        return ""
+
+    arch_type = ""
+    project_count = 0
+
+    # Check nested format (JSON report)
+    arch_spec = predictions.get("architecture_specific")
+    if isinstance(arch_spec, dict):
+        arch_type = arch_spec.get("architecture", "")
+        project_count = arch_spec.get("project_count", 0)
+
+    # Check flat format (PDF dict)
+    if not arch_type:
+        arch_type = predictions.get("architectural_type", "")
+        if predictions.get("arch_filtered"):
+            project_count = predictions.get("total_similar_projects", 0)
+
+    if not arch_type or arch_type == "general" or project_count < 1:
+        return ""
+
+    arch_label = arch_type.replace("_", " ")
+    return (
+        f"Your project is classified as a {arch_label}. "
+        f"Our corpus contains {project_count:,} {arch_label} projects. "
+        f"Your project uses {report.recognized_dep_count} "
+        f"recognised dependencies."
+    )
+
+
+def _build_test_methodology(
+    report: DiagnosticReport,
+    constraints: Optional["OperationalConstraints"] = None,
+) -> dict:
+    """Extract test methodology data for the PDF section.
+
+    Returns dict with scenario count, depth, scale range, and dep coverage.
+    """
+    depth = "standard"
+    baseline = None
+    ceiling = None
+    buffer_val = None
+
+    if constraints:
+        depth = getattr(constraints, "analysis_depth", None) or "standard"
+        baseline = getattr(constraints, "current_users", None)
+        ceiling = getattr(constraints, "max_users", None)
+        if ceiling is not None:
+            buffer_val = int(ceiling * 1.15)
+
+    return {
+        "scenarios_run": report.scenarios_run,
+        "analysis_depth": depth,
+        "baseline": baseline,
+        "ceiling": ceiling,
+        "buffer": buffer_val,
+        "fully_tested": report.recognized_dep_count,
+        "usage_tested": len(report.unrecognized_deps),
+        "confidence_note": report.confidence_note or "",
+    }
+
+
 _PREDICTION_SEVERITY_COLORS: dict[str, tuple] = {
     "critical": _RED,
     "warning": _AMBER_TEXT,
@@ -1815,8 +2097,16 @@ _PREDICTION_SEVERITY_COLORS: dict[str, tuple] = {
 }
 
 
-def _render_pred_bars(pdf, preds: list[dict]) -> None:
-    """Render a list of prediction items as probability bars."""
+def _render_pred_bars(
+    pdf, preds: list[dict],
+    confirmed_titles: frozenset[str] | None = None,
+) -> None:
+    """Render a list of prediction items as probability bars.
+
+    When *confirmed_titles* is provided, items whose title matches
+    get a green "(Confirmed by testing)" annotation.
+    """
+    confirmed_titles = confirmed_titles or frozenset()
     bar_max_w = 60
     bar_h = 4
     for pred in preds:
@@ -1835,21 +2125,45 @@ def _render_pred_bars(pdf, preds: list[dict]) -> None:
         pdf.cell(15, 5, f"{prob:.0f}%")
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(*_BODY)
-        pdf.cell(0, 5, _safe_text(title))
+        pdf.cell(0, 5, _safe_text(title), new_x="RIGHT")
+        # Confirmed annotation (annotation: reset colour after green)
+        if title in confirmed_titles:
+            pdf.set_font("Helvetica", "I", 8)
+            pdf.set_text_color(*_GREEN)
+            pdf.cell(0, 5, "  (Confirmed by testing)")
+            pdf.set_text_color(*_BODY)
         pdf.ln(bar_h + 2)
 
 
-def _render_predictive_analysis_pdf(pdf, predictions: dict) -> None:
+def _render_predictive_analysis_pdf(
+    pdf, predictions: dict, findings: list[Finding] | None = None,
+) -> None:
     """Render the Predictive Analysis section in the PDF.
 
     Shows two layers when architecture-filtered: architecture-specific
-    predictions first, then technology-wide predictions.
+    predictions first, then technology-wide predictions.  Items confirmed
+    by testing get a green annotation.
     """
     total = predictions.get("total_similar_projects", 0)
     deps = predictions.get("matching_deps", [])
     preds = predictions.get("predictions", [])
     if not preds:
         return
+
+    # Build set of confirmed prediction titles by matching against findings
+    confirmed_titles: set[str] = set()
+    if findings:
+        from mycode.prediction import match_prediction_to_findings
+        f_titles = [f.title for f in findings]
+        f_cats = [f.category for f in findings]
+        all_pred_items = list(preds) + list(
+            predictions.get("tech_wide_predictions", []),
+        )
+        for p in all_pred_items:
+            t = p.get("title", "")
+            if match_prediction_to_findings(t, f_titles, f_cats):
+                confirmed_titles.add(t)
+    confirmed_frozen = frozenset(confirmed_titles)
 
     pdf.section_heading("Predictive Analysis")
     deps_str = ", ".join(deps[:8])
@@ -1869,49 +2183,73 @@ def _render_predictive_analysis_pdf(pdf, predictions: dict) -> None:
         # Section 1 — Architecture-specific
         intro = (
             f"For {arch_label} projects "
-            f"({total} projects using {deps_str}):"
+            f"({total:,} projects):"
         )
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*_BODY)
         pdf.multi_cell(0, 4.5, _safe_text(intro))
         pdf.ln(2)
-        _render_pred_bars(pdf, preds)
+        _render_pred_bars(pdf, preds, confirmed_frozen)
 
         # Section 2 — Technology-wide
         if tw_preds:
             pdf.ln(2)
             tw_intro = (
                 f"Across all project types "
-                f"({tw_total} projects using {deps_str}):"
+                f"({tw_total:,} projects):"
             )
-            pdf.set_font("Helvetica", "", 10)
+            pdf.set_font("Helvetica", "B", 10)
             pdf.set_text_color(*_BODY)
             pdf.multi_cell(0, 4.5, _safe_text(tw_intro))
             pdf.ln(2)
-            _render_pred_bars(pdf, tw_preds)
+            _render_pred_bars(pdf, tw_preds, confirmed_frozen)
+
+        # Delta notes: arch vs tech-wide probability differences
+        if tw_preds:
+            tw_prob_map = {
+                p.get("title", ""): p.get("probability_pct", 0)
+                for p in tw_preds
+            }
+            delta_notes: list[str] = []
+            for p in preds:
+                t = p.get("title", "")
+                arch_prob = p.get("probability_pct", 0)
+                tw_prob = tw_prob_map.get(t, 0)
+                if tw_prob > 0 and arch_prob > tw_prob * 2:
+                    ratio = arch_prob / tw_prob
+                    delta_notes.append(
+                        f"{arch_label.capitalize()} projects are "
+                        f"{ratio:.1f}x more likely to experience "
+                        f'"{t}" than average.'
+                    )
+            for note in delta_notes[:2]:
+                pdf.set_font("Helvetica", "I", 8)
+                pdf.set_text_color(*_SUBTLE)
+                pdf.multi_cell(0, 3.5, _safe_text(note))
+                pdf.set_text_color(*_BODY)
+                pdf.ln(1)
+
     elif arch_label and not arch_filtered:
-        # Limited arch data
         intro = (
             f"Limited {arch_label}-specific data available. "
             f"Showing predictions across all project types "
-            f"({total} projects using {deps_str}):"
+            f"({total:,} projects):"
         )
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(*_BODY)
         pdf.multi_cell(0, 4.5, _safe_text(intro))
         pdf.ln(2)
-        _render_pred_bars(pdf, preds)
+        _render_pred_bars(pdf, preds, confirmed_frozen)
     else:
-        # No architecture — tech-wide only
         intro = (
-            f"Based on {total} projects with similar "
+            f"Based on {total:,} projects with similar "
             f"technology stack ({deps_str}):"
         )
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(*_BODY)
         pdf.multi_cell(0, 4.5, _safe_text(intro))
         pdf.ln(2)
-        _render_pred_bars(pdf, preds)
+        _render_pred_bars(pdf, preds, confirmed_frozen)
 
     # Scale note
     scale_notes = [
@@ -1921,6 +2259,7 @@ def _render_predictive_analysis_pdf(pdf, predictions: dict) -> None:
         pdf.set_font("Helvetica", "I", 8)
         pdf.set_text_color(*_SUBTLE)
         pdf.multi_cell(0, 3.5, _safe_text(scale_notes[0]))
+    pdf.set_text_color(*_BODY)
     pdf.ln(4)
 
 
@@ -1952,30 +2291,33 @@ def render_understanding_pdf(
     pdf.alias_nb_pages()
     pdf.add_page()
 
-    # ── Cover-page header block ──
-    # Use user's description if available, fall back to project name
+    # ── Branded header block (dark bg bar + white project name) ──
     display_title = (
         report.user_project_description
         or project_name
         or "Your Project"
     )
+    bar_h = 22
+    bar_x = pdf.l_margin
+    bar_y = pdf.get_y()
+    bar_w = pdf.w - pdf.l_margin - pdf.r_margin
+    pdf.set_fill_color(*_BRAND)
+    pdf.rect(bar_x, bar_y, bar_w, bar_h, style="F")
+    # Project name in white over the bar
+    pdf.set_xy(bar_x + 5, bar_y + 3)
     pdf.set_font("Helvetica", "B", 18)
-    pdf.set_text_color(*_BRAND)
-    pdf.multi_cell(0, 8, _safe_text(display_title))
-    pdf.ln(1)
+    pdf.set_text_color(*_WHITE)
+    pdf.multi_cell(bar_w - 10, 8, _safe_text(display_title))
+    pdf.set_y(bar_y + bar_h + 2)
 
-    # Date and edition in subtle text
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*_SUBTLE)
+    # Info row: date, edition, stack
     date = _dt.date.today().isoformat()
-    pdf.cell(0, 4, f"Edition {edition}  |  {date}")
-    pdf.ln(5)
+    info_parts: list[str] = [f"Edition {edition}", date]
 
     # Technology stack summary — group by language for multi-language projects
     if report.recognized_dep_names:
         if (hasattr(report, "secondary_languages")
                 and report.secondary_languages):
-            # Multi-language: group deps
             from mycode.prediction import PROFILED_DEPS, DEP_ALIASES
             _js_known = {
                 "react", "express", "nextjs", "axios", "mongoose",
@@ -1993,20 +2335,22 @@ def render_understanding_pdf(
                     js_deps.append(d)
                 else:
                     py_deps.append(d)
-            parts = []
+            stack_parts = []
             if py_deps:
-                parts.append(", ".join(py_deps[:6]) + " (Python)")
+                stack_parts.append(", ".join(py_deps[:6]) + " (Python)")
             if js_deps:
-                parts.append(", ".join(js_deps[:6]) + " (JavaScript)")
-            stack_text = "Stack: " + " + ".join(parts)
+                stack_parts.append(", ".join(js_deps[:6]) + " (JavaScript)")
+            info_parts.append(" + ".join(stack_parts))
         else:
-            stack_text = "Stack: " + ", ".join(report.recognized_dep_names[:12])
-            if len(report.recognized_dep_names) > 12:
+            stack_text = ", ".join(report.recognized_dep_names[:8])
+            if len(report.recognized_dep_names) > 8:
                 stack_text += "..."
-        pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(*_SUBTLE)
-        pdf.cell(0, 4, _safe_text(stack_text))
-        pdf.ln(5)
+            info_parts.append(stack_text)
+
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*_SUBTLE)
+    pdf.cell(0, 4, _safe_text("  |  ".join(info_parts)))
+    pdf.ln(5)
 
     # User intent summary box (only if constraints provided)
     if constraints is not None:
@@ -2023,6 +2367,11 @@ def render_understanding_pdf(
             intent_parts.append(f"Usage: {constraints.usage_pattern}")
         if intent_parts:
             pdf.callout_box(" | ".join(intent_parts))
+
+    # ── Executive summary ──
+    exec_summary = _build_executive_summary(report, predictions, constraints)
+    if exec_summary:
+        pdf.callout_box(exec_summary)
 
     # ── Assessment Context section ──
     if constraints is not None:
@@ -2069,6 +2418,16 @@ def render_understanding_pdf(
             pdf.set_font("Helvetica", "I", 9)
             pdf.set_text_color(*_SUBTLE)
             pdf.multi_cell(0, 4, _safe_text(f"Memory note: {mem_cap}"))
+
+        # Architecture assessment
+        arch_assessment = _build_architecture_assessment(
+            report, predictions,
+        )
+        if arch_assessment:
+            pdf.ln(1)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(*_BODY)
+            pdf.multi_cell(0, 4, _safe_text(arch_assessment))
 
         pdf.ln(3)
 
@@ -2141,7 +2500,7 @@ def render_understanding_pdf(
 
     # ── Predictive Analysis section ──
     if predictions:
-        _render_predictive_analysis_pdf(pdf, predictions)
+        _render_predictive_analysis_pdf(pdf, predictions, report.findings)
 
     # Partition http_tested out of incomplete tests
     http_tested, other_incomplete = _partition_http_tested(
@@ -2166,7 +2525,7 @@ def render_understanding_pdf(
         label = _pdf_severity_labels.get(severity, severity.upper())
         pdf.section_heading(f"{label} ({len(group)})", level=3)
         for f in group:
-            _render_pdf_finding(pdf, f)
+            _render_pdf_finding(pdf, f, predictions=predictions)
 
     # HTTP-tested summary
     if http_tested:
@@ -2174,6 +2533,30 @@ def render_understanding_pdf(
         pdf.set_text_color(*_SUBTLE)
         pdf.multi_cell(0, 5, _safe_text(_http_tested_summary(http_tested)))
         pdf.ln(6)
+
+    # ── Dependency Profile section ──
+    corpus_patterns = _load_corpus_for_pdf()
+    dep_profile = _build_dependency_profile(report, corpus_patterns)
+    if dep_profile:
+        pdf.section_heading("Dependency Profile")
+        for entry in dep_profile:
+            dep_name = entry["dep"].replace("_", " ").title()
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_text_color(*_HEADING)
+            pdf.cell(0, 5, _safe_text(dep_name))
+            pdf.ln(5)
+            for pat in entry["patterns"]:
+                pdf.set_font("Helvetica", "", 9)
+                pdf.set_text_color(*_BODY)
+                pdf.set_x(pdf.l_margin + 3)
+                pdf.cell(4, 4, "-")
+                pdf.multi_cell(
+                    0, 4,
+                    _safe_text(
+                        f"{pat['title']}: {pat['count']:,} projects affected"
+                    ),
+                )
+            pdf.ln(2)
 
     # Performance summary table + confidence + callout
     rows = _dedup_by_label(report.degradation_points)
@@ -2191,6 +2574,54 @@ def render_understanding_pdf(
 
     if rows:
         _render_perf_table_pdf(pdf, report.degradation_points, report.findings)
+
+    # ── Test Methodology section ──
+    methodology = _build_test_methodology(report, constraints)
+    if methodology.get("scenarios_run", 0) > 0:
+        pdf.section_heading("How myCode Tested Your Project")
+        depth_label = {
+            "quick": "quick (~2 min)",
+            "standard": "standard (~5 min)",
+            "deep": "deep (~10 min)",
+        }.get(methodology["analysis_depth"], methodology["analysis_depth"])
+        pdf.bullet(
+            f"{methodology['scenarios_run']} scenarios, "
+            f"{depth_label} analysis"
+        )
+        baseline = methodology.get("baseline")
+        ceiling = methodology.get("ceiling")
+        buffer_val = methodology.get("buffer")
+        if baseline is not None or ceiling is not None:
+            parts: list[str] = []
+            if baseline is not None:
+                parts.append(f"baseline: {baseline:,} users")
+            if ceiling is not None:
+                parts.append(f"ceiling: {ceiling:,} users")
+            if buffer_val is not None:
+                parts.append(f"buffer: {buffer_val:,} users")
+            pdf.bullet("Load range: " + ", ".join(parts))
+        fully = methodology.get("fully_tested", 0)
+        usage = methodology.get("usage_tested", 0)
+        if fully or usage:
+            pdf.bullet(
+                f"{fully} dependencies with full stress profiles"
+                + (f", {usage} with usage-based testing" if usage else "")
+            )
+        pdf.ln(2)
+
+    # ── Historical comparison placeholder ──
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(*_SUBTLE)
+    pdf.multi_cell(
+        0, 4,
+        _safe_text(
+            "This is your first myCode report. Future reports will show "
+            "changes from your previous assessment. Run myCode again after "
+            "making improvements to track your progress."
+        ),
+    )
+    pdf.set_text_color(*_BODY)
+    pdf.ln(4)
 
     # Confidence note
     if report.confidence_note:
@@ -2275,7 +2706,9 @@ def _estimate_finding_height(f: Finding) -> float:
     return h
 
 
-def _render_pdf_finding(pdf, f: Finding) -> None:
+def _render_pdf_finding(
+    pdf, f: Finding, predictions: Optional[dict] = None,
+) -> None:
     """Render a single finding for the understanding PDF.
 
     Each finding is a card with a coloured left border.
@@ -2287,7 +2720,7 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     the card starts (not in the middle).
     """
     # Pre-flight: keep the card together if it fits on a fresh page
-    est_h = _estimate_finding_height(f)
+    est_h = _estimate_finding_height(f) + (8 if predictions else 0)
     remaining = pdf.h - pdf.get_y() - 20  # bottom margin
     if est_h < pdf.h - 40 and remaining < est_h:
         # Card fits on a page but not on the current one — break first
@@ -2318,6 +2751,15 @@ def _render_pdf_finding(pdf, f: Finding) -> None:
     combined = _integrate_details(f.description or "", f.details or "")
     if combined:
         pdf.body_text(combined)
+
+    # Corpus context — neutral factual comparison
+    corpus_ctx = _build_corpus_context(f, predictions)
+    if corpus_ctx:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(*_SUBTLE)
+        pdf.multi_cell(0, 4, _safe_text(f"In our corpus: {corpus_ctx}"))
+        pdf.set_text_color(*_BODY)
+        pdf.ln(1.5)
 
     # Architecture-aware diagnosis (why it matters)
     diagnosis = _build_diagnosis(f)
