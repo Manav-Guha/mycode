@@ -2109,29 +2109,49 @@ def _render_pred_bars(
     confirmed_titles = confirmed_titles or frozenset()
     bar_max_w = 60
     bar_h = 4
+    confirm_label = "  (Confirmed by testing)"
     for pred in preds:
         title = pred.get("title", "")
         prob = pred.get("probability_pct", 0)
         severity = pred.get("severity", "info")
+        is_confirmed = title in confirmed_titles
         bar_color = _PREDICTION_SEVERITY_COLORS.get(severity, _SUBTLE)
         y = pdf.get_y()
         x = pdf.l_margin
+        page_right = pdf.w - pdf.r_margin
         bar_w = max(1, bar_max_w * prob / 100.0)
         pdf.set_fill_color(*bar_color)
         pdf.rect(x, y + 0.5, bar_w, bar_h, style="F")
+
+        # Percentage
         pdf.set_xy(x + bar_max_w + 3, y)
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*_BODY)
         pdf.cell(15, 5, f"{prob:.0f}%")
+
+        # Calculate available width for title (+ confirmed label if needed)
+        text_start_x = pdf.get_x()
+        avail_w = page_right - text_start_x
+        if is_confirmed:
+            pdf.set_font("Helvetica", "I", 8)
+            confirm_w = pdf.get_string_width(confirm_label) + 1
+        else:
+            confirm_w = 0
+        title_w = avail_w - confirm_w
+
+        # Title — constrained width so confirmed text fits
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(*_BODY)
-        pdf.cell(0, 5, _safe_text(title), new_x="RIGHT")
-        # Confirmed annotation (annotation: reset colour after green)
-        if title in confirmed_titles:
+        safe_title = _safe_text(title)
+        pdf.cell(max(title_w, 10), 5, safe_title)
+
+        # Confirmed annotation (reset colour after green)
+        if is_confirmed:
             pdf.set_font("Helvetica", "I", 8)
             pdf.set_text_color(*_GREEN)
-            pdf.cell(0, 5, "  (Confirmed by testing)")
+            pdf.cell(confirm_w, 5, confirm_label)
             pdf.set_text_color(*_BODY)
+
         pdf.ln(bar_h + 2)
 
 
@@ -2349,8 +2369,8 @@ def render_understanding_pdf(
 
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*_SUBTLE)
-    pdf.cell(0, 4, _safe_text("  |  ".join(info_parts)))
-    pdf.ln(5)
+    pdf.multi_cell(0, 4, _safe_text("  |  ".join(info_parts)))
+    pdf.ln(3)
 
     # User intent summary box (only if constraints provided)
     if constraints is not None:
