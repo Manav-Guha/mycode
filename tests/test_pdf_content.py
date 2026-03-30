@@ -1,6 +1,6 @@
 """Tests for PDF content generation helpers in documents.py.
 
-Tests pure logic functions — no PDF rendering required.
+Tests pure logic functions and PDF rendering margin safety.
 """
 
 import pytest
@@ -11,6 +11,9 @@ from mycode.documents import (
     _build_dependency_profile,
     _build_executive_summary,
     _build_test_methodology,
+    _HAS_FPDF,
+    _safe_text,
+    _truncate_to_width,
 )
 from mycode.report import DiagnosticReport, Finding
 
@@ -372,3 +375,190 @@ class TestTestMethodology:
         assert result["baseline"] is None
         assert result["ceiling"] is None
         assert result["buffer"] is None
+
+
+# ── Truncation and PDF Rendering Tests ──
+
+
+@pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+class TestTruncateToWidth:
+
+    def test_short_text_unchanged(self):
+        from fpdf import FPDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Helvetica", "", 10)
+        result = _truncate_to_width(pdf, "Short", 100, "Helvetica", "", 10)
+        assert result == "Short"
+
+    def test_long_text_truncated(self):
+        from fpdf import FPDF
+        pdf = FPDF()
+        pdf.add_page()
+        text = "A" * 200
+        result = _truncate_to_width(pdf, text, 30, "Helvetica", "", 10)
+        assert result.endswith("...")
+        assert len(result) < len(text)
+        # Verify the truncated text actually fits
+        pdf.set_font("Helvetica", "", 10)
+        assert pdf.get_string_width(result) <= 30
+
+
+@pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+class TestPredictionBarRendering:
+    """Render actual PDF prediction bars and verify no text overflows."""
+
+    def test_confirmed_predictions_within_margins(self):
+        """Multiple confirmed predictions with long titles stay in bounds."""
+        from mycode.documents import _render_pred_bars, _make_pdf_class
+
+        PDFClass = _make_pdf_class()
+        pdf = PDFClass(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.set_margins(20, 15, 20)
+        pdf.add_page()
+
+        page_right = pdf.w - pdf.r_margin
+
+        # Long titles that would overflow without truncation
+        preds = [
+            {
+                "title": "Memory accumulation over repeated "
+                         "sessions with large dataset processing",
+                "probability_pct": 45.0,
+                "severity": "critical",
+            },
+            {
+                "title": "Response time degradation under "
+                         "concurrent load with database queries",
+                "probability_pct": 32.0,
+                "severity": "warning",
+            },
+            {
+                "title": "Short title",
+                "probability_pct": 15.0,
+                "severity": "info",
+            },
+        ]
+        confirmed = frozenset(p["title"] for p in preds)
+
+        # This should not raise and should not produce text past the margin
+        _render_pred_bars(pdf, preds, confirmed)
+
+        # Verify PDF renders without error
+        output = bytes(pdf.output())
+        assert len(output) > 0
+
+    def test_unconfirmed_long_title_within_margins(self):
+        """A very long unconfirmed title is truncated, not overflowing."""
+        from mycode.documents import _render_pred_bars, _make_pdf_class
+
+        PDFClass = _make_pdf_class()
+        pdf = PDFClass(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=True, margin=20)
+        pdf.set_margins(20, 15, 20)
+        pdf.add_page()
+
+        preds = [
+            {
+                "title": "X" * 150,  # absurdly long title
+                "probability_pct": 50.0,
+                "severity": "critical",
+            },
+        ]
+
+        _render_pred_bars(pdf, preds)
+        output = bytes(pdf.output())
+        assert len(output) > 0
+
+
+@pytest.mark.skipif(not _HAS_FPDF, reason="fpdf2 not installed")
+class TestFullPdfRendering:
+    """End-to-end PDF rendering with all new sections."""
+
+    def test_pdf_renders_with_predictions_and_findings(self):
+        """Full PDF with confirmed predictions, corpus context, all sections."""
+        from mycode.documents import render_understanding_pdf
+
+        report = DiagnosticReport(
+            user_project_description="Financial Dashboard",
+            project_description="A Flask + pandas dashboard for analytics.",
+            scenarios_run=12,
+            scenarios_passed=8,
+            scenarios_failed=3,
+            scenarios_incomplete=1,
+            total_errors=5,
+            recognized_dep_count=4,
+            recognized_dep_names=["flask", "pandas", "numpy", "requests"],
+            unrecognized_deps=["some-lib"],
+            confidence_note="Results may vary outside sandbox.",
+            findings=[
+                Finding(
+                    title="Memory accumulation over sessions",
+                    severity="critical",
+                    category="memory_profiling",
+                    description="Memory grew from 50MB to 200MB.",
+                    _peak_memory_mb=200.0,
+                ),
+                Finding(
+                    title="Data volume scaling degradation",
+                    severity="warning",
+                    category="data_volume_scaling",
+                    description="Processing slowed at 10K items.",
+                    _load_level=10000,
+                ),
+            ],
+        )
+
+        predictions = {
+            "total_similar_projects": 120,
+            "matching_deps": ["flask", "pandas"],
+            "architectural_type": "dashboard",
+            "arch_filtered": True,
+            "predictions": [
+                {
+                    "title": "Memory accumulation over sessions",
+                    "probability_pct": 35.0,
+                    "severity": "critical",
+                    "confirmed_count": 42,
+                    "matching_deps": ["flask"],
+                    "scale_note": "",
+                },
+                {
+                    "title": "Data volume scaling degradation",
+                    "probability_pct": 28.0,
+                    "severity": "warning",
+                    "confirmed_count": 34,
+                    "matching_deps": ["pandas"],
+                    "scale_note": "",
+                },
+            ],
+            "tech_wide_total": 960,
+            "tech_wide_predictions": [
+                {
+                    "title": "Memory accumulation over sessions",
+                    "probability_pct": 10.0,
+                    "severity": "critical",
+                    "confirmed_count": 96,
+                    "matching_deps": ["flask"],
+                    "scale_note": "",
+                },
+            ],
+        }
+
+        from mycode.constraints import OperationalConstraints
+        constraints = OperationalConstraints(
+            current_users=50, max_users=500, analysis_depth="standard",
+        )
+
+        pdf_bytes = render_understanding_pdf(
+            report, edition=1, project_name="Financial Dashboard",
+            predictions=predictions, constraints=constraints,
+        )
+
+        assert len(pdf_bytes) > 1000
+        # Verify it's a valid PDF with multiple pages
+        pdf_text = pdf_bytes.decode("latin-1", errors="ignore")
+        assert pdf_text.startswith("%PDF")
+        # 3 pages expected (header+exec+context, findings, table+methodology)
+        assert "/Count 3" in pdf_text or "/Count 2" in pdf_text

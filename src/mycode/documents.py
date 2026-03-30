@@ -2097,6 +2097,34 @@ _PREDICTION_SEVERITY_COLORS: dict[str, tuple] = {
 }
 
 
+def _truncate_to_width(
+    pdf, text: str, max_w: float,
+    family: str, style: str, size: float,
+) -> str:
+    """Truncate *text* with '...' so it fits within *max_w* mm.
+
+    Temporarily sets the font to measure, then restores the previous
+    font state.
+    """
+    pdf.set_font(family, style, size)
+    if pdf.get_string_width(text) <= max_w:
+        return text
+    ellipsis = "..."
+    ellipsis_w = pdf.get_string_width(ellipsis)
+    target = max_w - ellipsis_w
+    if target <= 0:
+        return ellipsis
+    # Binary-ish search: trim from the end
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if pdf.get_string_width(text[:mid]) <= target:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo].rstrip() + ellipsis
+
+
 def _render_pred_bars(
     pdf, preds: list[dict],
     confirmed_titles: frozenset[str] | None = None,
@@ -2109,7 +2137,7 @@ def _render_pred_bars(
     confirmed_titles = confirmed_titles or frozenset()
     bar_max_w = 60
     bar_h = 4
-    confirm_label = "  (Confirmed by testing)"
+    confirm_text = "(Confirmed by testing)"
     for pred in preds:
         title = pred.get("title", "")
         prob = pred.get("probability_pct", 0)
@@ -2129,30 +2157,51 @@ def _render_pred_bars(
         pdf.set_text_color(*_BODY)
         pdf.cell(15, 5, f"{prob:.0f}%")
 
-        # Calculate available width for title (+ confirmed label if needed)
-        text_start_x = pdf.get_x()
-        avail_w = page_right - text_start_x
-        if is_confirmed:
-            pdf.set_font("Helvetica", "I", 8)
-            confirm_w = pdf.get_string_width(confirm_label) + 1
-        else:
-            confirm_w = 0
-        title_w = avail_w - confirm_w
-
-        # Title — constrained width so confirmed text fits
+        # Measure widths to decide layout
+        text_x = pdf.get_x()
+        avail_w = page_right - text_x
         pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(*_BODY)
         safe_title = _safe_text(title)
-        pdf.cell(max(title_w, 10), 5, safe_title)
+        title_text_w = pdf.get_string_width(safe_title)
 
-        # Confirmed annotation (reset colour after green)
-        if is_confirmed:
+        pdf.set_font("Helvetica", "I", 8)
+        confirm_text_w = pdf.get_string_width(f"  {confirm_text}")
+
+        if is_confirmed and title_text_w + confirm_text_w <= avail_w:
+            # Both fit on one line
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(*_BODY)
+            pdf.cell(title_text_w + 1, 5, safe_title)
             pdf.set_font("Helvetica", "I", 8)
             pdf.set_text_color(*_GREEN)
-            pdf.cell(confirm_w, 5, confirm_label)
+            pdf.cell(confirm_text_w, 5, f"  {confirm_text}")
             pdf.set_text_color(*_BODY)
-
-        pdf.ln(bar_h + 2)
+            pdf.ln(bar_h + 2)
+        elif is_confirmed:
+            # Title too long — truncate with ellipsis, then confirmed
+            max_title_w = avail_w - confirm_text_w - 2
+            truncated = _truncate_to_width(
+                pdf, safe_title, max_title_w, "Helvetica", "", 10,
+            )
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(*_BODY)
+            trunc_w = pdf.get_string_width(truncated) + 1
+            pdf.cell(trunc_w, 5, truncated)
+            pdf.set_font("Helvetica", "I", 8)
+            pdf.set_text_color(*_GREEN)
+            pdf.cell(confirm_text_w, 5, f"  {confirm_text}")
+            pdf.set_text_color(*_BODY)
+            pdf.ln(bar_h + 2)
+        else:
+            # No confirmation — render title, truncate if needed
+            if title_text_w > avail_w:
+                safe_title = _truncate_to_width(
+                    pdf, safe_title, avail_w - 1, "Helvetica", "", 10,
+                )
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(*_BODY)
+            pdf.cell(avail_w, 5, safe_title)
+            pdf.ln(bar_h + 2)
 
 
 def _render_predictive_analysis_pdf(
