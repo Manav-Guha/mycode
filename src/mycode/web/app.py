@@ -36,6 +36,7 @@ except ImportError:
 
 from mycode.web.jobs import store, MAX_CONCURRENT_JOBS
 from mycode.web.analytics import (
+    get_admin_jobs,
     get_admin_stats,
     log_download,
     log_survey,
@@ -282,6 +283,28 @@ async def admin_stats(key: str = Query(default="")):
         return JSONResponse(content={"error": "Forbidden"}, status_code=403)
     stats = await asyncio.to_thread(get_admin_stats)
     return JSONResponse(content=stats)
+
+
+@app.get("/api/admin/jobs")
+async def admin_jobs(
+    key: str = Query(default=""),
+    source: str = Query(default=""),
+    status: str = Query(default=""),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    """Return individual job records. Requires MYCODE_ADMIN_KEY."""
+    admin_key = os.environ.get("MYCODE_ADMIN_KEY", "")
+    if not admin_key or key != admin_key:
+        return JSONResponse(content={"error": "Forbidden"}, status_code=403)
+    jobs, total = await asyncio.to_thread(
+        get_admin_jobs,
+        source=source or None,
+        status=status or None,
+        limit=limit,
+        offset=offset,
+    )
+    return JSONResponse(content={"jobs": jobs, "count": len(jobs), "total": total})
 
 
 @app.get("/api/health")

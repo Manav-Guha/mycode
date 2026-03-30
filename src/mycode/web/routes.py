@@ -101,7 +101,7 @@ def handle_preflight(
             repo_url = github_url.strip()
             project_path = clone_github_repo(github_url, temp_dir / "project")
         elif file_obj is not None:
-            repo_url = "zip_upload"
+            repo_url = f"zip:{filename}" if filename else "zip_upload"
             project_path = extract_zip(file_obj, temp_dir / "project")
         else:
             return PreflightResponse(

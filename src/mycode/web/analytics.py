@@ -9,6 +9,7 @@ Configuration:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sqlite3
@@ -41,9 +42,21 @@ CREATE TABLE IF NOT EXISTS job_log (
     findings_info INTEGER,
     scenarios_run INTEGER,
     pdf_downloaded BOOLEAN NOT NULL DEFAULT 0,
-    json_downloaded BOOLEAN NOT NULL DEFAULT 0
+    json_downloaded BOOLEAN NOT NULL DEFAULT 0,
+    languages_detected TEXT NOT NULL DEFAULT '',
+    deps_found INTEGER NOT NULL DEFAULT 0,
+    finding_titles TEXT NOT NULL DEFAULT '',
+    predictions_count INTEGER NOT NULL DEFAULT 0
 );
 """
+
+# Columns added after initial schema — idempotent migration for existing DBs.
+_MIGRATION_COLUMNS = [
+    ("languages_detected", "TEXT NOT NULL DEFAULT ''"),
+    ("deps_found", "INTEGER NOT NULL DEFAULT 0"),
+    ("finding_titles", "TEXT NOT NULL DEFAULT ''"),
+    ("predictions_count", "INTEGER NOT NULL DEFAULT 0"),
+]
 
 _CREATE_SURVEY_TABLE = """\
 CREATE TABLE IF NOT EXISTS survey_responses (
@@ -80,9 +93,19 @@ def get_db() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(_CREATE_TABLE)
     conn.execute(_CREATE_SURVEY_TABLE)
+    _ensure_columns(conn)
     conn.commit()
     _local.conn = conn
     return conn
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Add migration columns if they don't exist (idempotent)."""
+    for col_name, col_def in _MIGRATION_COLUMNS:
+        try:
+            conn.execute(f"ALTER TABLE job_log ADD COLUMN {col_name} {col_def}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
 
 def validate_source(source: str) -> str:
@@ -111,6 +134,11 @@ def log_job_completed(
     findings_warning: int = 0,
     findings_info: int = 0,
     scenarios_run: int = 0,
+    *,
+    languages_detected: str = "",
+    deps_found: int = 0,
+    finding_titles: str = "",
+    predictions_count: int = 0,
 ) -> None:
     """Update job_log row with completion data."""
     try:
@@ -118,11 +146,13 @@ def log_job_completed(
         db.execute(
             "UPDATE job_log SET completed_at=?, status=?, "
             "findings_critical=?, findings_warning=?, findings_info=?, "
-            "scenarios_run=? WHERE job_id=?",
+            "scenarios_run=?, languages_detected=?, deps_found=?, "
+            "finding_titles=?, predictions_count=? WHERE job_id=?",
             (
                 _now_iso(), status,
                 findings_critical, findings_warning, findings_info,
-                scenarios_run, job_id,
+                scenarios_run, languages_detected, deps_found,
+                finding_titles, predictions_count, job_id,
             ),
         )
         db.commit()
@@ -289,6 +319,98 @@ def get_admin_stats() -> dict:
             "q3_retest": survey_q3,
         },
     }
+
+
+def get_admin_jobs(
+    source: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Return individual job records, newest first.
+
+    Returns (jobs_list, total_matching_count).
+    """
+    db = get_db()
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+
+    where_clauses: list[str] = []
+    params: list[str | int] = []
+    if source:
+        where_clauses.append("source = ?")
+        params.append(source)
+    if status:
+        where_clauses.append("status = ?")
+        params.append(status)
+
+    where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    # Total count (before limit/offset)
+    count_row = db.execute(
+        f"SELECT COUNT(*) FROM job_log{where_sql}", params,
+    ).fetchone()
+    total = count_row[0] if count_row else 0
+
+    rows = db.execute(
+        f"SELECT job_id, source, status, started_at, completed_at, "
+        f"repo_url, findings_critical, findings_warning, findings_info, "
+        f"scenarios_run, pdf_downloaded, json_downloaded, "
+        f"languages_detected, deps_found, finding_titles, predictions_count "
+        f"FROM job_log{where_sql} ORDER BY started_at DESC LIMIT ? OFFSET ?",
+        params + [limit, offset],
+    ).fetchall()
+
+    jobs: list[dict] = []
+    for row in rows:
+        (
+            job_id, src, st, started_at, completed_at,
+            repo_url, f_crit, f_warn, f_info,
+            scen_run, pdf_dl, json_dl,
+            langs, deps, titles_json, pred_count,
+        ) = row
+
+        # Compute duration
+        duration = None
+        if started_at and completed_at:
+            try:
+                start_dt = datetime.fromisoformat(started_at)
+                end_dt = datetime.fromisoformat(completed_at)
+                duration = round((end_dt - start_dt).total_seconds(), 1)
+            except (ValueError, TypeError):
+                pass
+
+        # Parse finding_titles from JSON string to list
+        parsed_titles: list[str] = []
+        if titles_json:
+            try:
+                parsed_titles = json.loads(titles_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Parse languages_detected from CSV to list
+        langs_list = [l for l in (langs or "").split(",") if l]
+
+        jobs.append({
+            "job_id": job_id,
+            "source": src,
+            "status": st,
+            "created_at": started_at,
+            "completed_at": completed_at,
+            "duration_seconds": duration,
+            "repo_identifier": repo_url or None,
+            "languages_detected": langs_list,
+            "deps_found": deps or 0,
+            "findings_critical": f_crit,
+            "findings_warning": f_warn,
+            "findings_info": f_info,
+            "finding_titles": parsed_titles,
+            "predictions_count": pred_count or 0,
+            "pdf_downloaded": bool(pdf_dl),
+            "json_downloaded": bool(json_dl),
+        })
+
+    return jobs, total
 
 
 def _now_iso() -> str:

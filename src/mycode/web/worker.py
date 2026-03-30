@@ -6,6 +6,7 @@ immediately while tests execute.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -196,8 +197,9 @@ def run_analysis(job: Job) -> None:
 
 
 def _log_completion(job: Job, status: str) -> None:
-    """Extract finding counts from job result and log to analytics."""
+    """Extract finding counts and metadata from job result and log to analytics."""
     critical = warning = info = scenarios_run = 0
+    finding_titles: list[str] = []
     if job.result and job.result.report:
         report = job.result.report
         scenarios_run = report.scenarios_run or 0
@@ -209,4 +211,43 @@ def _log_completion(job: Job, status: str) -> None:
                 warning += 1
             elif sev == "info":
                 info += 1
-    log_job_completed(job.id, status, critical, warning, info, scenarios_run)
+            title = getattr(f, "title", "")
+            if title:
+                finding_titles.append(title)
+
+    # Languages — may be absent on failed jobs
+    languages_str = ""
+    try:
+        langs = getattr(job, "detected_languages", None)
+        if langs:
+            languages_str = ",".join(sorted(langs))
+    except Exception:
+        pass
+
+    # Dependency count — may be absent on failed jobs
+    deps_found = 0
+    try:
+        if job.ingestion and job.ingestion.dependencies:
+            deps_found = len([d for d in job.ingestion.dependencies if not d.is_dev])
+    except Exception:
+        pass
+
+    # Predictions count — may be absent on failed jobs
+    predictions_count = 0
+    try:
+        if job.result and job.result.report:
+            report_dict = job.result.report.as_dict()
+            preds = report_dict.get("predictions", {})
+            items = preds.get("architecture_specific", {}).get("items", [])
+            items += preds.get("technology_wide", {}).get("items", [])
+            predictions_count = len(items)
+    except Exception:
+        pass
+
+    log_job_completed(
+        job.id, status, critical, warning, info, scenarios_run,
+        languages_detected=languages_str,
+        deps_found=deps_found,
+        finding_titles=json.dumps(finding_titles) if finding_titles else "",
+        predictions_count=predictions_count,
+    )
