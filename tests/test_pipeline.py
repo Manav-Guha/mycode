@@ -46,6 +46,7 @@ _ALL_STAGES = {
     "session_setup",
     "ingestion",
     "library_matching",
+    "viability_gate",
     "conversation",
     "scenario_generation",
     "scenario_review",
@@ -132,11 +133,17 @@ def py_project(tmp_path):
 
 @pytest.fixture
 def js_project(tmp_path):
-    """Minimal JavaScript project directory."""
+    """Minimal JavaScript project directory.
+
+    Detection requires ≥3 JS source files (``_MIN_JS_SOURCE_FILES``),
+    so we include index.js + two helpers.
+    """
     project = tmp_path / "project"
     project.mkdir()
     (project / "package.json").write_text('{"name":"demo","dependencies":{"express":"4.18.0"}}\n')
     (project / "index.js").write_text('const express = require("express");\n')
+    (project / "routes.js").write_text('module.exports = {};\n')
+    (project / "utils.js").write_text('function helper() {}\nmodule.exports = { helper };\n')
     return project
 
 
@@ -196,6 +203,8 @@ class TestDetectLanguage:
     def test_tsconfig(self, tmp_path):
         (tmp_path / "tsconfig.json").write_text("{}\n")
         (tmp_path / "app.ts").write_text("const x: number = 1;\n")
+        (tmp_path / "routes.ts").write_text("export {};\n")
+        (tmp_path / "utils.ts").write_text("export const y = 2;\n")
         assert detect_language(tmp_path) == "javascript"
 
 
@@ -562,13 +571,17 @@ class TestJavaScriptDetection:
 
     def test_yarn_lock(self, tmp_path):
         (tmp_path / "yarn.lock").write_text("# yarn\n")
+        (tmp_path / "package.json").write_text('{"name":"yarn-app"}\n')
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "app.tsx").write_text("export default function App() {}\n")
+        (tmp_path / "src" / "index.tsx").write_text("import App from './app';\n")
+        (tmp_path / "src" / "utils.ts").write_text("export const x = 1;\n")
         assert detect_language(tmp_path) == "javascript"
 
     def test_js_files_only_no_indicator(self, tmp_path):
         (tmp_path / "main.js").write_text("console.log('x');\n")
         (tmp_path / "utils.mjs").write_text("export const x = 1;\n")
+        (tmp_path / "helpers.js").write_text("function h() {}\n")
         assert detect_language(tmp_path) == "javascript"
 
 

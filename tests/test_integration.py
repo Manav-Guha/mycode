@@ -295,7 +295,7 @@ class TestIngesterClassesAndFunctions:
 
     def test_component_library_class_found(self, ingestion_result):
         """ComponentLibrary class is detected in library/loader.py."""
-        loader_analysis = _find_analysis(ingestion_result, "loader.py")
+        loader_analysis = _find_analysis(ingestion_result, "library/loader.py")
         assert loader_analysis is not None
         class_names = {c.name for c in loader_analysis.classes}
         assert "ComponentLibrary" in class_names
@@ -348,7 +348,7 @@ class TestIngesterImports:
 
     def test_loader_imports(self, ingestion_result):
         """library/loader.py imports json and pathlib."""
-        loader_analysis = _find_analysis(ingestion_result, "loader.py")
+        loader_analysis = _find_analysis(ingestion_result, "library/loader.py")
         assert loader_analysis is not None
         imported_modules = {imp.module for imp in loader_analysis.imports}
         assert "json" in imported_modules
