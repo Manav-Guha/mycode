@@ -1004,6 +1004,66 @@ class TestFindDepFileDir:
             ["-r", str(sub / "requirements.txt")], deadline=mock.ANY,
         )
 
+    def test_find_dep_dir_ignores_js_for_python(self, tmp_path):
+        """Root package.json should not prevent finding Python deps in subdir."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"root"}\n')
+        backend = project / "backend"
+        backend.mkdir()
+        (backend / "pyproject.toml").write_text('[project]\nname="app"\n')
+        (backend / "app.py").write_text("pass\n")
+
+        sm = self._make_session(tmp_path, project)
+        # Default (all filenames) returns root because package.json is there
+        assert sm.find_dep_file_dir() == project
+        # Python-only filter finds backend/
+        from mycode.session import _PY_DEP_FILENAMES
+        assert sm.find_dep_file_dir(filenames=_PY_DEP_FILENAMES) == backend
+
+    def test_find_dep_dir_root_python_still_wins(self, tmp_path):
+        """Root with both package.json and requirements.txt → returns root."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"root"}\n')
+        (project / "requirements.txt").write_text("flask\n")
+        backend = project / "backend"
+        backend.mkdir()
+        (backend / "pyproject.toml").write_text('[project]\nname="app"\n')
+
+        sm = self._make_session(tmp_path, project)
+        from mycode.session import _PY_DEP_FILENAMES
+        # Python dep at root → returns root even with filter
+        assert sm.find_dep_file_dir(filenames=_PY_DEP_FILENAMES) == project
+
+    def test_install_deps_monorepo_finds_subdir_pyproject(self, tmp_path):
+        """_install_dependencies() finds backend/pyproject.toml in monorepo."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"root"}\n')
+        backend = project / "backend"
+        backend.mkdir()
+        (backend / "pyproject.toml").write_text(
+            '[project]\nname="app"\ndependencies=["fastapi>=0.135.0"]\n'
+        )
+
+        sm = self._make_session(tmp_path, project)
+        calls = []
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+            # pip install backend/ fails (flat-layout)
+            if args[0] == str(backend):
+                raise DependencyInstallError("Multiple top-level packages")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            sm._install_dependencies()
+
+        # Should have tried pip install backend/, then parsed deps
+        assert calls[0] == [str(backend)]
+        individual = [c[0] for c in calls[1:]]
+        assert "fastapi>=0.135.0" in individual
+
 
 # ── JS Dependency Installation Tests ──
 

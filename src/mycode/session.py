@@ -58,12 +58,17 @@ COPY_EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
 # hangs (llama-cpp-python, grpcio from source, etc.).
 _DEP_INSTALL_TIMEOUT = 120
 
-_DEP_FILENAMES = (
+_PY_DEP_FILENAMES = (
     "requirements.txt", "requirement.txt",
     "requirements-dev.txt", "requirements_dev.txt",
     "pyproject.toml", "setup.py", "setup.cfg",
+)
+
+_JS_DEP_FILENAMES = (
     "package.json",
 )
+
+_DEP_FILENAMES = _PY_DEP_FILENAMES + _JS_DEP_FILENAMES
 
 
 @dataclass
@@ -381,19 +386,28 @@ class SessionManager:
 
     # ── Dependency Installation ──
 
-    def find_dep_file_dir(self) -> Path:
+    def find_dep_file_dir(
+        self, filenames: tuple[str, ...] | None = None,
+    ) -> Path:
         """Find the directory containing dependency files.
 
         Checks the project root first, then one level of subdirectories.
         If multiple subdirectories contain dep files, prefers the one with
         the most source files (.py, .js, .ts).  Returns the project root
         as fallback when no dep files are found anywhere.
+
+        Args:
+            filenames: Dep file names to search for.  Defaults to
+                ``_DEP_FILENAMES`` (all languages).  Pass
+                ``_PY_DEP_FILENAMES`` to avoid a root ``package.json``
+                short-circuiting discovery of Python deps in subdirs.
         """
+        names = filenames if filenames is not None else _DEP_FILENAMES
         root = self.project_copy_dir
         assert root is not None
 
         # 1. Check root — if any dep file exists, use root
-        for name in _DEP_FILENAMES:
+        for name in names:
             if (root / name).is_file():
                 return root
 
@@ -408,7 +422,7 @@ class SessionManager:
             if not child.is_dir() or child.name.startswith("."):
                 continue
             has_dep_file = any(
-                (child / name).is_file() for name in _DEP_FILENAMES
+                (child / name).is_file() for name in names
             )
             if has_dep_file:
                 py_count = len(list(child.glob("*.py")))
@@ -444,8 +458,10 @@ class SessionManager:
 
         deadline = time.monotonic() + _DEP_INSTALL_TIMEOUT
 
-        # Find the directory containing dep files (root or one subdir down)
-        dep_dir = self.find_dep_file_dir()
+        # Find the directory containing Python dep files (root or one subdir down).
+        # Pass _PY_DEP_FILENAMES so a root package.json doesn't short-circuit
+        # discovery of Python deps in subdirectories (monorepo case).
+        dep_dir = self.find_dep_file_dir(filenames=_PY_DEP_FILENAMES)
         installed_any = False
 
         def _budget_exceeded() -> bool:
