@@ -465,6 +465,161 @@ class TestPyDependencyInstallation:
         assert len(req_files_installed) == 2
 
 
+# ── Pyproject.toml Dependency Parsing Tests ──
+
+
+class TestParsePyprojectDeps:
+    """Test _parse_pyproject_deps static method."""
+
+    def test_basic_deps(self, tmp_path):
+        pp = tmp_path / "pyproject.toml"
+        pp.write_text(
+            '[project]\ndependencies = [\n'
+            '  "flask>=3.0.0",\n'
+            '  "requests==2.31.0",\n'
+            ']\n'
+        )
+        result = SessionManager._parse_pyproject_deps(pp)
+        assert [bare for bare, _ in result] == ["flask", "requests"]
+        assert [spec for _, spec in result] == ["flask>=3.0.0", "requests==2.31.0"]
+
+    def test_extras_and_complex_specifiers(self, tmp_path):
+        pp = tmp_path / "pyproject.toml"
+        pp.write_text(
+            '[project]\ndependencies = [\n'
+            '  "fastapi[standard]>=0.135.0,<0.136.0",\n'
+            '  "pydantic[email]~=2.0",\n'
+            '  "sqlmodel>=0.0.22,<0.1.0",\n'
+            ']\n'
+        )
+        result = SessionManager._parse_pyproject_deps(pp)
+        names = [bare for bare, _ in result]
+        specs = [spec for _, spec in result]
+        assert names == ["fastapi", "pydantic", "sqlmodel"]
+        # Full specs preserved for pip
+        assert specs[0] == "fastapi[standard]>=0.135.0,<0.136.0"
+        assert specs[1] == "pydantic[email]~=2.0"
+
+    def test_no_project_section(self, tmp_path):
+        pp = tmp_path / "pyproject.toml"
+        pp.write_text('[tool.setuptools]\npackages = ["myapp"]\n')
+        assert SessionManager._parse_pyproject_deps(pp) == []
+
+    def test_no_dependencies_key(self, tmp_path):
+        pp = tmp_path / "pyproject.toml"
+        pp.write_text('[project]\nname = "myapp"\n')
+        assert SessionManager._parse_pyproject_deps(pp) == []
+
+    def test_invalid_toml(self, tmp_path):
+        pp = tmp_path / "pyproject.toml"
+        pp.write_text("this is not valid toml {{{")
+        assert SessionManager._parse_pyproject_deps(pp) == []
+
+    def test_deduplicates(self, tmp_path):
+        pp = tmp_path / "pyproject.toml"
+        pp.write_text(
+            '[project]\ndependencies = [\n'
+            '  "Flask>=3.0",\n'
+            '  "flask>=2.0",\n'
+            ']\n'
+        )
+        result = SessionManager._parse_pyproject_deps(pp)
+        assert len(result) == 1
+        assert result[0][0] == "flask"
+
+
+class TestPyprojectFallbackToParsingDeps:
+    """Test that pyproject.toml pip-install failure triggers dep parsing."""
+
+    def _make_session(self, tmp_path, project):
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+        sm.venv_python = Path("/fake/venv/bin/python")
+        sm.environment_info = EnvironmentInfo()
+        return sm
+
+    def test_pyproject_failure_installs_parsed_deps(self, tmp_path):
+        """When pip install . fails, parsed deps are installed individually."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text(
+            '[project]\nname = "demo"\ndependencies = [\n'
+            '  "fastapi[standard]>=0.135.0",\n'
+            '  "sqlmodel>=0.0.22",\n'
+            ']\n'
+        )
+
+        sm = self._make_session(tmp_path, project)
+        calls = []
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+            # pip install . fails (monorepo flat-layout error)
+            if args[0] == str(project):
+                raise DependencyInstallError("Multiple top-level packages discovered")
+            # Individual installs succeed
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            sm._install_dependencies()
+
+        # First call: pip install . (fails)
+        assert calls[0] == [str(project)]
+        # Then individual deps via fallback cascade (strategy 1)
+        individual = [c[0] for c in calls[1:]]
+        assert "fastapi[standard]>=0.135.0" in individual
+        assert "sqlmodel>=0.0.22" in individual
+
+    def test_pyproject_failure_does_not_fall_through(self, tmp_path):
+        """When pip install . fails and deps are parsed, don't use env fallback."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text(
+            '[project]\nname = "demo"\ndependencies = ["requests>=2.0"]\n'
+        )
+
+        sm = self._make_session(tmp_path, project)
+        sm.environment_info = EnvironmentInfo(
+            installed_packages={"stale-pkg": "1.0.0"}
+        )
+
+        def mock_pip(args, deadline=None):
+            if args[0] == str(project):
+                raise DependencyInstallError("flat-layout error")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            with mock.patch.object(sm, "_install_from_package_list") as mock_env:
+                sm._install_dependencies()
+
+        # Environment fallback should NOT be called
+        mock_env.assert_not_called()
+
+    def test_pyproject_no_deps_falls_through(self, tmp_path):
+        """When pyproject.toml has no [project.dependencies], fall through."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        # Poetry-style: no [project.dependencies]
+        (project / "pyproject.toml").write_text(
+            '[tool.poetry]\nname = "demo"\n'
+            '[tool.poetry.dependencies]\npython = "^3.11"\n'
+        )
+
+        sm = self._make_session(tmp_path, project)
+        sm.environment_info = EnvironmentInfo(
+            installed_packages={"fallback-pkg": "1.0.0"}
+        )
+
+        def mock_pip(args, deadline=None):
+            if args[0] == str(project):
+                raise DependencyInstallError("no setup.py or pyproject.toml")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            with mock.patch.object(sm, "_install_from_package_list") as mock_env:
+                sm._install_dependencies()
+
+        # No parsed deps → falls through to environment fallback
+        mock_env.assert_called_once()
+
+
 # ── Pip Install Fallback Cascade Tests ──
 
 

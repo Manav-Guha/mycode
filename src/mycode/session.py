@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -19,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 import venv
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -497,8 +499,19 @@ class SessionManager:
                 logger.debug("[PY-DEPS] Successfully installed from pyproject.toml")
             except DependencyInstallError as e:
                 logger.warning(
-                    "[PY-DEPS] Failed to install from pyproject.toml, falling back to package list: %s", e
+                    "[PY-DEPS] pip install . failed for pyproject.toml: %s", e
                 )
+                parsed = self._parse_pyproject_deps(pyproject)
+                if parsed:
+                    logger.info(
+                        "[PY-DEPS] Parsed %d dependencies from pyproject.toml, "
+                        "installing individually", len(parsed),
+                    )
+                    for bare_name, full_spec in parsed:
+                        if _budget_exceeded():
+                            break
+                        self._pip_install_with_fallback(full_spec, deadline=deadline)
+                    installed_any = True
 
         # Try setup.py
         setup_py = dep_dir / "setup.py"
@@ -544,6 +557,42 @@ class SessionManager:
                 f"installed in the test environment: {names}{suffix}"
             )
             logger.warning("[PY-DEPS] %d package(s) failed all strategies: %s", n, names)
+
+    @staticmethod
+    def _parse_pyproject_deps(pyproject_path: Path) -> list[tuple[str, str]]:
+        """Parse ``[project.dependencies]`` from a pyproject.toml.
+
+        Returns a list of ``(bare_name, full_spec)`` tuples.
+        ``full_spec`` is the original string (e.g.
+        ``"fastapi[standard]>=0.135.0,<0.136.0"``), passed to pip as-is.
+        ``bare_name`` is for logging/tracking only.
+        """
+        try:
+            data = tomllib.loads(_read_text_safe(pyproject_path))
+        except Exception as exc:
+            logger.warning("[PY-DEPS] Could not parse pyproject.toml: %s", exc)
+            return []
+
+        deps = data.get("project", {}).get("dependencies", [])
+        if not isinstance(deps, list):
+            return []
+
+        # PEP 508 name: letters, digits, hyphens, dots, underscores
+        _NAME_RE = re.compile(r"^([A-Za-z0-9][-A-Za-z0-9_.]*)")
+        seen: set[str] = set()
+        result: list[tuple[str, str]] = []
+        for spec in deps:
+            spec = spec.strip()
+            if not spec:
+                continue
+            m = _NAME_RE.match(spec)
+            if not m:
+                continue
+            bare = m.group(1).lower()
+            if bare not in seen:
+                seen.add(bare)
+                result.append((bare, spec))
+        return result
 
     def _pip_install(self, args: list[str], deadline: float | None = None):
         """Run pip install with given arguments inside the venv.
