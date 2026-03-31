@@ -1048,6 +1048,88 @@ class TestServerStartupFailureFinding:
         assert len(result.http_degradation_points) == 0
 
 
+class TestStartupFailureDiagnosis:
+    """Verify cause-specific diagnosis and failure_pattern in startup findings."""
+
+    def _run_with_startup_error(self, startup_error, framework="fastapi"):
+        """Helper: run_http_testing_phase with a server crash and given error."""
+        with patch("mycode.http_load_driver.detect_framework_entry") as mock_detect, \
+             patch("mycode.http_load_driver.run_http_load_test") as mock_load:
+            mock_detect.return_value = FrameworkDetection(
+                framework=framework, entry_file="main.py",
+            )
+            mock_load.return_value = HttpLoadResult(
+                framework=framework,
+                endpoint_results=[],
+                server_crash=True,
+                startup_error=startup_error,
+            )
+            session = MagicMock()
+            session.project_copy_dir = Path("/tmp/proj")
+            ingestion = IngestionResult(project_path="/tmp/proj")
+            execution = ExecutionEngineResult()
+            result = run_http_testing_phase(
+                session, ingestion, execution, "python",
+            )
+        assert len(result.http_findings) == 1
+        return result.http_findings[0]
+
+    def test_missing_dependency_pattern(self):
+        finding = self._run_with_startup_error(
+            "Server could not start: missing dependency: uvicorn"
+        )
+        assert finding.failure_pattern == "missing_server_dependency"
+        assert "required dependency is missing" in finding.description
+
+    def test_missing_env_config_pattern(self):
+        finding = self._run_with_startup_error(
+            "Server could not start: missing API key or secret — "
+            "the app requires environment variables"
+        )
+        assert finding.failure_pattern == "missing_env_config"
+        assert "environment variables are not set" in finding.description
+
+    def test_missing_external_service_pattern(self):
+        finding = self._run_with_startup_error(
+            "Server could not start: missing database or external service connection"
+        )
+        assert finding.failure_pattern == "missing_external_service"
+        assert "external service" in finding.description
+
+    def test_syntax_error_pattern(self):
+        finding = self._run_with_startup_error(
+            "Server could not start: syntax error in application code"
+        )
+        assert finding.failure_pattern == "server_syntax_error"
+        assert "syntax error" in finding.description
+
+    def test_port_conflict_pattern(self):
+        finding = self._run_with_startup_error(
+            "Server could not start: port conflict — another process"
+        )
+        assert finding.failure_pattern == "server_startup_crash"
+        assert "port is already in use" in finding.description
+
+    def test_crashes_on_import_pattern(self):
+        finding = self._run_with_startup_error(
+            "Server could not start: fastapi is installed but crashes on import"
+        )
+        assert finding.failure_pattern == "server_startup_crash"
+        assert "incompatible with this Python version" in finding.description
+
+    def test_unknown_error_generic_pattern(self):
+        finding = self._run_with_startup_error(
+            "Server could not start: something totally unexpected"
+        )
+        assert finding.failure_pattern == "server_startup_crash"
+        assert "Check the error details above" in finding.description
+
+    def test_empty_error_generic_pattern(self):
+        finding = self._run_with_startup_error("")
+        assert finding.failure_pattern == "server_startup_crash"
+        assert "unknown error" in finding.description
+
+
 class TestHttpRanIntegration:
     """Verify run_http_testing_phase sets http_ran and populates findings."""
 

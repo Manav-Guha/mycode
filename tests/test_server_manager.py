@@ -510,6 +510,35 @@ class TestDiagnoseStartupFailure:
         )
         assert "port conflict" in msg
 
+    def test_traceback_returns_exception_line(self):
+        """Catch-all with a traceback should return the last line (exception)."""
+        stderr = (
+            "Traceback (most recent call last):\n"
+            '  File "/app/main.py", line 5, in <module>\n'
+            "    from pydantic_settings import BaseSettings\n"
+            "ValueError: some unexpected error\n"
+        )
+        msg = _diagnose_startup_failure(stderr, "fastapi")
+        assert msg == "ValueError: some unexpected error"
+
+    def test_no_traceback_returns_first_line(self):
+        """Catch-all without a traceback should return the first non-empty line."""
+        stderr = "weird error output\nanother line\n"
+        msg = _diagnose_startup_failure(stderr, "flask")
+        assert msg == "weird error output"
+
+    def test_traceback_with_trailing_blanks(self):
+        """Traceback followed by blank lines still returns the exception."""
+        stderr = (
+            "Traceback (most recent call last):\n"
+            '  File "x.py", line 1\n'
+            "RuntimeError: boom\n"
+            "\n"
+            "  \n"
+        )
+        msg = _diagnose_startup_failure(stderr, "flask")
+        assert msg == "RuntimeError: boom"
+
 
 # ── Process Group Teardown ──
 

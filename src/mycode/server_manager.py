@@ -697,10 +697,18 @@ def _diagnose_startup_failure(stderr: str, framework: str) -> str:
         return "syntax error in application code"
 
     if stderr.strip():
-        # Return first meaningful line
-        for line in stderr.strip().splitlines():
+        lines = stderr.strip().splitlines()
+        # If stderr contains a traceback, the actual exception is the
+        # last non-empty line (e.g. "ValueError: invalid literal...").
+        if any(l.strip().startswith("Traceback") for l in lines):
+            for line in reversed(lines):
+                line = line.strip()
+                if line:
+                    return line[:200]
+        # No traceback — return first non-empty line.
+        for line in lines:
             line = line.strip()
-            if line and not line.startswith("Traceback"):
+            if line:
                 return line[:200]
 
     return f"{framework} server process exited without output"

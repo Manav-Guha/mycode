@@ -1144,17 +1144,62 @@ def run_http_testing_phase(
             detection.framework, [detection.framework]
         )
         error_detail = load_result.startup_error or "unknown error"
+        error_lower = error_detail.lower()
+
+        if "missing dependency" in error_lower:
+            diagnosis = (
+                f"Your {detection.framework} app failed to start because "
+                f"a required dependency is missing."
+            )
+            pattern = "missing_server_dependency"
+        elif "api key" in error_lower or "secret" in error_lower or "environment variable" in error_lower:
+            diagnosis = (
+                f"Your {detection.framework} app failed to start because "
+                f"required environment variables are not set."
+            )
+            pattern = "missing_env_config"
+        elif "connection" in error_lower or "database" in error_lower:
+            diagnosis = (
+                f"Your {detection.framework} app failed to start because "
+                f"an external service (database, cache, etc.) is unavailable."
+            )
+            pattern = "missing_external_service"
+        elif "syntax error" in error_lower:
+            diagnosis = (
+                f"Your {detection.framework} app failed to start due to "
+                f"a syntax error in the application code."
+            )
+            pattern = "server_syntax_error"
+        elif "port conflict" in error_lower:
+            diagnosis = (
+                f"Your {detection.framework} app failed to start because "
+                f"the assigned port is already in use."
+            )
+            pattern = "server_startup_crash"
+        elif "crashes on import" in error_lower:
+            diagnosis = (
+                f"Your {detection.framework} app failed to start because "
+                f"an installed package is incompatible with this Python version."
+            )
+            pattern = "server_startup_crash"
+        else:
+            diagnosis = (
+                f"Your {detection.framework} app failed to start. "
+                f"Check the error details above."
+            )
+            pattern = "server_startup_crash"
+
         execution.http_findings.append(Finding(
             title="Application server could not start",
             severity="critical",
             category="http_load_testing",
             description=(
                 f"myCode detected a {detection.framework} application but "
-                f"the server failed to start: {error_detail}. Your "
-                f"application will not start on modern infrastructure. "
+                f"the server failed to start: {error_detail}. {diagnosis} "
                 f"No users can access your app until this is resolved."
             ),
             affected_dependencies=list(deps),
+            failure_pattern=pattern,
             _finding_type="scenario_failed",
         ))
         # http_ran stays False — server never ran, so runtime context
