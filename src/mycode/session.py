@@ -386,6 +386,17 @@ class SessionManager:
 
     # ── Dependency Installation ──
 
+    @staticmethod
+    def _pyproject_has_deps(path: Path) -> bool:
+        """Return True if *path* declares ``[project.dependencies]``."""
+        try:
+            data = tomllib.loads(_read_text_safe(path))
+        except Exception:
+            # Can't parse — be conservative, treat as valid.
+            return True
+        deps = data.get("project", {}).get("dependencies")
+        return isinstance(deps, list) and len(deps) > 0
+
     def find_dep_file_dir(
         self, filenames: tuple[str, ...] | None = None,
     ) -> Path:
@@ -406,9 +417,19 @@ class SessionManager:
         root = self.project_copy_dir
         assert root is not None
 
-        # 1. Check root — if any dep file exists, use root
+        # 1. Check root — if any dep file exists, use root.
+        #    Exception: pyproject.toml must declare [project.dependencies]
+        #    to count — a UV workspace config at root should not prevent
+        #    discovery of real deps in a subdirectory.
         for name in names:
-            if (root / name).is_file():
+            candidate = root / name
+            if candidate.is_file():
+                if name == "pyproject.toml" and not self._pyproject_has_deps(candidate):
+                    logger.debug(
+                        "[DEP-DIR] Root pyproject.toml has no "
+                        "[project.dependencies] — skipping",
+                    )
+                    continue
                 return root
 
         # 2. Check one level of subdirectories

@@ -1064,6 +1064,83 @@ class TestFindDepFileDir:
         individual = [c[0] for c in calls[1:]]
         assert "fastapi>=0.135.0" in individual
 
+    def test_root_pyproject_without_deps_skipped(self, tmp_path):
+        """Root pyproject.toml without [project.dependencies] → search subdirs."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        # UV workspace config — no [project.dependencies]
+        (project / "pyproject.toml").write_text(
+            '[tool.uv.workspace]\nmembers = ["backend"]\n'
+        )
+        backend = project / "backend"
+        backend.mkdir()
+        (backend / "pyproject.toml").write_text(
+            '[project]\nname="app"\ndependencies=["fastapi"]\n'
+        )
+        (backend / "app.py").write_text("pass\n")
+
+        sm = self._make_session(tmp_path, project)
+        from mycode.session import _PY_DEP_FILENAMES
+        assert sm.find_dep_file_dir(filenames=_PY_DEP_FILENAMES) == backend
+
+    def test_root_pyproject_with_deps_returns_root(self, tmp_path):
+        """Root pyproject.toml WITH [project.dependencies] → returns root."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text(
+            '[project]\nname="app"\ndependencies=["flask"]\n'
+        )
+        backend = project / "backend"
+        backend.mkdir()
+        (backend / "pyproject.toml").write_text(
+            '[project]\nname="api"\ndependencies=["fastapi"]\n'
+        )
+
+        sm = self._make_session(tmp_path, project)
+        from mycode.session import _PY_DEP_FILENAMES
+        assert sm.find_dep_file_dir(filenames=_PY_DEP_FILENAMES) == project
+
+    def test_root_pyproject_empty_deps_skipped(self, tmp_path):
+        """Root pyproject.toml with empty dependencies list → search subdirs."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text(
+            '[project]\nname="meta"\ndependencies=[]\n'
+        )
+        backend = project / "backend"
+        backend.mkdir()
+        (backend / "requirements.txt").write_text("flask\n")
+        (backend / "app.py").write_text("pass\n")
+
+        sm = self._make_session(tmp_path, project)
+        from mycode.session import _PY_DEP_FILENAMES
+        assert sm.find_dep_file_dir(filenames=_PY_DEP_FILENAMES) == backend
+
+    def test_root_pyproject_malformed_returns_root(self, tmp_path):
+        """Unparseable root pyproject.toml → conservative, return root."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("this is not valid toml {{{")
+
+        sm = self._make_session(tmp_path, project)
+        from mycode.session import _PY_DEP_FILENAMES
+        assert sm.find_dep_file_dir(filenames=_PY_DEP_FILENAMES) == project
+
+    def test_root_requirements_txt_beats_empty_pyproject(self, tmp_path):
+        """Root requirements.txt still short-circuits even with empty pyproject."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "requirements.txt").write_text("flask\n")
+        # pyproject.toml with no deps — but shouldn't matter since
+        # requirements.txt is checked first and short-circuits.
+        (project / "pyproject.toml").write_text(
+            '[tool.uv.workspace]\nmembers = ["backend"]\n'
+        )
+
+        sm = self._make_session(tmp_path, project)
+        from mycode.session import _PY_DEP_FILENAMES
+        assert sm.find_dep_file_dir(filenames=_PY_DEP_FILENAMES) == project
+
 
 # ── JS Dependency Installation Tests ──
 
