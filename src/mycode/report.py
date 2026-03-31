@@ -102,6 +102,7 @@ class Finding:
     affected_dependencies: list[str] = field(default_factory=list)
     grouped_findings: list["Finding"] = field(default_factory=list)
     group_count: int = 1
+    diagnosis: str = ""
     failure_domain: str = ""
     failure_pattern: Optional[str] = None
     operational_trigger: str = ""

@@ -1198,6 +1198,7 @@ def run_http_testing_phase(
                 f"the server failed to start: {error_detail}. {diagnosis} "
                 f"No users can access your app until this is resolved."
             ),
+            diagnosis=diagnosis,
             affected_dependencies=list(deps),
             failure_pattern=pattern,
             _finding_type="scenario_failed",

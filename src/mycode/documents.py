@@ -1326,6 +1326,8 @@ def _match_remediation(f: Finding) -> tuple[str, str] | None:
 
 def _build_diagnosis(f: Finding) -> str:
     """Return architecture-aware diagnosis, or empty string if unmatched."""
+    if f.diagnosis:
+        return f.diagnosis
     match = _match_remediation(f)
     return match[0] if match else ""
 
