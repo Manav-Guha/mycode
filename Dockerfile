@@ -10,12 +10,16 @@
 
 FROM python:3.11-slim
 
-# Layer 1: System build tools (cached safely)
+# Layer 1: System build tools + libraries for compiling Python C extensions
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       gcc g++ libffi-dev libssl-dev python3-dev \
+       build-essential libffi-dev libssl-dev python3-dev \
+       libpq-dev libxml2-dev libxslt1-dev \
+       libjpeg-dev zlib1g-dev libcurl4-openssl-dev \
+       cargo \
        libopenblas-dev libgfortran5 git \
        ca-certificates curl gnupg \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Layer 2: Node.js 20 LTS via NodeSource (separate layer to avoid cache hits

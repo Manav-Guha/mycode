@@ -330,7 +330,9 @@ class TestPyDependencyInstallation:
         with mock.patch.object(sm, "_pip_install") as mock_pip:
             sm._install_dependencies()
 
-        mock_pip.assert_called_once_with(["-r", str(project / "requirement.txt")])
+        mock_pip.assert_called_once_with(
+            ["-r", str(project / "requirement.txt")], deadline=mock.ANY,
+        )
 
     def test_requirements_txt_installed(self, tmp_path):
         project = tmp_path / "py_project"
@@ -342,7 +344,9 @@ class TestPyDependencyInstallation:
         with mock.patch.object(sm, "_pip_install") as mock_pip:
             sm._install_dependencies()
 
-        mock_pip.assert_called_once_with(["-r", str(project / "requirements.txt")])
+        mock_pip.assert_called_once_with(
+            ["-r", str(project / "requirements.txt")], deadline=mock.ANY,
+        )
 
     def test_pip_failure_non_fatal(self, tmp_path):
         """pip install failure for requirements.txt should not kill the session."""
@@ -354,7 +358,7 @@ class TestPyDependencyInstallation:
 
         call_count = 0
 
-        def mock_pip_install(args):
+        def mock_pip_install(args, deadline=None):
             nonlocal call_count
             call_count += 1
             if args[0] == "-r":
@@ -366,7 +370,8 @@ class TestPyDependencyInstallation:
             # Should NOT raise
             sm._install_dependencies()
 
-        # Bulk install was attempted, then individual fallback was attempted
+        # Bulk install was attempted, then individual fallback cascade was attempted
+        # (3 strategies per package for the fallback cascade)
         assert call_count >= 2
 
     def test_pip_uses_venv_python(self, tmp_path):
@@ -398,7 +403,9 @@ class TestPyDependencyInstallation:
         with mock.patch.object(sm, "_install_from_package_list") as mock_fallback:
             sm._install_dependencies()
 
-        mock_fallback.assert_called_once_with({"requests": "2.31.0"})
+        mock_fallback.assert_called_once_with(
+            {"requests": "2.31.0"}, deadline=mock.ANY,
+        )
 
     def test_requirement_txt_in_find_dependency_files(self, tmp_path):
         project = tmp_path / "py_project"
@@ -410,7 +417,7 @@ class TestPyDependencyInstallation:
         assert "requirement.txt" in info.dependency_files
 
     def test_individual_fallback_installs_each_package(self, tmp_path):
-        """When bulk install fails, each package is tried individually."""
+        """When bulk install fails, each package is tried via fallback cascade."""
         project = tmp_path / "py_project"
         project.mkdir()
         (project / "requirements.txt").write_text("flask==3.0.0\nrequests==2.31.0\n")
@@ -419,11 +426,11 @@ class TestPyDependencyInstallation:
 
         calls = []
 
-        def mock_pip_install(args):
+        def mock_pip_install(args, deadline=None):
             calls.append(args)
             if args[0] == "-r":
                 raise DependencyInstallError("bulk failed")
-            # Individual installs succeed
+            # Individual installs succeed on strategy 1
 
         with mock.patch.object(sm, "_pip_install", side_effect=mock_pip_install):
             sm._install_dependencies()
@@ -433,6 +440,9 @@ class TestPyDependencyInstallation:
         individual_args = [c[0] for c in calls[1:]]
         assert "flask==3.0.0" in individual_args
         assert "requests==2.31.0" in individual_args
+        # Both should be recorded as "installed"
+        assert sm.dep_install_results.get("flask==3.0.0") == "installed"
+        assert sm.dep_install_results.get("requests==2.31.0") == "installed"
 
     def test_both_requirements_and_requirement_txt(self, tmp_path):
         """Both requirements.txt and requirement.txt present — both installed."""
@@ -445,7 +455,7 @@ class TestPyDependencyInstallation:
 
         calls = []
 
-        def mock_pip_install(args):
+        def mock_pip_install(args, deadline=None):
             calls.append(args)
 
         with mock.patch.object(sm, "_pip_install", side_effect=mock_pip_install):
@@ -453,6 +463,296 @@ class TestPyDependencyInstallation:
 
         req_files_installed = [c for c in calls if c[0] == "-r"]
         assert len(req_files_installed) == 2
+
+
+# ── Pip Install Fallback Cascade Tests ──
+
+
+class TestPipInstallFallbackCascade:
+    """Test _pip_install_with_fallback three-strategy cascade."""
+
+    def _make_session(self, tmp_path, project):
+        sm = SessionManager(project, temp_base=tmp_path / "sess")
+        sm.project_copy_dir = project
+        sm.venv_python = Path("/fake/venv/bin/python")
+        sm.environment_info = EnvironmentInfo()
+        return sm
+
+    def test_strategy1_succeeds_no_fallback(self, tmp_path):
+        """Normal install succeeds → no fallback attempted."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sm = self._make_session(tmp_path, project)
+        calls = []
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            result = sm._pip_install_with_fallback("flask==3.0.0")
+
+        assert result == "installed"
+        assert sm.dep_install_results["flask==3.0.0"] == "installed"
+        assert len(calls) == 1
+        assert calls[0] == ["flask==3.0.0"]
+
+    def test_strategy2_after_strategy1_fails(self, tmp_path):
+        """Strategy 1 fails → strategy 2 (binary-only) succeeds."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sm = self._make_session(tmp_path, project)
+        calls = []
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+            if "--only-binary=:all:" not in args:
+                raise DependencyInstallError("compilation failed")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            result = sm._pip_install_with_fallback("cryptography==42.0.0")
+
+        assert result == "installed-binary-only"
+        assert sm.dep_install_results["cryptography==42.0.0"] == "installed-binary-only"
+        assert len(calls) == 2
+        assert "--only-binary=:all:" in calls[1]
+
+    def test_strategy3_after_strategies_1_2_fail(self, tmp_path):
+        """Strategies 1+2 fail → strategy 3 (no-deps) succeeds."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sm = self._make_session(tmp_path, project)
+        calls = []
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+            if "--no-deps" not in args:
+                raise DependencyInstallError("install failed")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            result = sm._pip_install_with_fallback("obscure-pkg==1.0.0")
+
+        assert result == "installed-no-deps"
+        assert sm.dep_install_results["obscure-pkg==1.0.0"] == "installed-no-deps"
+        assert len(calls) == 3
+        assert "--no-deps" in calls[2]
+
+    def test_all_strategies_fail(self, tmp_path):
+        """All three strategies fail → recorded as 'failed'."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sm = self._make_session(tmp_path, project)
+
+        def mock_pip(args, deadline=None):
+            raise DependencyInstallError("always fails")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            result = sm._pip_install_with_fallback("broken-pkg==0.0.1")
+
+        assert result == "failed"
+        assert sm.dep_install_results["broken-pkg==0.0.1"] == "failed"
+
+    def test_version_incompatible_skips_fallbacks(self, tmp_path):
+        """Version incompatibility in strategy 1 → skip strategies 2+3."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sm = self._make_session(tmp_path, project)
+        calls = []
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+            raise DependencyInstallError(
+                "pip install failed (exit 1): "
+                "ERROR: Package requires Python >=3.12 but you have 3.11"
+            )
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            result = sm._pip_install_with_fallback("new-pkg==2.0.0")
+
+        assert result == "failed"
+        assert sm.dep_install_results["new-pkg==2.0.0"] == "failed"
+        # Only strategy 1 attempted — no fallback
+        assert len(calls) == 1
+
+    def test_version_incompatible_python_requires(self, tmp_path):
+        """python_requires marker detected → skip fallbacks."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sm = self._make_session(tmp_path, project)
+        calls = []
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+            raise DependencyInstallError(
+                "pip install failed (exit 1): "
+                "python_requires='>=3.13' is not compatible"
+            )
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            result = sm._pip_install_with_fallback("future-pkg==1.0.0")
+
+        assert result == "failed"
+        assert len(calls) == 1
+
+    def test_low_budget_skips_strategy2(self, tmp_path):
+        """Less than 10s remaining → skip strategies 2+3."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sm = self._make_session(tmp_path, project)
+
+        # Deadline 5 seconds from now
+        deadline = time.monotonic() + 5
+        calls = []
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+            raise DependencyInstallError("failed")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            result = sm._pip_install_with_fallback("slow-pkg==1.0.0", deadline=deadline)
+
+        assert result == "failed"
+        # Strategy 1 attempted, then budget guard skipped 2+3
+        assert len(calls) == 1
+
+    def test_low_budget_skips_strategy3_only(self, tmp_path):
+        """Budget enough for strategy 2 but not 3."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        sm = self._make_session(tmp_path, project)
+
+        calls = []
+        # Use a fixed fake time that advances: starts at 100, then after
+        # strategy 2 fails, returns deadline - 5 (< 10s guard)
+        deadline = 200.0
+        time_values = iter([
+            185.0,   # strategy 2 budget check: 200 - 185 = 15s > 10s, proceed
+            195.0,   # strategy 3 budget check: 200 - 195 = 5s < 10s, skip
+        ])
+
+        def mock_pip(args, deadline=None):
+            calls.append(args)
+            raise DependencyInstallError("failed")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            with mock.patch("mycode.session.time.monotonic", side_effect=time_values):
+                result = sm._pip_install_with_fallback("tricky-pkg==1.0.0", deadline=deadline)
+
+        assert result == "failed"
+        # Strategy 1 + strategy 2 attempted, strategy 3 skipped
+        assert len(calls) == 2
+
+    def test_disable_pip_version_check_preserved(self, tmp_path):
+        """--disable-pip-version-check flag present on all pip calls."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "requirements.txt").write_text("flask==3.0.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        with mock.patch("mycode.session.subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            sm._install_dependencies()
+
+        for call in mock_run.call_args_list:
+            cmd = call[0][0]
+            assert "--disable-pip-version-check" in cmd
+
+    def test_failed_deps_warning_generated(self, tmp_path):
+        """Failed deps produce a warning in dep_install_warnings."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "requirements.txt").write_text("good==1.0\nbad==1.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        def mock_pip(args, deadline=None):
+            if args[0] == "-r":
+                raise DependencyInstallError("bulk failed")
+            if "bad==1.0" in args[0]:
+                raise DependencyInstallError("always fails")
+            # good==1.0 succeeds on strategy 1
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            sm._install_dependencies()
+
+        assert sm.dep_install_results.get("good==1.0") == "installed"
+        assert sm.dep_install_results.get("bad==1.0") == "failed"
+        assert any("1 dependency could not be installed" in w for w in sm.dep_install_warnings)
+        assert any("bad==1.0" in w for w in sm.dep_install_warnings)
+
+    def test_multiple_failed_deps_warning(self, tmp_path):
+        """Multiple failed deps listed in warning."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "requirements.txt").write_text("bad1==1.0\nbad2==1.0\n")
+
+        sm = self._make_session(tmp_path, project)
+
+        def mock_pip(args, deadline=None):
+            raise DependencyInstallError("always fails")
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            sm._install_dependencies()
+
+        assert sm.dep_install_results.get("bad1==1.0") == "failed"
+        assert sm.dep_install_results.get("bad2==1.0") == "failed"
+        assert any("2 dependencies could not be installed" in w for w in sm.dep_install_warnings)
+
+    def test_install_from_package_list_uses_fallback(self, tmp_path):
+        """_install_from_package_list individual fallback uses cascade."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "app.py").write_text("pass")
+
+        sm = self._make_session(tmp_path, project)
+        sm.environment_info = EnvironmentInfo(
+            installed_packages={"bad-pkg": "2.0.0"}
+        )
+
+        def mock_pip(args, deadline=None):
+            # Batch install fails
+            if len(args) > 1 and "--only-binary=:all:" not in args and "--no-deps" not in args:
+                raise DependencyInstallError("batch failed")
+            # Strategy 1 (individual) fails for bad-pkg
+            if args[0] == "bad-pkg==2.0.0" and "--only-binary=:all:" not in args and "--no-deps" not in args:
+                raise DependencyInstallError("compilation failed")
+            # Strategy 2 (binary-only) succeeds
+            if "--only-binary=:all:" in args:
+                return
+
+        with mock.patch.object(sm, "_pip_install", side_effect=mock_pip):
+            sm._install_dependencies()
+
+        assert sm.dep_install_results.get("bad-pkg==2.0.0") == "installed-binary-only"
+
+
+class TestIsVersionIncompatible:
+    """Test _is_version_incompatible static method."""
+
+    def test_requires_python(self):
+        assert SessionManager._is_version_incompatible(
+            "ERROR: Package requires Python >=3.12"
+        )
+
+    def test_python_requires(self):
+        assert SessionManager._is_version_incompatible(
+            "python_requires='>=3.13' is not compatible"
+        )
+
+    def test_requires_python_mixed_case(self):
+        assert SessionManager._is_version_incompatible(
+            "Requires-Python >=3.12 not satisfied"
+        )
+
+    def test_normal_error_not_version(self):
+        assert not SessionManager._is_version_incompatible(
+            "Could not find a version that satisfies the requirement"
+        )
+
+    def test_compilation_error_not_version(self):
+        assert not SessionManager._is_version_incompatible(
+            "error: command 'gcc' failed with exit status 1"
+        )
 
 
 # ── Subdirectory Dep-File Discovery Tests ──
@@ -546,7 +846,7 @@ class TestFindDepFileDir:
             sm._install_dependencies()
 
         mock_pip.assert_called_once_with(
-            ["-r", str(sub / "requirements.txt")]
+            ["-r", str(sub / "requirements.txt")], deadline=mock.ANY,
         )
 
 

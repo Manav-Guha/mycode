@@ -163,6 +163,9 @@ class SessionManager:
 
         # Dependency install warnings (surfaced to pipeline)
         self.dep_install_warnings: list[str] = []
+        # Per-package install strategy tracking
+        self.dep_install_results: dict[str, str] = {}
+        # package → "installed" | "installed-binary-only" | "installed-no-deps" | "failed"
 
     # ── Context Manager ──
 
@@ -527,6 +530,21 @@ class SessionManager:
 
         logger.debug("[PY-DEPS] Installation complete: installed_any=%s", installed_any)
 
+        # Surface failed deps summary
+        failed = [
+            pkg for pkg, status in self.dep_install_results.items()
+            if status == "failed"
+        ]
+        if failed:
+            names = ", ".join(failed[:10])
+            suffix = "..." if len(failed) > 10 else ""
+            n = len(failed)
+            self.dep_install_warnings.append(
+                f"{n} dependenc{'y' if n == 1 else 'ies'} could not be "
+                f"installed in the test environment: {names}{suffix}"
+            )
+            logger.warning("[PY-DEPS] %d package(s) failed all strategies: %s", n, names)
+
     def _pip_install(self, args: list[str], deadline: float | None = None):
         """Run pip install with given arguments inside the venv.
 
@@ -563,6 +581,76 @@ class SessionManager:
             logger.debug("[PY-DEPS] pip install timed out: %s", e)
             raise DependencyInstallError(f"pip install timed out: {e}") from e
 
+    @staticmethod
+    def _is_version_incompatible(error_msg: str) -> bool:
+        """Detect Python/Node version incompatibility from pip stderr."""
+        markers = [
+            "requires python",
+            "python_requires",
+            "requires-python",
+            "not supported on this platform",
+            "incompatible with this version",
+            "python version",
+        ]
+        lower = error_msg.lower()
+        return any(m in lower for m in markers)
+
+    def _pip_install_with_fallback(
+        self, package: str, deadline: float | None = None,
+    ) -> str:
+        """Try up to three install strategies for a single package.
+
+        Returns the strategy that succeeded: ``"installed"``,
+        ``"installed-binary-only"``, ``"installed-no-deps"``, or ``"failed"``.
+
+        Annotation guards:
+        - If remaining budget < 10s before strategy 2 or 3, skip and record
+          as ``"failed"`` immediately.
+        - If strategy 1 fails with a Python version incompatibility error,
+          skip strategies 2 and 3 (they'll fail identically).
+        """
+        # Strategy 1: normal install
+        try:
+            self._pip_install([package], deadline=deadline)
+            self.dep_install_results[package] = "installed"
+            return "installed"
+        except DependencyInstallError as exc:
+            stderr = str(exc)
+            if self._is_version_incompatible(stderr):
+                logger.warning(
+                    "[PY-DEPS] %s: version-incompatible, skipping fallbacks", package,
+                )
+                self.dep_install_results[package] = "failed"
+                return "failed"
+
+        # Strategy 2: pre-built wheel only (skip if <10s remaining)
+        if deadline is not None and (deadline - time.monotonic()) < 10:
+            logger.info("[PY-DEPS] %s: <10s remaining, skipping fallbacks", package)
+            self.dep_install_results[package] = "failed"
+            return "failed"
+        try:
+            self._pip_install([package, "--only-binary=:all:"], deadline=deadline)
+            logger.info("[PY-DEPS] %s installed via binary-only fallback", package)
+            self.dep_install_results[package] = "installed-binary-only"
+            return "installed-binary-only"
+        except DependencyInstallError:
+            pass
+
+        # Strategy 3: no transitive deps (skip if <10s remaining)
+        if deadline is not None and (deadline - time.monotonic()) < 10:
+            logger.info("[PY-DEPS] %s: <10s remaining, skipping no-deps fallback", package)
+            self.dep_install_results[package] = "failed"
+            return "failed"
+        try:
+            self._pip_install([package, "--no-deps"], deadline=deadline)
+            logger.info("[PY-DEPS] %s installed via no-deps fallback", package)
+            self.dep_install_results[package] = "installed-no-deps"
+            return "installed-no-deps"
+        except DependencyInstallError:
+            logger.warning("[PY-DEPS] %s failed all install strategies", package)
+            self.dep_install_results[package] = "failed"
+            return "failed"
+
     def _pip_install_individually(
         self, req_path: Path, deadline: float | None = None,
     ) -> int:
@@ -585,12 +673,10 @@ class SessionManager:
             if deadline is not None and time.monotonic() > deadline:
                 logger.warning("[PY-DEPS] Budget exceeded, skipping remaining packages")
                 break
-            try:
-                logger.debug("[PY-DEPS] Installing individual package: %s", line)
-                self._pip_install([line], deadline=deadline)
+            logger.debug("[PY-DEPS] Installing individual package: %s", line)
+            result = self._pip_install_with_fallback(line, deadline=deadline)
+            if result != "failed":
                 successful += 1
-            except DependencyInstallError:
-                logger.warning("[PY-DEPS] Failed to install %s, skipping", line)
         return successful
 
     def _install_from_package_list(
@@ -620,10 +706,7 @@ class SessionManager:
                     if deadline is not None and time.monotonic() > deadline:
                         logger.warning("[PY-DEPS] Budget exceeded, skipping remaining packages")
                         break
-                    try:
-                        self._pip_install([spec], deadline=deadline)
-                    except DependencyInstallError:
-                        logger.warning("Failed to install %s, skipping", spec)
+                    self._pip_install_with_fallback(spec, deadline=deadline)
 
     # ── JS Dependency Installation ──
 

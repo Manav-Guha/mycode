@@ -46,7 +46,7 @@ from mycode.interface import (
 from mycode.js_ingester import JsProjectIngester
 from mycode.library import ComponentLibrary, ProfileMatch
 from mycode.recorder import InteractionRecorder
-from mycode.report import DiagnosticReport, ReportGenerator
+from mycode.report import DiagnosticReport, Finding, ReportGenerator
 from mycode.scenario import (
     LLMConfig,
     ScenarioGenerator,
@@ -192,6 +192,7 @@ class PipelineResult:
     discovery_paths: list[Path] = field(default_factory=list)
     total_duration_ms: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    failed_deps: list[str] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -675,6 +676,13 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             # Surface dependency install warnings
             if session.dep_install_warnings:
                 result.warnings.extend(session.dep_install_warnings)
+            # Track which deps failed all install strategies
+            failed = [
+                pkg for pkg, s in session.dep_install_results.items()
+                if s == "failed"
+            ]
+            if failed:
+                result.failed_deps = failed
 
             # ── Stage 3: Project Ingestion ──
             ingestion = _run_ingestion(
@@ -790,6 +798,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
                     project_name, config, result,
                     constraints=constraints,
                     prior_state=prior_state,
+                    failed_deps=result.failed_deps or None,
                 )
 
                 # Record report
@@ -1288,6 +1297,7 @@ def _run_report_generation(
     result: PipelineResult,
     constraints: Optional[OperationalConstraints] = None,
     prior_state=None,
+    failed_deps: list[str] | None = None,
 ) -> None:
     """Stage 9: Generate the diagnostic report."""
     stage_start = time.monotonic()
@@ -1306,6 +1316,40 @@ def _run_report_generation(
             prior_state=prior_state,
         )
         result.report = report
+
+        # Surface failed deps as INFO finding
+        if failed_deps:
+            report.failed_deps = list(failed_deps)
+            # Check which failed deps have corpus/profile coverage
+            profile_names = {pm.dependency_name for pm in matches if pm.profile is not None}
+            covered = [d for d in failed_deps if d in profile_names]
+            uncovered = [d for d in failed_deps if d not in profile_names]
+
+            parts: list[str] = []
+            if covered:
+                parts.append(
+                    f"{', '.join(covered[:10])} — findings based on "
+                    f"corpus prediction data only, not empirical testing"
+                )
+            if uncovered:
+                parts.append(
+                    f"{', '.join(uncovered[:10])} — could not be installed "
+                    f"or assessed in the test environment"
+                )
+            desc = (
+                f"{len(failed_deps)} dependenc"
+                f"{'y' if len(failed_deps) == 1 else 'ies'} "
+                f"could not be installed in the test environment: "
+                + "; ".join(parts)
+                + "."
+            )
+            finding = Finding(
+                title="Some dependencies could not be installed",
+                severity="info",
+                category="environment",
+                description=desc,
+            )
+            report.incomplete_tests.append(finding)
 
         result.stages.append(StageResult(
             stage="report_generation",

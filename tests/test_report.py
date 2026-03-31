@@ -5194,3 +5194,37 @@ class TestJsonPromptField:
         prompt = d["findings"][0]["prompt"]
         assert "thread safety" in prompt
         assert "JSON" in prompt
+
+
+# ── Failed Dependencies in Report ──
+
+
+class TestFailedDepsInReport:
+    """Test that failed_deps field appears correctly in report output."""
+
+    def test_failed_deps_in_json(self):
+        """failed_deps list appears in JSON output."""
+        report = DiagnosticReport()
+        report.failed_deps = ["sentry_sdk", "psycopg2"]
+        d = report.as_dict()
+        assert d["failed_dependencies"] == ["sentry_sdk", "psycopg2"]
+
+    def test_failed_deps_empty_by_default(self):
+        """No failed_deps key when list is empty."""
+        report = DiagnosticReport()
+        d = report.as_dict()
+        assert d["failed_dependencies"] == []
+
+    def test_failed_deps_in_text(self):
+        """failed_deps info appears in incomplete_tests when populated."""
+        report = DiagnosticReport()
+        report.failed_deps = ["broken-pkg"]
+        finding = Finding(
+            title="Some dependencies could not be installed",
+            severity="info",
+            category="environment",
+            description="1 dependency could not be installed: broken-pkg",
+        )
+        report.incomplete_tests.append(finding)
+        text = report.as_text()
+        assert "could not be installed" in text

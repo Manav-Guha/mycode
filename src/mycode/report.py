@@ -198,6 +198,7 @@ class DiagnosticReport:
     _analysis_depth: str | None = None
     baseline_failed: bool = False
     _baseline_report_text: str = ""
+    failed_deps: list[str] = field(default_factory=list)
     http_ran: bool = False
     project_name: str = ""
     model_used: str = "offline"
@@ -715,6 +716,7 @@ class DiagnosticReport:
             ],
             "version_discrepancies": list(self.version_flags),
             "unrecognized_dependencies": list(self.unrecognized_deps),
+            "failed_dependencies": list(self.failed_deps),
             "operational_context": self.operational_context,
             "vertical": self.vertical,
             "architectural_pattern": self.architectural_pattern,

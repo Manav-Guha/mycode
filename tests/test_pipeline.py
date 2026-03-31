@@ -234,6 +234,14 @@ class TestPipelineResult:
         assert r.report is None
         assert r.recording_path is None
 
+    def test_failed_deps_default_empty(self):
+        r = PipelineResult()
+        assert r.failed_deps == []
+
+    def test_failed_deps_populated(self):
+        r = PipelineResult(failed_deps=["sentry_sdk", "psycopg2"])
+        assert r.failed_deps == ["sentry_sdk", "psycopg2"]
+
 
 # ── Pipeline with forced language (skips detection) ──
 
