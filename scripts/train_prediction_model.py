@@ -18,7 +18,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import cross_val_predict
 from sklearn.multioutput import MultiOutputClassifier
 from xgboost import XGBClassifier
@@ -111,16 +111,24 @@ def main():
     else:
         Y_scores = Y_proba_cv
 
-    # Compute per-target AUC
+    # Binary predictions at 0.5 threshold for precision/recall/F1
+    Y_pred_cv = (Y_scores >= 0.5).astype(int)
+
+    # Compute per-target AUC, precision, recall, F1
     per_target_auc = {}
     aucs = []
-    print("\n  Per-target AUC:")
+    precisions = []
+    recalls = []
+    f1s = []
+    print("\n  Per-target metrics:")
+    print(f"  {'':2s} {'AUC':>5s}  {'Prec':>5s}  {'Rec':>5s}  {'F1':>5s}  {'Pos':>5s}  {'Title'}")
     for i, col in enumerate(viable_cols):
         y_true = Y_viable[:, i]
         y_score = Y_scores[:, i]
+        y_pred = Y_pred_cv[:, i]
         n_pos = int(y_true.sum())
         n_neg = len(y_true) - n_pos
-        title = target_info.get(col, {}).get("title", col)[:55]
+        title = target_info.get(col, {}).get("title", col)[:45]
         if n_pos < 2 or n_neg < 2:
             print(f"    {col}: SKIP (n_pos={n_pos})")
             continue
@@ -129,13 +137,22 @@ def main():
         except ValueError:
             print(f"    {col}: SKIP (AUC undefined)")
             continue
+        prec = precision_score(y_true, y_pred, average="binary", zero_division=0)
+        rec = recall_score(y_true, y_pred, average="binary", zero_division=0)
+        f1 = f1_score(y_true, y_pred, average="binary", zero_division=0)
         aucs.append(auc)
+        precisions.append(prec)
+        recalls.append(rec)
+        f1s.append(f1)
         per_target_auc[col] = round(auc, 4)
         marker = "  " if auc >= 0.60 else "!!"
-        print(f"  {marker} {auc:.3f}  ({n_pos:4d} pos)  {title}")
+        print(f"  {marker} {auc:.3f}  {prec:.3f}  {rec:.3f}  {f1:.3f}  {n_pos:5d}  {title}")
 
     mean_auc = float(np.mean(aucs)) if aucs else 0.0
-    print(f"\n  Mean AUC: {mean_auc:.3f} (across {len(aucs)} targets)")
+    mean_prec = float(np.mean(precisions)) if precisions else 0.0
+    mean_rec = float(np.mean(recalls)) if recalls else 0.0
+    mean_f1 = float(np.mean(f1s)) if f1s else 0.0
+    print(f"\n  Mean AUC: {mean_auc:.3f}  Prec: {mean_prec:.3f}  Rec: {mean_rec:.3f}  F1: {mean_f1:.3f}  (across {len(aucs)} targets)")
 
     if mean_auc < 0.50:
         print("WARNING: Mean AUC below random. Model may not be useful.")
