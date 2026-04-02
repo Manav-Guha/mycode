@@ -275,8 +275,11 @@ def detect_languages(project_path: Path) -> set[str]:
 
     if not detected:
         raise LanguageDetectionError(
-            "Could not determine project language — no Python or JavaScript "
-            "files found."
+            "myCode currently supports Python and JavaScript/TypeScript "
+            "projects. Your project doesn't appear to use a supported "
+            "language. If your project does use Python or JS/TS, make sure "
+            "it has a requirements.txt, pyproject.toml, setup.py, or "
+            "package.json in the repository."
         )
 
     return detected

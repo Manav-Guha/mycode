@@ -17,6 +17,7 @@ from mycode.interface import ConversationalInterface, InterfaceResult, Operation
 from mycode.js_ingester import JsProjectIngester
 from mycode.library import ComponentLibrary
 from mycode.pipeline import (
+    LanguageDetectionError,
     detect_language,
     detect_languages,
     determine_primary_language,
@@ -295,6 +296,11 @@ def handle_preflight(
         )
 
     except FetchError as exc:
+        job.status = "preflight_failed"
+        job.error = str(exc)
+        return PreflightResponse(job_id=job.id, error=str(exc))
+
+    except LanguageDetectionError as exc:
         job.status = "preflight_failed"
         job.error = str(exc)
         return PreflightResponse(job_id=job.id, error=str(exc))
