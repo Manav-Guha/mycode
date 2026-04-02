@@ -89,6 +89,9 @@ class Job:
     progress_stage: str = ""
     progress_start_time: float = 0.0
 
+    # CI gate
+    ci_threshold: str = ""
+
     # Conversation state
     conversation_summary: str = ""
     turn1_response: str = ""

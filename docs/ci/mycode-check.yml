@@ -1,0 +1,88 @@
+# myCode Stress Test — GitHub Action Template
+#
+# Copy this file into your repo at .github/workflows/mycode-check.yml
+#
+# Required secrets:
+#   MYCODE_API_KEY  — CI API key (generate via POST /api/admin/ci-keys)
+#
+# Required variables (Settings → Variables → Actions):
+#   MYCODE_API_URL  — Base URL of the myCode API (no trailing slash)
+#
+# Optional variables:
+#   MYCODE_THRESHOLD — "report_only" (default), "critical", "warning", "any"
+#   MYCODE_TIER      — Analysis depth: 1 (quick), 2 (standard, default), 3 (deep)
+
+name: myCode Stress Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  mycode-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Run myCode stress test
+        env:
+          MYCODE_API_KEY: ${{ secrets.MYCODE_API_KEY }}
+          MYCODE_API_URL: ${{ vars.MYCODE_API_URL }}
+          MYCODE_THRESHOLD: ${{ vars.MYCODE_THRESHOLD || 'report_only' }}
+          MYCODE_TIER: ${{ vars.MYCODE_TIER || '2' }}
+        run: |
+          set -euo pipefail
+
+          # Require MYCODE_API_URL
+          if [ -z "${MYCODE_API_URL:-}" ]; then
+            echo "::error::MYCODE_API_URL not configured. Set it in Settings → Variables → Actions."
+            exit 1
+          fi
+
+          # Submit check
+          RESPONSE=$(curl -sf -X POST "${MYCODE_API_URL}/api/ci/check" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"repo_url\": \"https://github.com/${{ github.repository }}\",
+              \"threshold\": \"${MYCODE_THRESHOLD}\",
+              \"tier\": ${MYCODE_TIER},
+              \"api_key\": \"${MYCODE_API_KEY}\"
+            }")
+
+          JOB_ID=$(echo "$RESPONSE" | jq -r '.job_id')
+          echo "myCode job: $JOB_ID"
+
+          if [ "$JOB_ID" = "null" ] || [ -z "$JOB_ID" ]; then
+            echo "::error::Failed to submit myCode check: $RESPONSE"
+            exit 1
+          fi
+
+          # Poll for result (15s intervals, 15min timeout)
+          DEADLINE=$((SECONDS + 900))
+          while [ $SECONDS -lt $DEADLINE ]; do
+            sleep 15
+            RESULT=$(curl -sf "${MYCODE_API_URL}/api/ci/result/${JOB_ID}")
+            STATUS=$(echo "$RESULT" | jq -r '.status')
+
+            if [ "$STATUS" = "running" ]; then
+              echo "Still running..."
+              continue
+            fi
+
+            echo "$RESULT" | jq .
+
+            if [ "$STATUS" = "pass" ] || [ "$STATUS" = "report_only" ]; then
+              echo "::notice::myCode check passed"
+              exit 0
+            elif [ "$STATUS" = "fail" ]; then
+              SUMMARY=$(echo "$RESULT" | jq -r '.summary')
+              echo "::error::myCode check failed: $SUMMARY"
+              exit 1
+            elif [ "$STATUS" = "error" ]; then
+              echo "::warning::myCode check encountered an error"
+              exit 0
+            fi
+          done
+
+          echo "::warning::myCode check timed out after 15 minutes"
+          exit 0

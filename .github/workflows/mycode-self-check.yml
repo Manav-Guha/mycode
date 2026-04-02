@@ -1,0 +1,73 @@
+# myCode Self-Check — dogfood workflow
+#
+# Runs myCode against its own repo on pull requests.
+# Always report_only — never blocks PRs, just surfaces findings.
+#
+# Required secrets:
+#   MYCODE_API_KEY — CI API key
+#
+# Required variables:
+#   MYCODE_API_URL — Base URL of the myCode API (no trailing slash)
+
+name: myCode Self-Check
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  self-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Run myCode on this repo
+        env:
+          MYCODE_API_KEY: ${{ secrets.MYCODE_API_KEY }}
+          MYCODE_API_URL: ${{ vars.MYCODE_API_URL }}
+        run: |
+          set -euo pipefail
+
+          # Require MYCODE_API_URL
+          if [ -z "${MYCODE_API_URL:-}" ]; then
+            echo "::error::MYCODE_API_URL not configured. Set it in Settings → Variables → Actions."
+            exit 1
+          fi
+
+          RESPONSE=$(curl -sf -X POST "${MYCODE_API_URL}/api/ci/check" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"repo_url\": \"https://github.com/${{ github.repository }}\",
+              \"threshold\": \"report_only\",
+              \"tier\": 2,
+              \"api_key\": \"${MYCODE_API_KEY}\"
+            }")
+
+          JOB_ID=$(echo "$RESPONSE" | jq -r '.job_id')
+          echo "myCode job: $JOB_ID"
+
+          if [ "$JOB_ID" = "null" ] || [ -z "$JOB_ID" ]; then
+            echo "::error::Failed to submit: $RESPONSE"
+            exit 1
+          fi
+
+          DEADLINE=$((SECONDS + 900))
+          while [ $SECONDS -lt $DEADLINE ]; do
+            sleep 15
+            RESULT=$(curl -sf "${MYCODE_API_URL}/api/ci/result/${JOB_ID}")
+            STATUS=$(echo "$RESULT" | jq -r '.status')
+
+            if [ "$STATUS" = "running" ]; then
+              echo "Still running..."
+              continue
+            fi
+
+            echo "## myCode Self-Check Results" >> $GITHUB_STEP_SUMMARY
+            echo '```json' >> $GITHUB_STEP_SUMMARY
+            echo "$RESULT" | jq . >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+
+            echo "$RESULT" | jq .
+            exit 0
+          done
+
+          echo "::warning::Timed out"
+          exit 0

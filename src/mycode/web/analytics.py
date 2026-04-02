@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-VALID_SOURCES = frozenset({"internal", "hn", "public", "cli", "test_group"})
+VALID_SOURCES = frozenset({"internal", "hn", "public", "cli", "test_group", "ci"})
 _INTERNAL_SOURCES = frozenset({"internal", "test_group"})
 
 # DEPLOYMENT NOTE: Railway ephemeral storage resets on every deploy.
@@ -94,6 +94,10 @@ def get_db() -> sqlite3.Connection:
     conn.execute(_CREATE_TABLE)
     conn.execute(_CREATE_SURVEY_TABLE)
     _ensure_columns(conn)
+
+    from mycode.web.ci_keys import ensure_ci_tables
+    ensure_ci_tables(conn)
+
     conn.commit()
     _local.conn = conn
     return conn

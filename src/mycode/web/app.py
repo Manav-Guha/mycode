@@ -43,6 +43,14 @@ from mycode.web.analytics import (
     validate_source,
     validate_survey,
 )
+from mycode.web.ci import (
+    handle_admin_overrides,
+    handle_ci_check,
+    handle_ci_keys_create,
+    handle_ci_keys_list,
+    handle_ci_override,
+    handle_ci_result,
+)
 from mycode.web.routes import (
     handle_analyze,
     handle_converse,
@@ -305,6 +313,88 @@ async def admin_jobs(
         offset=offset,
     )
     return JSONResponse(content={"jobs": jobs, "count": len(jobs), "total": total})
+
+
+# ── CI Gate ──
+
+
+@app.post("/api/ci/check")
+async def ci_check(request: Request):
+    """Submit a CI stress-test check."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Invalid JSON"}, status_code=400)
+    result = await asyncio.to_thread(
+        handle_ci_check,
+        body.get("repo_url", ""),
+        body.get("threshold", "report_only"),
+        body.get("tier", 2),
+        body.get("api_key", ""),
+    )
+    if "_status" in result:
+        code = result.pop("_status")
+        return JSONResponse(content=result, status_code=code)
+    return JSONResponse(content=result)
+
+
+@app.get("/api/ci/result/{job_id}")
+async def ci_result(job_id: str):
+    """Poll for CI check result."""
+    result = await asyncio.to_thread(handle_ci_result, job_id)
+    if "_status" in result:
+        code = result.pop("_status")
+        return JSONResponse(content=result, status_code=code)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/ci/override/{job_id}")
+async def ci_override(job_id: str, request: Request):
+    """Override a failed CI check."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Invalid JSON"}, status_code=400)
+    result = await asyncio.to_thread(
+        handle_ci_override,
+        job_id,
+        body.get("api_key", ""),
+        body.get("reason", ""),
+    )
+    if "_status" in result:
+        code = result.pop("_status")
+        return JSONResponse(content=result, status_code=code)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/admin/ci-keys")
+async def admin_ci_keys_create(key: str = Query(default="")):
+    """Generate a new CI API key. Requires MYCODE_ADMIN_KEY."""
+    admin_key = os.environ.get("MYCODE_ADMIN_KEY", "")
+    if not admin_key or key != admin_key:
+        return JSONResponse(content={"error": "Forbidden"}, status_code=403)
+    result = await asyncio.to_thread(handle_ci_keys_create)
+    return JSONResponse(content=result)
+
+
+@app.get("/api/admin/ci-keys")
+async def admin_ci_keys_list(key: str = Query(default="")):
+    """List all CI API keys. Requires MYCODE_ADMIN_KEY."""
+    admin_key = os.environ.get("MYCODE_ADMIN_KEY", "")
+    if not admin_key or key != admin_key:
+        return JSONResponse(content={"error": "Forbidden"}, status_code=403)
+    result = await asyncio.to_thread(handle_ci_keys_list)
+    return JSONResponse(content=result)
+
+
+@app.get("/api/admin/overrides")
+async def admin_overrides_list(key: str = Query(default="")):
+    """List all CI overrides. Requires MYCODE_ADMIN_KEY."""
+    admin_key = os.environ.get("MYCODE_ADMIN_KEY", "")
+    if not admin_key or key != admin_key:
+        return JSONResponse(content={"error": "Forbidden"}, status_code=403)
+    result = await asyncio.to_thread(handle_admin_overrides)
+    return JSONResponse(content=result)
 
 
 @app.get("/api/health")
