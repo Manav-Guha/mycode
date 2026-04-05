@@ -1,180 +1,194 @@
-# Plan: Two Fixes — Coverage Warning + Health Endpoint
+# Plan: Three Bug Fixes
 
 **STATUS: AWAITING REVIEW**
 
 ---
 
-## Fix 1: Coverage Warning for Low Scenario Count
+## Bug 1: Fix Prompt Mismatch for "Application server could not start — missing dependency"
 
-### Problem
+### Root Cause
 
-A project with 0-1 recognized dependencies and no coupling points can produce 0-1 scenarios. The report says "All stress test scenarios completed cleanly" identically whether 1 scenario ran or 30 ran. A 1-scenario clean pass gives false confidence — the user thinks their project was thoroughly tested.
+`_pat_flask_concurrency()` in `documents.py:1213-1229` matches **all** Flask findings with `category == "http_load_testing"`, including startup failures. It does not check the title or `failure_pattern`. Since there is no `_pat_flask_startup()` pattern, a Flask startup failure (with `failure_pattern="missing_server_dependency"`) matches the concurrency pattern and gets: "Use database connection pooling (SQLAlchemy pool_size)..."
 
-Confirmed path to 1 scenario:
-- `scenario.py:1284-1307` — the only guaranteed scenario is `unrecognized_deps_generic_stress`, which fires when the `unrecognized` list is non-empty.
-- If a project has zero recognized deps, zero unrecognized deps, and no coupling points (≥3 callers or ≥2 global mutators, `ingester.py:1020-1092`), the scenario list is **empty**.
-- The pipeline handles this with only a warning string (`pipeline.py:1152-1155`), not a user-visible alert.
+FastAPI has a startup-specific pattern (`_pat_fastapi_startup`, `documents.py:1157-1171`) that checks `"could not start" in f.title.lower()`. Flask does not.
 
-### Threshold
+### Evidence
 
-**≤3 scenarios.** Rationale:
-- A single recognized dep with a profile generates 2-5 template scenarios plus 1-2 failure mode scenarios. A project with even one profiled dep gets ≥5 scenarios.
-- ≤3 scenarios means: at most one generic stress test + one or two coupling scenarios. This is not meaningful coverage.
-- The median scenario count across corpus reports is ~15-20. Anything ≤3 is bottom-5th-percentile.
+- `http_load_driver.py:1149-1154`: When server fails with "missing dependency" in error, sets `failure_pattern="missing_server_dependency"` and `diagnosis="...a required dependency is missing."`
+- `documents.py:1213-1220`: `_pat_flask_concurrency` checks only `framework == "flask"` and `f.category in ("http_load_testing", ...)` — no exclusion for startup failures
+- Pattern registry iterates in registration order; `_pat_flask_concurrency` (line 1213) fires before any startup check could run
 
-### Where the warning should appear
+### Proposed Fix
 
-**Both the report and the web UI.**
+Add `_pat_startup_failure()` as a **framework-agnostic** startup pattern, registered **before** `_pat_flask_concurrency`. This handles all frameworks, not just Flask, and checks `failure_pattern` for specific remediation.
 
-#### A. Report (PDF + text + JSON)
-
-**File:** `src/mycode/report.py`
-**Location:** After the stats bar and before findings, in the `as_text()` method at line ~244 and `as_markdown()` method at line ~472.
-
-**Proposed check:** Add after the existing scenario coverage summary block (`report.py:244-252`):
+**File:** `src/mycode/documents.py`
+**Insert:** Before `_pat_flask_concurrency` (line 1213)
 
 ```python
-# Low coverage warning
-if self.scenarios_run <= 3 and not self.findings:
-    sections.append(
-        "\n⚠ Limited test coverage: myCode ran only "
-        f"{self.scenarios_run} scenario{'s' if self.scenarios_run != 1 else ''}. "
-        "This usually means your project's dependencies don't have "
-        "detailed test profiles in myCode's library yet. A clean "
-        "result with limited coverage means fewer things were checked, "
-        "not that nothing can go wrong."
+@_register_pattern
+def _pat_startup_failure(f, framework, fields):
+    if "could not start" not in f.title.lower():
+        return None
+    fp = f.failure_pattern or ""
+    if fp == "missing_server_dependency":
+        return (
+            f"Your {framework} app failed to start because a required "
+            f"dependency is missing from your project.",
+            f"Check that all imports in your main app module are listed "
+            f"in your requirements.txt or package.json. Run your app "
+            f"locally to see which import fails, then add the missing "
+            f"package.",
+        )
+    if fp == "missing_env_config":
+        return (
+            f"Your {framework} app failed to start because required "
+            f"environment variables are not set.",
+            f"Create a .env file with the required variables, or set "
+            f"them in your hosting platform's environment settings. "
+            f"Check your app's documentation or config file for the "
+            f"expected variable names.",
+        )
+    if fp == "missing_external_service":
+        return (
+            f"Your {framework} app failed to start because it cannot "
+            f"connect to an external service (database, cache, API).",
+            f"Make sure your database or external service is running "
+            f"and the connection string is correct. For local "
+            f"development, check that Docker containers or local "
+            f"services are started.",
+        )
+    if fp == "server_syntax_error":
+        return (
+            f"Your {framework} app failed to start due to a syntax "
+            f"error in the code.",
+            f"Run your app locally — the error message will point to "
+            f"the exact file and line. Fix the syntax error and retry.",
+        )
+    # Generic startup failure
+    return (
+        f"Your {framework} app failed to start. This prevents all "
+        f"users from accessing your application.",
+        f"Run your app locally to reproduce the error. Check the "
+        f"startup logs for the specific failure reason.",
     )
 ```
 
-Mirror the same text in `as_markdown()` at line ~472.
+**Also remove** `_pat_fastapi_startup` (lines 1157-1171) since the new pattern covers all frameworks including FastAPI.
 
-**Also in JSON output:** Add a boolean field `low_coverage` to the `as_dict()` method (`report.py:696+`) under `statistics`:
+### Acceptance Criteria
 
-```python
-"low_coverage": self.scenarios_run <= 3,
-```
-
-#### B. Web UI
-
-**File:** `src/mycode/web/worker.py` (line 94 sets `progress_scenarios_total`)
-**Location:** After job completion, the web frontend reads the report JSON. The `low_coverage` field in the JSON output is sufficient — the frontend can check it and display a banner.
-
-No backend change needed beyond the JSON field. Frontend change: check `report.statistics.low_coverage` and show a yellow banner with the same text.
-
-### Visual distinction
-
-**Yes — a low-scenario clean pass should look different from a full-coverage clean pass.**
-
-Currently, the report executive summary uses a score label system. Proposed change in `_compute_score_label()` or equivalent: when `scenarios_run <= 3` and no findings, use a label like **"Limited check — passed"** instead of the unconditional **"Passed"**.
-
-**File:** `src/mycode/report.py`, in the summary/score rendering section (~line 450-468).
-
-Add before the existing score logic:
-
-```python
-if total <= 3 and not self.findings:
-    score_label = "Limited coverage — no issues found"
-```
-
-### Acceptance criteria
-
-1. A project with 1 scenario and no findings shows "Limited test coverage" warning in report text, markdown, and PDF.
-2. Report JSON includes `"low_coverage": true` in statistics.
-3. Score label distinguishes limited-coverage pass from full-coverage pass.
-4. A project with 10+ scenarios and no findings shows no warning (no regression).
-5. Existing tests pass.
+1. Flask project with missing dependency gets: "Check that all imports...are listed in your requirements.txt"
+2. Flask project with env variable issue gets: "Create a .env file..."
+3. FastAPI startup failures still get correct prompts (covered by same pattern)
+4. Flask concurrency findings (non-startup) still get the pooling/gunicorn advice
+5. Existing tests pass
 
 ---
 
-## Fix 2: /api/health Endpoint Slowness
+## Bug 2: React/JS Packages Flagged as Missing pip Dependencies
 
-### Problem
+### Root Cause
 
-The `/api/health` endpoint takes >10 seconds on first hit (or every 5 minutes when cache expires). This causes:
-1. The HTTP load driver flags myCode's own health endpoint as slow when self-testing (`_SLOW_BASELINE_MS = 10_000` at `http_load_driver.py:90`).
-2. External uptime monitors (Railway, UptimeRobot) see timeouts.
-3. The endpoint blocks the async event loop during the slow path.
+When a project is detected as **multi-language** (has both `requirements.txt` and `package.json`), or when a Python project has a `package.json` from a build dependency, the Python ingester extracts dependencies only from `requirements.txt` — this is correct. But the viability gate and report may still reference JS packages.
 
-### What it currently does
+The actual bug path: The report's missing-dependency rendering in `report.py:2088` uses a heuristic `is_js = any(d.name.startswith("@") for d in ingestion.dependencies)` to decide whether to show "declared but not installed" (Python) vs "no stress profile available" (JS). Packages like `react`, `react-dom`, `react-scripts` do NOT start with `@`, so they're treated as Python packages and flagged as "declared but not installed."
 
-**File:** `src/mycode/web/routes.py:893-919` (`handle_health()`)
-**Called from:** `src/mycode/web/app.py:400-404` (`health()` async endpoint)
+This happens when:
+1. A React project is misclassified as Python (unlikely but possible if it has a `requirements.txt`)
+2. The multi-language ingestion picks up both Python and JS deps, but renders all missing deps using the Python template
+3. The `@` heuristic misses non-scoped JS packages
+
+### Evidence
+
+- `report.py:2088`: `is_js = any(d.name.startswith("@") for d in ingestion.dependencies)` — fails for `react`, `react-dom`, `react-scripts`
+- `ingester.py:683`: Sets `is_missing=True` when a dep is not found via `importlib.metadata` (Python-only check)
+- `pipeline.py:847-860`: Language router sends Python projects through `ProjectIngester` which only knows pip
+
+### Proposed Fix
+
+Replace the `@`-prefix heuristic with the actual language from the pipeline. The `IngestionResult` already has a `language` field (`ingester.py:209`).
+
+**File:** `src/mycode/report.py`, line ~2088
+**Change:** Replace `is_js = any(d.name.startswith("@") ...` with `is_js = ingestion.language == "javascript"`
+
+The `_build_confidence_note` function and the `_record_unrecognized_deps` method both receive `ingestion` — the language is available.
+
+Additionally, in the dependency coverage section (`report.py:2203-2230`), when `ingestion.language == "javascript"`, deps should not be flagged as "declared in requirements but not installed" — they should be flagged as "no stress profile available" (info, not warning).
+
+### Acceptance Criteria
+
+1. A JavaScript project's deps (react, react-dom) show as "no stress profile" (info), not "declared but not installed" (warning)
+2. A Python project's missing deps still show as "declared but not installed" (warning)
+3. Multi-language projects use per-dep language awareness (deps from package.json are JS, deps from requirements.txt are Python)
+4. Existing tests pass
+
+---
+
+## Bug 3: Project Name Extraction Pulling Wrong Name
+
+### Root Cause
+
+`_infer_project_name()` in `pipeline.py:993-1035` reads `package.json` `name` field as the project name. If the repo's `package.json` has `"name": "sumo-unity3d-connection"`, the project is named "Sumo Unity3d Connection" regardless of what the user typed.
+
+The user's description ("TRAFFIC REGULATOR APPLICATION") goes into `constraints.project_description` at `routes.py:806`. This is stored in `report.user_project_description` at `report.py:1073`. But the report's `display_name` at `report.py:438` uses `self.project_description` (auto-generated) first, which incorporates the `package.json` name.
+
+The priority chain is:
+1. `report.py:438`: `display_name = self.project_description or project_name or "Your Project"`
+2. `self.project_description` is set by `_generate_project_description()` at `report.py:1097` which uses `project_name` (from `_infer_project_name()` → package.json)
+3. The user's stated name in `constraints.project_description` is stored but **never used as the display name**
+
+### Evidence
+
+- `pipeline.py:1020-1028`: Reads `package.json` `name` field, title-cases it → "Sumo Unity3d Connection"
+- `routes.py:246`: `project_name = _infer_project_name(project_path)` — set at preflight, before user submits intent
+- `routes.py:806`: User's description stored as `constraints.project_description`
+- `report.py:1073`: Stored as `report.user_project_description`
+- `report.py:438`: `display_name` uses `self.project_description` (auto-generated), never `user_project_description`
+
+### Proposed Fix
+
+When `user_project_description` is set, use it as the display name in preference to the auto-generated description. The auto-generated description can still appear as supplementary context.
+
+**File:** `src/mycode/report.py`, line ~438
+**Change:**
 
 ```python
-def handle_health() -> HealthResponse:
-    now = time.time()
-    if "result" not in _docker_cache or now - _docker_cache.get("ts", 0) > 300:
-        from mycode.container import is_docker_available   # lazy import
-        _docker_cache["result"] = is_docker_available()    # BLOCKING: subprocess
-        _docker_cache["ts"] = now
-    ...
+# Before:
+display_name = self.project_description or project_name or "Your Project"
+
+# After:
+display_name = (
+    self.user_project_description
+    or self.project_description
+    or project_name
+    or "Your Project"
+)
 ```
 
-`is_docker_available()` (`container.py:35-49`) runs `docker info` as a **blocking subprocess** with a **10-second timeout**. On Railway (where Docker is not available), this blocks for the full 10 seconds before timing out.
+Apply the same change in `as_text()` (line ~215 area, wherever display_name is computed for text output).
 
-The async endpoint calls `handle_health()` **synchronously** — not via `asyncio.to_thread()`. This blocks the entire event loop for up to 10 seconds.
+Also apply in `_generate_project_description()` (`report.py:3315`): when a `user_project_description` exists, use it as the project name parameter instead of the inferred name.
 
-The 5-minute cache (`_docker_cache`) means this only happens once per 5 minutes, but that's enough to trigger the slow-baseline detector on self-tests and cause uptime monitor alerts.
+### Acceptance Criteria
 
-### What a health endpoint should do
-
-Return immediately with server status. No subprocess calls, no external dependencies, no blocking I/O. Health endpoints exist for load balancers and monitors to verify the process is alive and accepting requests.
-
-### Proposed fix
-
-**Remove the Docker check from the health endpoint entirely.** Docker availability is irrelevant to server health — it's a feature flag, not a liveness signal.
-
-**File:** `src/mycode/web/routes.py:893-919`
-
-Replace `handle_health()` with:
-
-```python
-def handle_health() -> HealthResponse:
-    """Return server health status. Must be fast — no subprocess calls."""
-    version = "0.1.2"
-    try:
-        import importlib.metadata
-        version = importlib.metadata.version("mycode-ai")
-    except Exception:
-        pass
-
-    return HealthResponse(
-        status="ok",
-        docker_available=False,  # Railway doesn't have Docker; remove field in next schema bump
-        version=version,
-        active_jobs=store.active_count(),
-        max_concurrent_jobs=MAX_CONCURRENT_JOBS,
-    )
-```
-
-This removes:
-- The `_docker_cache` dict (lines 889-890) — no longer needed
-- The `is_docker_available()` import and call (lines 896-902)
-- The blocking subprocess on the event loop
-
-**`docker_available` field:** Set to `False` unconditionally. Railway doesn't have Docker. If Docker detection is needed elsewhere (e.g., for the `--containerised` flag), it should be checked at job submission time, not on every health poll. The `HealthResponse` schema (`web/schemas.py:156-161`) can keep the field for backward compatibility; remove it in a future schema bump.
-
-**Alternative (if Docker status must stay on health):** Move the check to a background task that runs on startup and every 5 minutes, storing the result in a module-level variable. The health endpoint reads the cached value without blocking. But this is overengineering — Docker isn't available on Railway and the field serves no current purpose.
-
-### Acceptance criteria
-
-1. `GET /api/health` returns in <100ms consistently (no 10-second spikes).
-2. Response still includes `status`, `version`, `active_jobs`, `max_concurrent_jobs`.
-3. `docker_available` field is `False` (matches Railway reality).
-4. No blocking subprocess call on the async event loop.
-5. Existing health-endpoint tests pass (update expected `docker_available` if tests assert `True`).
+1. A project submitted with description "TRAFFIC REGULATOR APPLICATION" shows that as the report title, not "Sumo Unity3d Connection"
+2. A project submitted without a description still shows the auto-detected name from package.json/pyproject.toml
+3. The auto-generated technical description still appears in the report body (not lost)
+4. Existing tests pass
 
 ---
 
 ## Implementation Order
 
-1. Fix 2 first (health endpoint) — 10 minutes, isolated change, no risk.
-2. Fix 1 second (coverage warning) — 30 minutes, touches report rendering in multiple output formats.
+1. Bug 1 (fix prompt) — 15 minutes, isolated to documents.py pattern registry
+2. Bug 3 (project name) — 10 minutes, isolated to report.py display name logic
+3. Bug 2 (JS deps) — 20 minutes, touches report rendering and needs careful language-awareness threading
 
 ## Files Modified
 
-| Fix | File | Lines | Change |
+| Bug | File | Lines | Change |
 |-----|------|-------|--------|
-| 2 | `src/mycode/web/routes.py` | 889-919 | Remove Docker check, simplify `handle_health()` |
-| 1 | `src/mycode/report.py` | ~244, ~472, ~696 | Add low-coverage warning in text/markdown/JSON |
-| 1 | `src/mycode/report.py` | ~450-468 | Distinguish score label for limited coverage |
+| 1 | `src/mycode/documents.py` | ~1157-1229 | Add `_pat_startup_failure`, remove `_pat_fastapi_startup` |
+| 3 | `src/mycode/report.py` | ~438, ~215 | Prefer `user_project_description` for display name |
+| 2 | `src/mycode/report.py` | ~2088 | Replace `@`-prefix heuristic with `ingestion.language` |

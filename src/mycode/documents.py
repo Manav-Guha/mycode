@@ -1155,20 +1155,51 @@ def _pat_fastapi_concurrency(f, framework, fields):
 
 
 @_register_pattern
-def _pat_fastapi_startup(f, framework, fields):
-    if (
-        framework == "fastapi"
-        and f.category == "http_load_testing"
-        and "could not start" in f.title.lower()
-    ):
+def _pat_startup_failure(f, framework, fields):
+    if "could not start" not in f.title.lower():
+        return None
+    fp = f.failure_pattern or ""
+    if fp == "missing_server_dependency":
         return (
-            "Your FastAPI app failed to start because a required dependency "
-            "is missing.",
-            "Check that all imports in your main app module are installed. "
-            "Add missing packages to requirements.txt or pyproject.toml "
-            "dependencies (not just dev/optional groups).",
+            f"Your {framework} app failed to start because a required "
+            f"dependency is missing from your project.",
+            f"Check that all imports in your main app module are listed "
+            f"in your requirements.txt or package.json. Run your app "
+            f"locally to see which import fails, then add the missing "
+            f"package.",
         )
-    return None
+    if fp == "missing_env_config":
+        return (
+            f"Your {framework} app failed to start because required "
+            f"environment variables are not set.",
+            f"Create a .env file with the required variables, or set "
+            f"them in your hosting platform's environment settings. "
+            f"Check your app's documentation or config file for the "
+            f"expected variable names.",
+        )
+    if fp == "missing_external_service":
+        return (
+            f"Your {framework} app failed to start because it cannot "
+            f"connect to an external service (database, cache, API).",
+            f"Make sure your database or external service is running "
+            f"and the connection string is correct. For local "
+            f"development, check that Docker containers or local "
+            f"services are started.",
+        )
+    if fp == "server_syntax_error":
+        return (
+            f"Your {framework} app failed to start due to a syntax "
+            f"error in the code.",
+            f"Run your app locally — the error message will point to "
+            f"the exact file and line. Fix the syntax error and retry.",
+        )
+    # Generic startup failure
+    return (
+        f"Your {framework} app failed to start. This prevents all "
+        f"users from accessing your application.",
+        f"Run your app locally to reproduce the error. Check the "
+        f"startup logs for the specific failure reason.",
+    )
 
 
 @_register_pattern

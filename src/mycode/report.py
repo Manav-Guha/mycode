@@ -434,8 +434,13 @@ class DiagnosticReport:
         if not date:
             date = _dt.date.today().isoformat()
 
-        # Use auto-generated description, then fall back to project_name
-        display_name = self.project_description or project_name or "Your Project"
+        # Use user-stated description (title-cased) first, then auto-generated,
+        # then the inferred project_name, then fallback.
+        if self.user_project_description:
+            # Title-case normalises all-caps input like "TRAFFIC REGULATOR"
+            display_name = self.user_project_description.strip().title()
+        else:
+            display_name = self.project_description or project_name or "Your Project"
 
         lines: list[str] = []
 
@@ -2084,8 +2089,14 @@ class ReportGenerator:
         outdated: list[DependencyInfo] = []
         missing: list[DependencyInfo] = []
 
-        # Detect JS/TS project — npm scoped packages start with @
-        is_js = any(d.name.startswith("@") for d in ingestion.dependencies)
+        # Detect JS/TS project from ingester language classification.
+        # Fall back to @-scoped package heuristic when language is unset
+        # (e.g. synthetic test data).
+        is_js = (
+            ingestion.language in ("javascript", "multi")
+            or (not ingestion.language
+                and any(d.name.startswith("@") for d in ingestion.dependencies))
+        )
 
         for dep in ingestion.dependencies:
             if dep.is_dev:
