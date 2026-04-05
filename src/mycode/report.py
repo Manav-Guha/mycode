@@ -251,6 +251,18 @@ class DiagnosticReport:
                 f"(see below)."
             )
 
+        # Low coverage warning
+        if self.scenarios_run <= 3:
+            sections.append(
+                f"\nLimited test coverage: myCode ran only "
+                f"{self.scenarios_run} scenario"
+                f"{'s' if self.scenarios_run != 1 else ''}. "
+                "This usually means your project's dependencies don't "
+                "have detailed test profiles in myCode's library yet. "
+                "A result with limited coverage means fewer things were "
+                "checked — not that nothing can go wrong."
+            )
+
         # Confidence note
         if self.confidence_note:
             sections.append(f"\n{self.confidence_note}")
@@ -446,6 +458,15 @@ class DiagnosticReport:
 
         if total == 0:
             score_label = "No tests ran"
+        elif total <= 3:
+            issue_count = critical_count + warning_count
+            if issue_count > 0:
+                score_label = (
+                    f"Limited coverage — {issue_count} "
+                    f"issue{'s' if issue_count != 1 else ''} found"
+                )
+            else:
+                score_label = "Limited coverage — no issues found"
         elif critical_count > 0:
             score_label = "Needs attention"
         elif warning_count > 0:
@@ -477,6 +498,18 @@ class DiagnosticReport:
                 f"{total} scenarios. "
                 f"{len(self.incomplete_tests)} could not be run "
                 f"(see below)."
+            )
+            lines.append("")
+
+        # Low coverage warning
+        if total <= 3:
+            lines.append(
+                f"> **Limited test coverage:** myCode ran only "
+                f"{total} scenario{'s' if total != 1 else ''}. "
+                "This usually means your project's dependencies don't "
+                "have detailed test profiles in myCode's library yet. "
+                "A result with limited coverage means fewer things were "
+                "checked — not that nothing can go wrong."
             )
             lines.append("")
 
@@ -709,6 +742,7 @@ class DiagnosticReport:
                 "recognized_dependencies": self.recognized_dep_count,
                 "recognized_dependency_names": list(self.recognized_dep_names),
                 "unrecognized_dependencies": len(self.unrecognized_deps),
+                "low_coverage": self.scenarios_run <= 3,
             },
             "findings": [_finding_dict(f) for f in self.findings],
             "incomplete_tests": [_finding_dict(f) for f in self.incomplete_tests],

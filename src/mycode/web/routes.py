@@ -886,23 +886,12 @@ def handle_predict(job_id: str) -> dict:
     }
 
 
-# Rechecked every 5 minutes.
-_docker_cache: dict[str, object] = {}
-
-
 def handle_health() -> HealthResponse:
-    """Return server health status."""
-    now = time.time()
-    if "result" not in _docker_cache or now - _docker_cache.get("ts", 0) > 300:
-        try:
-            from mycode.container import is_docker_available
-            _docker_cache["result"] = is_docker_available()
-        except Exception:
-            _docker_cache["result"] = False
-        _docker_cache["ts"] = now
+    """Return server health status.
 
-    docker_available = bool(_docker_cache.get("result", False))
-
+    Must be fast — no subprocess calls, no external dependencies.
+    Docker availability is not checked here; Railway doesn't have Docker.
+    """
     version = "0.1.2"
     try:
         import importlib.metadata
@@ -912,7 +901,7 @@ def handle_health() -> HealthResponse:
 
     return HealthResponse(
         status="ok",
-        docker_available=docker_available,
+        docker_available=False,
         version=version,
         active_jobs=store.active_count(),
         max_concurrent_jobs=MAX_CONCURRENT_JOBS,
