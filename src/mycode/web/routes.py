@@ -698,7 +698,10 @@ def handle_report(job_id: str) -> ReportResponse:
             render_understanding,
             render_understanding_pdf,
         )
-        edition = get_next_edition(github_url=job.github_url or None)
+        edition = get_next_edition(
+            github_url=job.github_url or None,
+            project_name=job.project_name if not job.github_url else None,
+        )
         understanding_md = render_understanding(job.result.report, edition)
 
         if _HAS_FPDF:

@@ -566,13 +566,33 @@ def _normalize_github_url(url: str) -> str:
     return f"{parsed.netloc}{path}"
 
 
+_GITHUB_DOWNLOAD_SUFFIXES = re.compile(
+    r"-(main|master|develop|dev|v\d+(?:\.\d+)*(?:\.\d+)?)$", re.IGNORECASE,
+)
+
+
+def _normalize_project_name(name: str) -> str:
+    """Normalise a project name for consistent edition hashing.
+
+    Strips whitespace, lowercases, and removes common GitHub download
+    suffixes (-main, -master, -v1, -v2.0.1, etc.) so that
+    "my-app-main" and "my-app" resolve to the same edition counter.
+    """
+    s = name.strip().lower()
+    s = _GITHUB_DOWNLOAD_SUFFIXES.sub("", s)
+    return s
+
+
 def get_next_edition(project_path: Optional[Path] = None,
-                     github_url: Optional[str] = None) -> int:
+                     github_url: Optional[str] = None,
+                     project_name: Optional[str] = None) -> int:
     """Increment and return the next edition number for a project.
 
     Args:
         project_path: Local project path (CLI mode).
         github_url: GitHub URL (web mode).
+        project_name: Project name (zip upload mode — normalised
+            before hashing so "my-app-main" matches "my-app").
 
     Returns:
         The new edition number (starting from 1).
@@ -581,6 +601,8 @@ def get_next_edition(project_path: Optional[Path] = None,
         key_input = _normalize_github_url(github_url)
     elif project_path:
         key_input = str(project_path.resolve())
+    elif project_name and project_name.strip():
+        key_input = f"name:{_normalize_project_name(project_name)}"
     else:
         return 1
 
@@ -1061,8 +1083,10 @@ _FIX_OBJECTIVES: dict[str, str] = {
         "handle async rejections and avoid leaking unresolved promises."
     ),
     "http_load_testing": (
-        "handle concurrent HTTP load without crashes, error spikes, "
-        "or excessive response time."
+        "handle concurrent HTTP load without crashes or excessive response "
+        "time. Check for blocking I/O in route handlers, add connection "
+        "timeouts to external calls, and consider running with multiple "
+        "workers (e.g. gunicorn -w 4)."
     ),
 }
 
@@ -1272,6 +1296,31 @@ def _pat_memory_baseline(f, framework, fields):
             "first request, or increase server memory.",
         )
     return None
+
+
+@_register_pattern
+def _pat_http_endpoint_blocking(f, framework, fields):
+    """Match HTTP endpoint findings that failed at very low concurrency."""
+    if f.category != "http_load_testing":
+        return None
+    if f._load_level is None or f._load_level > 5:
+        return None
+    if "could not start" in f.title.lower():
+        return None  # handled by _pat_startup_failure
+    endpoint = fields.get("endpoint", "this endpoint")
+    return (
+        f"Your {endpoint} took too long to respond even at {f._load_level} "
+        f"concurrent connection(s). This usually means the route handler "
+        f"contains a blocking call — a synchronous operation that holds the "
+        f"thread until it completes.",
+        "Check the route handler for: (1) time.sleep() calls — remove or "
+        "replace with async alternatives, (2) synchronous database queries "
+        "without timeouts — add connection timeouts and consider async DB "
+        "drivers, (3) external API calls without timeouts — add "
+        "requests.get(url, timeout=5) or equivalent. The blocking call "
+        "must be removed or made non-blocking for the endpoint to respond "
+        "under load.",
+    )
 
 
 @_register_pattern
