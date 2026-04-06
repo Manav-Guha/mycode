@@ -2763,14 +2763,19 @@ def render_understanding_pdf(
     # ── Historical comparison placeholder ──
     pdf.set_font("Helvetica", "I", 9)
     pdf.set_text_color(*_SUBTLE)
-    pdf.multi_cell(
-        0, 4,
-        _safe_text(
+    if edition <= 1:
+        footer_text = (
             "This is your first myCode report. Future reports will show "
             "changes from your previous assessment. Run myCode again after "
             "making improvements to track your progress."
-        ),
-    )
+        )
+    else:
+        footer_text = (
+            f"This is Edition {edition} of your myCode report. "
+            "Run myCode again after making improvements to continue "
+            "tracking your progress."
+        )
+    pdf.multi_cell(0, 4, _safe_text(footer_text))
     pdf.set_text_color(*_BODY)
     pdf.ln(4)
 

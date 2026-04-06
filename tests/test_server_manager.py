@@ -120,7 +120,7 @@ class TestBuildStartupCommand:
             app_variable="app",
         )
         cmd, env = build_startup_command(detection, 5000)
-        assert cmd == ["python", "-m", "flask", "run", "--port", "5000"]
+        assert cmd == ["python", "-m", "flask", "run", "--port", "5000", "--with-threads"]
         assert env == {"FLASK_APP": "server.py"}
 
     def test_express_command(self):

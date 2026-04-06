@@ -433,6 +433,7 @@ def build_startup_command(
         cmd = [
             "python", "-m", "flask", "run",
             "--port", str(port),
+            "--with-threads",
         ]
         env = {"FLASK_APP": detection.entry_file}
         return cmd, env
