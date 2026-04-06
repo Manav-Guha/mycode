@@ -1,181 +1,273 @@
-# Plan: Two Bug Fixes
+# Plan: Gemini Integration — LLM-Enhanced Fix Prompts
 
-**STATUS: IMPLEMENTED — verified and committed**
+**STATUS: AWAITING REVIEW**
 
----
-
-## Bug A: Flask Sandbox Endpoint Interference
-
-### Symptom
-
-When a Flask project has multiple endpoints with varying response times, fast endpoints are falsely flagged as slow. Confirmed across 4 test runs with `~/Desktop/test-dashboard-fixed.zip`: `/slow-report` (no `time.sleep`, confirmed absent) consistently measures ~15s because `/process-data` (pandas `iterrows()`) occupies the Flask dev server's single worker thread.
-
-### How Endpoints Are Currently Tested
-
-Endpoints are tested **sequentially** in a loop (`http_load_driver.py:475`). Each endpoint goes through all concurrency levels before the next one starts. Within each level, concurrent requests are fired via `ThreadPoolExecutor` (`http_load_driver.py:241-245`).
-
-The server is started **once** (`server_manager.py:432-438`) and shared across all endpoint tests. There is **no isolation** between endpoint tests — no server restart, no drain/cooldown between endpoints.
-
-### Root Cause
-
-**Flask dev server defaults to single-threaded mode.** The startup command at `server_manager.py:432-438`:
-
-```python
-if fw == "flask":
-    cmd = [
-        "python", "-m", "flask", "run",
-        "--port", str(port),
-    ]
-    env = {"FLASK_APP": detection.entry_file}
-    return cmd, env
-```
-
-No `--with-threads` flag. Werkzeug's dev server runs single-threaded by default: it handles one request at a time, queuing all others.
-
-**The interference mechanism:** Endpoint A (`/process-data`) is tested first with concurrent requests. At higher concurrency levels, some requests may still be processing or the server thread may still be occupied when Endpoint B (`/slow-report`) starts its baseline test. On a single-threaded server, Endpoint B's baseline request (concurrency=1) queues behind Endpoint A's lingering work. With `_REQUEST_TIMEOUT_SECONDS = 15` and `_SLOW_BASELINE_MS = 10_000`, a fast endpoint waiting 10+ seconds in queue triggers `external_dependency_timeout` at line 361-371 and is skipped.
-
-Even without cross-endpoint queueing, the single-threaded server means that *within* an endpoint's own test at concurrency > 1, only one request is processed at a time. Every concurrent request waits for all prior ones. This inflates response times for ALL endpoints at ANY concurrency level, not just the falsely-flagged fast ones. The measurements are fundamentally wrong for any Flask app tested this way.
-
-### Files and Line Numbers
-
-| File | Lines | What |
-|------|-------|------|
-| `src/mycode/server_manager.py` | 432-438 | Flask startup command — missing `--with-threads` |
-| `src/mycode/http_load_driver.py` | 76 | `_ROUNDS_PER_LEVEL = 3` |
-| `src/mycode/http_load_driver.py` | 82 | `_REQUEST_TIMEOUT_SECONDS = 15` |
-| `src/mycode/http_load_driver.py` | 90 | `_SLOW_BASELINE_MS = 10_000` |
-| `src/mycode/http_load_driver.py` | 230-285 | `_drive_single_round()` — concurrent requests via ThreadPoolExecutor |
-| `src/mycode/http_load_driver.py` | 288-321 | `drive_load_level()` — 3 rounds, median selection |
-| `src/mycode/http_load_driver.py` | 324-391 | `drive_endpoint()` — per-endpoint loop with baseline abort check |
-| `src/mycode/http_load_driver.py` | 361-371 | Baseline >10s → `external_dependency_timeout` skip |
-| `src/mycode/http_load_driver.py` | 473-498 | Main endpoint iteration loop — sequential, shared server |
-
-### Proposed Fix
-
-**Enforce `--with-threads` on Flask dev server startup.**
-
-In `server_manager.py:432-438`, add the threading flag:
-
-```python
-if fw == "flask":
-    cmd = [
-        "python", "-m", "flask", "run",
-        "--port", str(port),
-        "--with-threads",
-    ]
-    env = {"FLASK_APP": detection.entry_file}
-    return cmd, env
-```
-
-**Why this is the correct fix:**
-
-1. **Matches real deployment.** Production Flask apps always run behind multi-worker/threaded WSGI servers (gunicorn, uwsgi). Single-threaded testing produces misleading results that don't represent how the app will actually behave.
-2. **Fixes the root cause.** Endpoint requests won't queue behind each other. Each request gets its own thread.
-3. **One-line change.** Minimal blast radius — only affects Flask apps, only adds threading.
-4. **No threshold tuning needed.** The measurements themselves become correct, so existing thresholds work as designed.
-
-**Alternatives considered and rejected:**
-
-- *Restart server between endpoint tests:* Adds 30-120s per endpoint (health check wait). Wastes time budget. Doesn't fix within-endpoint concurrency measurements being wrong.
-- *Detect single-threaded Flask and adjust thresholds:* Masks the problem. Measurements are fundamentally wrong on a single-threaded server at any concurrency > 1 — no threshold adjustment can correct that.
-- *Add drain/cooldown between endpoint tests:* Band-aid for cross-endpoint interference only. Doesn't fix within-endpoint concurrency inflation.
-
-### Verification
-
-**Pass condition with `~/Desktop/test-dashboard-fixed.zip`:**
-- `/slow-report` must NOT be flagged as slow — no `external_dependency_timeout`, baseline median well below 10,000ms
-- `/process-data` (pandas `iterrows()`) must STILL be flagged as genuinely slow
-- Both endpoints must receive load testing at all concurrency levels (no premature skip for `/slow-report`)
-
-**Unit test:** Assert `build_startup_command()` includes `--with-threads` when framework is `"flask"`.
+Scope: When a finding has `source_file` and `source_function` populated, pass the function's source code to Gemini 2.0 Flash with the diagnostic finding as context, get a line-specific fix suggestion back, and append it to the deterministic fix prompt. Silent fallback to deterministic-only on any failure.
 
 ---
 
-## Bug B: Edition N Footer Says "This is your first myCode report"
+## 1. Where Fix Prompt Generation Happens Today
 
-### Symptom
+**Call chain:**
 
-Edition 2, 3, and 4 reports all display: *"This is your first myCode report. Future reports will show changes from your previous assessment."* The edition number in the header increments correctly, but the footer text never updates.
+```
+ReportGenerator.generate()                     # report.py:1058
+  → assembles Finding objects with _tag_source  # report.py:1342
+  → stores in DiagnosticReport.findings
 
-### Root Cause
+DiagnosticReport.to_dict()                     # report.py:684
+  → _finding_dict(f)                            # report.py:684
+    → generate_finding_prompt(f)                # documents.py:1025
 
-**The footer text is hardcoded with no conditional on edition number.** At `documents.py:2763-2773`:
+documents.py PDF/markdown generation
+  → generate_finding_prompt(f)                  # documents.py:869, 3289
+```
+
+`generate_finding_prompt()` (documents.py:1025) takes a `Finding` and builds a deterministic prompt from:
+- `f.severity`, `f.title`
+- `f.source_file`, `f.source_function` (names only — no code)
+- `f.affected_dependencies`
+- `f._load_level`
+- `_build_diagnosis(f)` — pattern-matched architecture-aware diagnosis
+- `_build_fix(f)` — pattern-matched fix objective
+
+**Key observation:** At prompt generation time, neither `IngestionResult` nor the project path are available. Only the `Finding` dataclass fields are accessible.
+
+---
+
+## 2. How to Read the Function Body
+
+**Option A (recommended): Use IngestionResult at enrichment time.**
+
+`IngestionResult` has:
+- `project_path: str` — absolute path to the project copy (inside session venv)
+- `file_analyses: list[FileAnalysis]` — each with `functions: list[FunctionInfo]`
+
+`FunctionInfo` has:
+- `file_path: str` — relative to project root
+- `name: str` — function name
+- `lineno: int` — start line (1-indexed)
+- `end_lineno: int` — end line (inclusive)
+
+**Extraction method:**
+1. Match `Finding.source_file` → `FileAnalysis.file_path`
+2. Match `Finding.source_function` → `FunctionInfo.name` within that file
+3. Read `project_path / file_path`, extract lines `lineno` through `end_lineno`
+4. Cap at 80 lines (truncate with `# ... truncated` comment). This keeps the Gemini prompt under ~3K tokens for function body.
+
+**Why not re-parse?** The ingester already parsed the AST and stored line ranges. Re-reading is just `readlines()[lineno-1:end_lineno]`. No re-parsing needed.
+
+**Edge cases:**
+- `source_function` not found in `file_analyses` → skip enrichment (silent fallback)
+- `end_lineno == 0` (JS regex extraction doesn't always set it) → skip enrichment
+- File no longer readable (session cleanup race) → skip enrichment
+- Function body > 80 lines → truncate, note truncation in prompt
+
+---
+
+## 3. Gemini API Integration
+
+**Endpoint:** `https://generativelanguage.googleapis.com/v1beta/openai/` — already defined in the codebase as `GEMINI_BASE_URL` in `scenario.py:180`.
+
+**Model:** `gemini-2.0-flash`
+
+**Configuration:**
+
+New environment variable: `GEMINI_API_KEY` (already used by the existing LLM pipeline — same key reused).
+
+No new config class. Create a dedicated `LLMConfig` instance for fix-prompt enrichment:
 
 ```python
-# ── Historical comparison placeholder ──
-pdf.set_font("Helvetica", "I", 9)
-pdf.set_text_color(*_SUBTLE)
-pdf.multi_cell(
-    0, 4,
-    _safe_text(
-        "This is your first myCode report. Future reports will show "
-        "changes from your previous assessment. Run myCode again after "
-        "making improvements to track your progress."
-    ),
+_fix_llm_config = LLMConfig(
+    api_key=api_key,           # from existing pipeline config
+    base_url=GEMINI_BASE_URL,  # same as scenario generator
+    model="gemini-2.0-flash",  # hardcoded — this is a cheap, fast call
+    max_tokens=256,            # fix suggestions are short
+    temperature=0.2,           # low creativity, high precision
+    timeout_seconds=8.0,       # fast fail — this is an enhancement, not critical path
+    max_retries=1,             # single retry only
 )
 ```
 
-The `edition` parameter is in scope — the function signature at line 2417 is `def render_understanding_pdf(report, edition, ...)`, and `edition` is already used at line 2466 for the header info row. But the footer block at line 2763 ignores it.
+**Why `gemini-2.0-flash` and not `gemini-2.5-flash`?** 2.0 Flash is cheaper and faster. Fix suggestions don't need deep reasoning — they need pattern recognition on a short function with diagnostic context already provided. If quality proves insufficient, upgrade to 2.5 Flash later.
 
-### Files and Line Numbers
-
-| File | Lines | What |
-|------|-------|------|
-| `src/mycode/documents.py` | 2417 | Function signature — `edition: int` parameter available |
-| `src/mycode/documents.py` | 2466 | Edition used in header (works correctly) |
-| `src/mycode/documents.py` | 2763-2773 | Hardcoded footer text — **the bug** |
-| `src/mycode/documents.py` | 586-634 | `get_next_edition()` — edition counter logic |
-| `src/mycode/documents.py` | 2977 | `write_edition_documents()` — calls `render_understanding_pdf()` |
-
-### "Changes from previous" Comparison Feature
-
-The comment at line 2763 (`# ── Historical comparison placeholder ──`) confirms this was planned but never built. No comparison logic exists anywhere in the codebase. The edition 2+ footer text should NOT reference "changes noted above" — that feature doesn't exist yet.
-
-### Proposed Fix
-
-Replace the hardcoded text at `documents.py:2766-2773` with an edition-aware conditional:
-
-```python
-# ── Historical comparison placeholder ──
-pdf.set_font("Helvetica", "I", 9)
-pdf.set_text_color(*_SUBTLE)
-if edition <= 1:
-    footer_text = (
-        "This is your first myCode report. Future reports will show "
-        "changes from your previous assessment. Run myCode again after "
-        "making improvements to track your progress."
-    )
-else:
-    footer_text = (
-        f"This is Edition {edition} of your myCode report. "
-        "Run myCode again after making improvements to continue "
-        "tracking your progress."
-    )
-pdf.multi_cell(0, 4, _safe_text(footer_text))
-```
-
-**Why this wording for edition 2+:** It acknowledges the edition number without promising a comparison feature that doesn't exist. When the historical comparison feature ships later, update the text to reference it (e.g., "Changes from your previous assessment are noted above.").
-
-### Verification
-
-**Pass condition:**
-- Edition 1 report: footer says "This is your first myCode report. Future reports will show changes..."
-- Edition 2 report: footer says "This is Edition 2 of your myCode report. Run myCode again..."
-- Edition 5 report: footer says "This is Edition 5 of your myCode report. Run myCode again..."
-- Edition number in footer matches edition number in header
-
-**Unit test:** Call `render_understanding_pdf()` with `edition=1` and `edition=3`, extract text from each PDF, assert correct footer text appears.
+**Why separate LLMConfig?** The scenario generator config may use a different model (e.g., BYOK, Sonnet for freemium). Fix enrichment always uses Gemini 2.0 Flash at low cost, regardless of what the user's main LLM config is. If `GEMINI_API_KEY` is not set and the user is using BYOK, fix enrichment is silently skipped.
 
 ---
 
-## Implementation Order
+## 4. The Prompt to Gemini
 
-1. **Bug A** — one-line change in `server_manager.py`, plus unit test
-2. **Bug B** — conditional in `documents.py`, plus unit test
+**System message:**
 
-## Files Modified
+```
+You are a code diagnostic assistant for myCode, a stress-testing tool. Given a function's source code and a diagnostic finding from a stress test, provide a specific, line-referenced fix suggestion.
 
-| Bug | File | Lines | Change |
-|-----|------|-------|--------|
-| A | `src/mycode/server_manager.py` | 435 | Add `"--with-threads"` to Flask startup command |
-| B | `src/mycode/documents.py` | 2766-2773 | Replace hardcoded footer with edition-aware conditional |
+Rules:
+- Reference specific line numbers or variable/function names from the code.
+- Be concise: 2-4 sentences maximum.
+- Be actionable: say exactly what to change and where.
+- Do not wrap output in markdown fences or formatting.
+- Do not repeat the diagnosis — only provide the fix.
+- If the code does not clearly relate to the finding, reply with exactly: NO_SUGGESTION
+```
+
+**User message template:**
+
+```
+Finding: [{severity}] {title}
+File: {source_file} → {source_function}()
+Diagnosis: {diagnosis}
+Dependencies involved: {affected_dependencies}
+{load_level_line}
+
+Source code ({source_file}, lines {lineno}-{end_lineno}):
+```{language}
+{function_body}
+```
+
+What specific code change fixes this?
+```
+
+**Output constraints:**
+- Max 256 tokens (enforced via `max_tokens`)
+- Response must be < 100 words (validated post-response — reject if over)
+- `NO_SUGGESTION` response → silent fallback
+- Empty response → silent fallback
+
+---
+
+## 5. Silent Fallback Conditions
+
+Every condition below results in the deterministic prompt being returned unchanged — no error shown to user, no degraded output. The Gemini enhancement is invisible when it fails.
+
+| # | Condition | Check point |
+|---|-----------|-------------|
+| 1 | `GEMINI_API_KEY` not set and no LLM config available | Before attempting call |
+| 2 | `source_file` or `source_function` empty on Finding | Before function lookup |
+| 3 | Function not found in `file_analyses` | During FunctionInfo lookup |
+| 4 | `end_lineno == 0` (line range unavailable) | During FunctionInfo lookup |
+| 5 | Source file not readable from disk | During file read |
+| 6 | Function body is empty (0 lines) | After extraction |
+| 7 | Gemini call times out (> 8 seconds) | During API call |
+| 8 | Gemini returns HTTP error (4xx, 5xx) | During API call |
+| 9 | Gemini returns empty content | After API call |
+| 10 | Response is `NO_SUGGESTION` | After API call |
+| 11 | Response exceeds 100 words | After API call |
+| 12 | Response contains error indicators (`"error"`, `"I cannot"`, `"I'm sorry"`) | After API call |
+| 13 | Any uncaught exception in the enrichment path | Outer try/except |
+
+**Logging:** All fallbacks logged at `DEBUG` level with reason. No `WARNING` or `ERROR` — this is expected behavior, not a failure.
+
+---
+
+## 6. Where to Insert in the Pipeline
+
+**Proposed approach: Enrichment step in `ReportGenerator.generate()`, NOT inside `generate_finding_prompt()`.**
+
+**Rationale:**
+- `generate_finding_prompt()` is a pure function that takes only a `Finding`. Passing `IngestionResult`, `LLMConfig`, and the project path into it would bloat its signature and break its deterministic contract.
+- `ReportGenerator.generate()` already has access to `ingestion` (with `project_path` and `file_analyses`) and `self._llm_config` (with the API key).
+- Enrichment happens once per finding, before any prompt generation call.
+
+**Implementation location:** `src/mycode/report.py`, new private method `_enrich_finding_with_llm_fix()`.
+
+**Call site:** After the finding assembly loop (after line ~1354 in report.py), before `to_dict()` is ever called. New loop:
+
+```python
+# After all findings assembled, enrich with LLM fix suggestions
+for f in report.findings:
+    self._enrich_finding_with_llm_fix(f, ingestion)
+```
+
+**New field on Finding:** `llm_fix_suggestion: str = ""` — populated by enrichment, empty string when not enriched.
+
+**Integration with `generate_finding_prompt()`:** After the existing `Fix:` line, append:
+
+```python
+if f.llm_fix_suggestion:
+    parts.append(f"Suggested fix: {f.llm_fix_suggestion}")
+```
+
+**New helper module:** `src/mycode/fix_enrichment.py` — contains:
+- `extract_function_body(ingestion: IngestionResult, source_file: str, source_function: str) -> tuple[str, int, int]` — returns `(body, lineno, end_lineno)` or `("", 0, 0)` on failure
+- `get_llm_fix_suggestion(finding: Finding, function_body: str, lineno: int, end_lineno: int, llm_config: LLMConfig, language: str) -> str` — returns suggestion or `""` on any failure
+- All fallback logic encapsulated here. report.py stays clean.
+
+**Why a separate module?** Keeps LLM call logic out of both report.py (already 1500+ lines) and documents.py (already 3000+ lines). Single responsibility. Easy to test in isolation.
+
+---
+
+## 7. Public Caveat Text
+
+When at least one finding in the report has a non-empty `llm_fix_suggestion`, append this caveat to both the PDF and JSON outputs:
+
+**In the PDF (Understanding Your Results), in the "About this report" section:**
+
+> Some fix suggestions in this report were generated by an AI model (Gemini) based on your source code and the diagnostic findings. These suggestions are starting points, not guaranteed fixes. Always review AI-generated suggestions in the context of your full codebase before applying them.
+
+**In the JSON (for Coding Agent), as a top-level field:**
+
+```json
+{
+  "llm_fix_caveat": "Fix suggestions marked 'Suggested fix' were generated by Gemini based on the function source code and diagnostic context. Treat as starting points — verify before applying."
+}
+```
+
+**When no LLM suggestions were generated:** Omit both. No mention of Gemini in reports that didn't use it.
+
+---
+
+## 8. Testing Approach
+
+**Unit tests (no real API calls):**
+
+**A. Function body extraction** (`test_fix_enrichment.py`):
+- Test `extract_function_body()` with a mock `IngestionResult` containing known `FileAnalysis` + `FunctionInfo`
+- Write a temporary Python file, populate `FunctionInfo` with correct line ranges, verify extraction
+- Test edge cases: function not found, `end_lineno == 0`, file not readable, body > 80 lines (truncation)
+
+**B. LLM suggestion with mocked backend** (`test_fix_enrichment.py`):
+- Patch `LLMBackend.generate` to return a canned `LLMResponse`
+- Verify prompt template is correctly assembled
+- Verify response is accepted when valid (< 100 words, not `NO_SUGGESTION`)
+- Verify silent fallback on each condition from Section 5:
+  - Mock returning `NO_SUGGESTION`
+  - Mock returning 150-word response (rejected)
+  - Mock returning empty string
+  - Mock raising `LLMError` (timeout/HTTP error)
+  - Mock raising unexpected exception
+  - Test with `api_key=None` (no call made)
+
+**C. Integration with Finding** (`test_fix_enrichment.py`):
+- Create a Finding with `source_file` + `source_function`
+- Run enrichment with mocked backend
+- Verify `f.llm_fix_suggestion` is populated
+- Verify `generate_finding_prompt(f)` includes the suggestion line
+
+**D. End-to-end prompt output** (in existing `test_documents.py`):
+- Verify `generate_finding_prompt()` output includes `Suggested fix:` when `llm_fix_suggestion` is set
+- Verify it does NOT include the line when `llm_fix_suggestion` is empty
+
+**No test requires a real Gemini API call.** All LLM interaction is behind `LLMBackend.generate()`, which is trivially mockable via `unittest.mock.patch`.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/mycode/fix_enrichment.py` | **NEW** — function body extraction + LLM fix suggestion logic |
+| `src/mycode/report.py` | Add `llm_fix_suggestion` field to `Finding`, call enrichment loop in `generate()` |
+| `src/mycode/documents.py` | Append `Suggested fix:` line in `generate_finding_prompt()`, add caveat to PDF/JSON |
+| `tests/test_fix_enrichment.py` | **NEW** — unit tests for extraction, suggestion, fallback |
+| `tests/test_documents.py` | Add tests for prompt output with/without LLM suggestion |
+
+---
+
+## Not In Scope
+
+- Freemium/enterprise LLM routing (this is free-tier Gemini only)
+- Caching LLM responses across runs
+- Passing `installed_version`, `call_graph`, or `is_outdated` into prompts (separate issue per MEMORY.md)
+- JavaScript function body extraction (JS `end_lineno` is unreliable — enrichment silently skips these via fallback condition #4)
+- User-facing toggle to disable Gemini enrichment (silent by design — no config needed)

@@ -114,6 +114,7 @@ class Finding:
     _load_level: Optional[int] = None
     _failure_reason: str = ""
     _finding_type: str = ""  # scenario_failed, resource_limit_hit, errors_during, failure_indicators
+    llm_fix_suggestion: str = ""
 
 
 @dataclass
@@ -701,6 +702,7 @@ class DiagnosticReport:
                 "source_function": f.source_function,
                 "diagnosis": _build_diagnosis(f),
                 "prompt": generate_finding_prompt(f),
+                "llm_fix_suggestion": f.llm_fix_suggestion or None,
             }
             if f.grouped_findings:
                 d["grouped_findings"] = [
@@ -764,6 +766,18 @@ class DiagnosticReport:
             "secondary_languages": list(self.secondary_languages),
             "model_used": self.model_used,
             "token_usage": dict(self.token_usage),
+            **(
+                {
+                    "llm_fix_caveat": (
+                        "Fix suggestions marked 'Suggested fix' were generated "
+                        "by Gemini based on the function source code and "
+                        "diagnostic context. Treat as starting points — verify "
+                        "before applying."
+                    ),
+                }
+                if any(f.llm_fix_suggestion for f in self.findings)
+                else {}
+            ),
         }
 
 
@@ -1249,7 +1263,14 @@ class ReportGenerator:
                 if constraints.max_users is not None:
                     dp.user_ceiling = constraints.max_users
 
-        # 4b. Generate plain-language summary for non-technical readers
+        # 4b. Enrich findings with LLM fix suggestions (silent fallback)
+        if not self._offline and self._llm_config and self._llm_config.api_key:
+            from mycode.fix_enrichment import enrich_finding
+
+            for f in report.findings:
+                enrich_finding(f, ingestion, self._llm_config)
+
+        # 4c. Generate plain-language summary for non-technical readers
         report.plain_summary = self._generate_plain_summary(
             report, operational_intent, project_name,
         )
