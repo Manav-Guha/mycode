@@ -1143,7 +1143,75 @@ def _remediation_fields(f: Finding) -> dict[str, str]:
     if not endpoint:
         endpoint = f.source_function or "endpoint"
 
-    return {"load": load, "mem": mem, "endpoint": endpoint}
+    # Location string
+    if f.source_file and f.source_function:
+        loc = f"In `{f.source_file}`, the `{f.source_function}()` function"
+    elif f.source_file:
+        loc = f"In `{f.source_file}`"
+    elif f.source_function:
+        loc = f"The `{f.source_function}()` function"
+    else:
+        loc = ""
+
+    # Response time
+    resp = ""
+    if f._execution_time_ms and f._execution_time_ms > 0:
+        resp = f"{f._execution_time_ms:.0f}ms"
+
+    # Error count
+    errs = ""
+    if f._error_count and f._error_count > 0:
+        errs = str(f._error_count)
+
+    # Details — error extraction or first useful line
+    detail_excerpt = ""
+    if f.details:
+        raw = f.details.strip()
+        # If details contain a traceback/error, extract just the error line
+        if any(marker in raw for marker in ("Traceback", "Error:", "Exception:")):
+            # Find last line that looks like an error type + message
+            for line in reversed(raw.splitlines()):
+                line = line.strip()
+                if re.match(r"^[A-Za-z]*(?:Error|Exception)", line):
+                    detail_excerpt = line
+                    break
+            if not detail_excerpt:
+                # Fall back to first line containing Error:/Exception:
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if "Error:" in line or "Exception:" in line:
+                        detail_excerpt = line
+                        break
+        if not detail_excerpt:
+            # Cap at 200 chars, strip to last complete sentence/phrase
+            capped = raw[:200]
+            if ". " in capped:
+                detail_excerpt = capped[:capped.rindex(". ") + 1]
+            else:
+                detail_excerpt = capped
+
+    # Dependencies as readable string
+    deps_str = ", ".join(f.affected_dependencies[:4]) if f.affected_dependencies else ""
+
+    # Operational trigger
+    trigger = ""
+    if f.operational_trigger:
+        _trigger_labels = {
+            "sustained_load": "under sustained load",
+            "burst_traffic": "under burst traffic",
+            "long_session": "during a long-running session",
+            "large_input": "with large input data",
+            "concurrent_access": "under concurrent access",
+            "format_variation": "with varied input formats",
+        }
+        trigger = _trigger_labels.get(f.operational_trigger, f.operational_trigger)
+
+    return {
+        "load": load, "mem": mem, "endpoint": endpoint,
+        "loc": loc, "resp": resp, "errs": errs,
+        "detail_excerpt": detail_excerpt, "deps_str": deps_str,
+        "trigger": trigger,
+    }
 
 
 # Each pattern returns (diagnosis, fix) or None if no match.
@@ -1166,14 +1234,28 @@ def _pat_fastapi_concurrency(f, framework, fields):
         and f.category == "http_load_testing"
         and f.failure_domain == "concurrency_failure"
     ):
+        loc = fields["loc"]
+        resp = fields["resp"]
+        errs = fields["errs"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
         return (
-            f"Your FastAPI endpoint delegates blocking work to the default "
-            f"thread pool. At {fields['load']} concurrent requests, the pool "
-            f"saturates and requests queue — new requests wait for a thread, "
-            f"causing cascading timeouts.",
-            "Create a dedicated ThreadPoolExecutor sized for your expected "
-            "concurrency, or convert blocking operations to native async "
-            "(async def + await).",
+            f"{loc + ' delegates' if loc else 'Your FastAPI endpoint delegates'} "
+            f"blocking work to the default thread pool. At {fields['load']} "
+            f"concurrent requests"
+            f"{' (' + trigger + ')' if trigger else ''}, the pool saturates "
+            f"and requests queue — response time reached "
+            f"{resp if resp else 'unacceptable levels'}"
+            f"{', with ' + errs + ' errors' if errs else ''}. New requests "
+            f"wait for a thread, causing cascading timeouts."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{loc + ': convert' if loc else 'Convert'} the handler from "
+            f"`def` to `async def` with `await` for I/O operations. If "
+            f"wrapping sync code, create a dedicated "
+            f"`ThreadPoolExecutor(max_workers={fields['load']})` instead of "
+            f"relying on the default pool."
+            f"{' Dependencies involved: ' + deps_str + '.' if deps_str else ''}",
         )
     return None
 
@@ -1183,46 +1265,68 @@ def _pat_startup_failure(f, framework, fields):
     if "could not start" not in f.title.lower():
         return None
     fp = f.failure_pattern or ""
+    detail_excerpt = fields["detail_excerpt"]
+    deps_str = fields["deps_str"]
+    src = f.source_file
     if fp == "missing_server_dependency":
         return (
             f"Your {framework} app failed to start because a required "
-            f"dependency is missing from your project.",
-            f"Check that all imports in your main app module are listed "
-            f"in your requirements.txt or package.json. Run your app "
-            f"locally to see which import fails, then add the missing "
-            f"package.",
+            f"dependency is missing."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' Entry point: `' + src + '`.' if src else ''}",
+            f"{('Check `' + src + '` for') if src else 'Check your entry point for'} "
+            f"import statements that reference packages not in your "
+            f"requirements.txt or package.json. Run the app locally to see "
+            f"the exact ImportError, then `pip install` or `npm install` "
+            f"the missing package."
+            f"{' Dependencies listed: ' + deps_str + '.' if deps_str else ''}",
         )
     if fp == "missing_env_config":
         return (
             f"Your {framework} app failed to start because required "
-            f"environment variables are not set.",
-            f"Create a .env file with the required variables, or set "
-            f"them in your hosting platform's environment settings. "
-            f"Check your app's documentation or config file for the "
-            f"expected variable names.",
+            f"environment variables are not set."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' Entry point: `' + src + '`.' if src else ''}",
+            f"{('In `' + src + '`, find') if src else 'Find'} the "
+            f"`os.environ[]` or `os.getenv()` calls that expect "
+            f"configuration values. Create a `.env` file with those "
+            f"variables, or set them in your hosting platform's "
+            f"environment settings.",
         )
     if fp == "missing_external_service":
         return (
             f"Your {framework} app failed to start because it cannot "
-            f"connect to an external service (database, cache, API).",
-            f"Make sure your database or external service is running "
-            f"and the connection string is correct. For local "
-            f"development, check that Docker containers or local "
-            f"services are started.",
+            f"connect to an external service (database, cache, API) at "
+            f"startup."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' Entry point: `' + src + '`.' if src else ''}",
+            f"{('In `' + src + '`, the') if src else 'The'} startup code "
+            f"connects to an external service before the app is ready to "
+            f"serve requests. Ensure the service is running and the "
+            f"connection string is correct. For local dev, check Docker "
+            f"containers or local service processes."
+            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}",
         )
     if fp == "server_syntax_error":
         return (
-            f"Your {framework} app failed to start due to a syntax "
-            f"error in the code.",
-            f"Run your app locally — the error message will point to "
-            f"the exact file and line. Fix the syntax error and retry.",
+            f"Your {framework} app failed to start due to a syntax error."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' File: `' + src + '`.' if src else ''}",
+            f"{('Open `' + src + '` and fix') if src else 'Fix'} the "
+            f"syntax error. Run `python -c \"import py_compile; "
+            f"py_compile.compile('{src or 'app.py'}')\"` to check for "
+            f"syntax errors without starting the app.",
         )
     # Generic startup failure
     return (
         f"Your {framework} app failed to start. This prevents all "
-        f"users from accessing your application.",
-        f"Run your app locally to reproduce the error. Check the "
-        f"startup logs for the specific failure reason.",
+        f"users from accessing your application."
+        f"{' ' + detail_excerpt if detail_excerpt else ''}"
+        f"{' Entry point: `' + src + '`.' if src else ''}",
+        f"Run {('`python ' + src + '`') if src else 'your app'} locally "
+        f"to reproduce the error. Check the startup logs for the specific "
+        f"failure reason."
+        f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}",
     )
 
 
@@ -1232,13 +1336,30 @@ def _pat_streamlit_memory(f, framework, fields):
         framework == "streamlit"
         and f.failure_pattern == "memory_accumulation_over_sessions"
     ):
+        loc = fields["loc"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
+        mem_val = fields["mem"]
+        load_val = fields["load"]
+        # Compute projected total if both are numeric
+        try:
+            total = int(mem_val) * int(load_val)
+            total_str = f"~{total}MB"
+        except (ValueError, TypeError):
+            total_str = "dangerously high levels"
         return (
-            f"Streamlit creates a new Python process per user session. Your "
-            f"app uses {fields['mem']}MB per session. At {fields['load']} "
-            f"concurrent users, you'll exhaust server memory.",
-            "Cache shared data with @st.cache_data, move heavy computation "
-            "to a background service, and avoid loading large "
-            "models/datasets at module level.",
+            f"Streamlit creates a new Python process per user session. "
+            f"{loc + ' uses' if loc else 'Your app uses'} {mem_val}MB per "
+            f"session{' (' + trigger + ')' if trigger else ''}. At "
+            f"{load_val} concurrent users, total memory reaches "
+            f"{total_str}."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{loc + ': wrap' if loc else 'Wrap'} expensive computations "
+            f"with `@st.cache_data` and database connections or ML models "
+            f"with `@st.cache_resource`. Move module-level data loading "
+            f"inside functions so it can be cached."
+            f"{' Dependencies to check: ' + deps_str + '.' if deps_str else ''}",
         )
     return None
 
@@ -1254,13 +1375,26 @@ def _pat_streamlit_response_time(f, framework, fields):
             or "degradation" in f.title.lower()
         )
     ):
+        loc = fields["loc"]
+        resp = fields["resp"]
+        errs = fields["errs"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
         return (
-            "Streamlit reruns the entire script on each user interaction. "
-            "Under concurrent load, this compounds because each session "
-            "triggers a full re-execution.",
-            "Use @st.cache_data for expensive computations, "
-            "@st.cache_resource for database connections and ML models, "
-            "and move heavy initialization outside the main script flow.",
+            f"Streamlit reruns the entire script on each user interaction. "
+            f"{loc + ' was' if loc else 'The app was'} measured at "
+            f"{resp if resp else 'degraded'} response time at "
+            f"{fields['load']} concurrent users"
+            f"{' (' + trigger + ')' if trigger else ''}"
+            f"{', with ' + errs + ' errors' if errs else ''}. Each session "
+            f"triggers a full re-execution, compounding under load."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{loc + ': identify' if loc else 'Identify'} the heaviest "
+            f"operations in the script (data loading, API calls, model "
+            f"inference) and wrap with `@st.cache_data`. Use "
+            f"`@st.cache_resource` for database connections and ML models."
+            f"{' Dependencies to check: ' + deps_str + '.' if deps_str else ''}",
         )
     return None
 
@@ -1273,13 +1407,65 @@ def _pat_flask_concurrency(f, framework, fields):
             "http_load_testing", "blocking_io", "concurrent_execution",
         )
     ):
+        loc = fields["loc"]
+        resp = fields["resp"]
+        errs = fields["errs"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
         return (
             f"Flask handles requests synchronously — each request blocks a "
-            f"worker thread. At {fields['load']} concurrent requests, all "
-            f"threads are occupied and new requests queue.",
-            "Use database connection pooling (SQLAlchemy pool_size), add "
-            "gunicorn with multiple workers (gunicorn -w 4), or migrate "
-            "to an async framework for I/O-heavy endpoints.",
+            f"worker thread. "
+            f"{loc + ' reached' if loc else 'Response time reached'} "
+            f"{resp if resp else 'degraded levels'} at {fields['load']} "
+            f"concurrent requests"
+            f"{' (' + trigger + ')' if trigger else ''}"
+            f"{', with ' + errs + ' errors' if errs else ''}. All threads "
+            f"are occupied and new requests queue."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{loc + ': add' if loc else 'Add'} database connection "
+            f"pooling (`SQLAlchemy(pool_size=10)`), deploy with "
+            f"`gunicorn -w 4` for multiple workers, or add timeouts to "
+            f"blocking calls (`requests.get(url, timeout=5)`)."
+            f"{' Dependencies involved: ' + deps_str + '.' if deps_str else ''}",
+        )
+    return None
+
+
+# Flask/FastAPI response_time_cliff findings are caught by their
+# framework-specific patterns above (_pat_flask_concurrency,
+# _pat_fastapi_concurrency) due to registration order. This generic
+# pattern only fires for other frameworks or unmatched cases.
+@_register_pattern
+def _pat_response_time_cliff_generic(f, framework, fields):
+    if (
+        f.failure_pattern == "response_time_cliff"
+        and f.category == "http_load_testing"
+    ):
+        loc = fields["loc"]
+        resp = fields["resp"]
+        errs = fields["errs"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
+        return (
+            f"{loc + ' — response' if loc else 'Response'} time degrades "
+            f"sharply at {fields['load']} concurrent connections"
+            f"{': from baseline to ' + resp if resp else ''}"
+            f"{' (' + trigger + ')' if trigger else ''}. Below this "
+            f"threshold the application responds normally; above it, a "
+            f"bottleneck causes sudden degradation rather than gradual "
+            f"slowdown."
+            f"{' ' + errs + ' errors occurred.' if errs else ''}"
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}",
+            f"{loc + ': investigate' if loc else 'Investigate'} what "
+            f"saturates at {fields['load']} concurrent connections — "
+            f"connection pool limits, thread pool size, file descriptor "
+            f"limits, or a single-threaded bottleneck. Add connection "
+            f"pooling for database and HTTP clients, deploy with multiple "
+            f"workers, and add timeouts to all blocking operations."
+            f"{' Framework: ' + framework + '.' if framework else ''}",
         )
     return None
 
@@ -1287,13 +1473,50 @@ def _pat_flask_concurrency(f, framework, fields):
 @_register_pattern
 def _pat_memory_baseline(f, framework, fields):
     if "memory baseline" in f.title.lower():
+        loc = fields["loc"]
+        deps_str = fields["deps_str"]
+        detail_excerpt = fields["detail_excerpt"]
         return (
-            f"Your application uses {fields['mem']}MB per process. This is "
-            f"a baseline issue, not a memory leak — memory stays flat "
-            f"under load.",
-            "Use lazy imports for heavy modules (import inside functions, "
-            "not at module level), defer loading large models/data until "
-            "first request, or increase server memory.",
+            f"{loc + ' contributes to' if loc else 'Your application has'} "
+            f"a {fields['mem']}MB baseline memory footprint per process. "
+            f"This is not a leak — memory stays flat under load — but it "
+            f"limits how many worker processes fit in available RAM."
+            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}"
+            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{loc + ': check for' if loc else 'Check for'} module-level "
+            f"imports of heavy packages "
+            f"({deps_str if deps_str else 'numpy, pandas, ML frameworks'}) "
+            f"and move them inside the functions that use them. Defer "
+            f"loading large data files or models until first request.",
+        )
+    return None
+
+
+@_register_pattern
+def _pat_unbounded_cache_growth(f, framework, fields):
+    if f.failure_pattern == "unbounded_cache_growth":
+        loc = fields["loc"]
+        mem = fields["mem"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
+        return (
+            f"{loc + ' — memory' if loc else 'Memory'} grows without "
+            f"bound because cached data is never evicted. "
+            f"{'Peak memory reached ' + mem + 'MB. ' if mem not in ('', 'high') else ''}"
+            f"{'At load level ' + fields['load'] + ', ' if fields['load'] != 'high' else ''}"
+            f"the cache accumulates entries with every unique request, "
+            f"eventually exhausting available memory."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' (' + trigger + ')' if trigger else ''}",
+            f"{loc + ': add' if loc else 'Add'} an eviction policy to "
+            f"every in-memory cache. Use "
+            f"`functools.lru_cache(maxsize=1024)` for function "
+            f"memoization, `cachetools.TTLCache(maxsize=1024, ttl=300)` "
+            f"for time-based expiry, or Redis/Memcached for shared caches "
+            f"that survive restarts. Monitor cache size with periodic "
+            f"logging."
+            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}",
         )
     return None
 
@@ -1307,19 +1530,28 @@ def _pat_http_endpoint_blocking(f, framework, fields):
         return None
     if "could not start" in f.title.lower():
         return None  # handled by _pat_startup_failure
+    loc = fields["loc"]
+    resp = fields["resp"]
+    errs = fields["errs"]
+    trigger = fields["trigger"]
+    detail_excerpt = fields["detail_excerpt"]
+    deps_str = fields["deps_str"]
     endpoint = fields.get("endpoint", "this endpoint")
     return (
-        f"Your {endpoint} took too long to respond even at {f._load_level} "
-        f"concurrent connection(s). This usually means the route handler "
-        f"contains a blocking call — a synchronous operation that holds the "
-        f"thread until it completes.",
-        "Check the route handler for: (1) time.sleep() calls — remove or "
-        "replace with async alternatives, (2) synchronous database queries "
-        "without timeouts — add connection timeouts and consider async DB "
-        "drivers, (3) external API calls without timeouts — add "
-        "requests.get(url, timeout=5) or equivalent. The blocking call "
-        "must be removed or made non-blocking for the endpoint to respond "
-        "under load.",
+        f"{loc + ' took' if loc else 'Your ' + endpoint + ' endpoint took'} "
+        f"{resp if resp else 'over 10 seconds'} to respond at just "
+        f"{f._load_level} concurrent connection(s)"
+        f"{' (' + trigger + ')' if trigger else ''}. The route handler "
+        f"contains a blocking call — a synchronous operation holding the "
+        f"thread until completion."
+        f"{' ' + detail_excerpt if detail_excerpt else ''}"
+        f"{' Dependencies involved: ' + deps_str + '.' if deps_str else ''}",
+        f"{loc + ': check for' if loc else 'In the route handler, check for'}: "
+        f"(1) `time.sleep()` calls — remove or replace with async "
+        f"alternatives, (2) synchronous database queries — add "
+        f"`connect_timeout` and consider async drivers, (3) external API "
+        f"calls — add `requests.get(url, timeout=5)`."
+        f"{' Errors observed: ' + errs + '.' if errs else ''}",
     )
 
 
@@ -1327,13 +1559,50 @@ def _pat_http_endpoint_blocking(f, framework, fields):
 def _pat_external_timeout(f, framework, fields):
     title_lower = f.title.lower()
     if "skipped" in title_lower and "slow response" in title_lower:
+        loc = fields["loc"]
+        resp = fields["resp"]
+        deps_str = fields["deps_str"]
+        detail_excerpt = fields["detail_excerpt"]
         return (
-            f"Your {fields['endpoint']} took over 10 seconds at 1 "
-            f"concurrent connection — it's waiting on an external service "
-            f"that isn't configured in the test environment.",
-            "Ensure the service is available in production, add timeout "
-            "handling (e.g. requests.get(url, timeout=5)), and return a "
-            "graceful error when the service is down.",
+            f"{loc + ' took' if loc else 'Your ' + fields['endpoint'] + ' endpoint took'} "
+            f"{resp if resp else 'over 10 seconds'} at 1 concurrent "
+            f"connection — it is waiting on an external service that is "
+            f"not configured or reachable in the test environment."
+            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}"
+            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{loc + ': add' if loc else 'Add'} timeout handling to every "
+            f"external call (`requests.get(url, timeout=5)` or "
+            f"equivalent). Return a graceful error (HTTP 503 with "
+            f"message) when the service is unavailable."
+            f"{' Check calls to: ' + deps_str + '.' if deps_str else ''}",
+        )
+    return None
+
+
+@_register_pattern
+def _pat_cascading_timeout(f, framework, fields):
+    if f.failure_pattern == "cascading_timeout":
+        loc = fields["loc"]
+        resp = fields["resp"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
+        return (
+            f"{loc + ' — a' if loc else 'A'} slow dependency call "
+            f"triggers cascading timeouts in downstream functions. "
+            f"{'Response time reached ' + resp + '. ' if resp else ''}"
+            f"{'At load level ' + fields['load'] + ', ' if fields['load'] != 'high' else ''}"
+            f"the slow call blocks its caller, which blocks its caller, "
+            f"until the entire request chain times out."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' (' + trigger + ')' if trigger else ''}",
+            f"{loc + ': add' if loc else 'Add'} timeouts to every "
+            f"external call in the chain (`timeout=5` for HTTP, "
+            f"`connect_timeout` for DB). Use circuit breakers (e.g. "
+            f"`tenacity` retry with `stop_after_attempt(3)`) to fail "
+            f"fast instead of waiting. Return partial results or cached "
+            f"fallbacks when a dependency is slow."
+            f"{' Dependencies in the chain: ' + deps_str + '.' if deps_str else ''}",
         )
     return None
 
@@ -1347,14 +1616,56 @@ def _pat_pandas_silent_dtypes(f, framework, fields):
             and f.category == "edge_case_input"
         )
     ):
+        loc = fields["loc"]
+        mem = fields["mem"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
+        # Filter out pandas itself from deps for the fix
+        other_deps = deps_str.replace("pandas, ", "").replace(", pandas", "").replace("pandas", "").strip(", ")
         return (
-            "Pandas silently converts data types when input values don't match "
-            "expected types. A single non-numeric value in an integer column "
-            "converts the entire column to object dtype, increasing memory 10x "
-            "and producing incorrect numeric operations without raising errors.",
-            "Specify dtypes explicitly in read_csv(dtype={...}), use "
-            "pd.to_numeric(errors='coerce') for controlled conversion, and "
-            "validate column dtypes after loading with df.dtypes checks.",
+            f"{loc + ' — Pandas' if loc else 'Pandas'} silently converts "
+            f"data types when input values do not match expected types. A "
+            f"single non-numeric value in an integer column converts the "
+            f"entire column to `object` dtype, increasing memory 10x and "
+            f"producing incorrect numeric operations without raising "
+            f"errors."
+            f"{' Peak memory: ' + mem + 'MB.' if mem not in ('', 'high') else ''}"
+            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{loc + ': specify' if loc else 'Specify'} dtypes explicitly "
+            f"in `read_csv(dtype={{...}})`, use "
+            f"`pd.to_numeric(errors='coerce')` for controlled conversion, "
+            f"and add `assert df[col].dtype == expected` checks after "
+            f"loading."
+            f"{' Other dependencies to check: ' + other_deps + '.' if other_deps else ''}",
+        )
+    return None
+
+
+@_register_pattern
+def _pat_unvalidated_type_crash(f, framework, fields):
+    if f.failure_pattern == "unvalidated_type_crash":
+        loc = fields["loc"]
+        errs = fields["errs"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
+        return (
+            f"{loc + ' — the' if loc else 'The'} application crashes when "
+            f"it receives input of an unexpected type. "
+            f"{'At load level ' + fields['load'] + ', ' if fields['load'] != 'high' else ''}"
+            f"{errs + ' errors occurred' if errs else 'The crash occurred'} "
+            f"because the code assumes a specific input type (string, "
+            f"number, object) without validating."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' (' + trigger + ')' if trigger else ''}",
+            f"{loc + ': add' if loc else 'Add'} input validation at the "
+            f"entry point. For Python: use type checks "
+            f"(`isinstance(x, str)`), Pydantic models for structured "
+            f"input, or try/except with specific error types. For "
+            f"JavaScript: use Zod or joi for schema validation. Validate "
+            f"before processing — never pass unvalidated external input "
+            f"to business logic."
+            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}",
         )
     return None
 
@@ -1365,14 +1676,27 @@ def _pat_requests_concurrent(f, framework, fields):
         f.failure_domain == "concurrency_failure"
         or f.category == "concurrent_execution"
     ):
+        loc = fields["loc"]
+        resp = fields["resp"]
+        errs = fields["errs"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
         return (
-            f"The requests library is synchronous — each call blocks its "
-            f"thread until the response arrives. At {fields['load']} concurrent "
-            f"requests, all threads are occupied waiting on I/O and new "
-            f"requests queue.",
-            "Use requests.Session() for connection pooling, switch to "
-            "httpx.AsyncClient or aiohttp for async I/O, or use "
-            "concurrent.futures.ThreadPoolExecutor with a bounded pool size.",
+            f"{loc + ' — the' if loc else 'The'} `requests` library is "
+            f"synchronous — each call blocks its thread until the response "
+            f"arrives. At {fields['load']} concurrent requests"
+            f"{' (' + trigger + ')' if trigger else ''}, all threads are "
+            f"occupied waiting on I/O"
+            f"{' (response time: ' + resp + ')' if resp else ''}"
+            f"{', with ' + errs + ' errors' if errs else ''}."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{loc + ': replace' if loc else 'Replace'} `requests.get/post` "
+            f"with `httpx.AsyncClient` for async I/O, or use "
+            f"`requests.Session()` for connection pooling with "
+            f"`concurrent.futures.ThreadPoolExecutor"
+            f"(max_workers={fields['load']})` for bounded parallelism."
+            f"{' Other dependencies involved: ' + deps_str + '.' if deps_str else ''}",
         )
     return None
 
@@ -1380,12 +1704,27 @@ def _pat_requests_concurrent(f, framework, fields):
 @_register_pattern
 def _pat_data_volume(f, framework, fields):
     if f.category == "data_volume_scaling":
+        loc = fields["loc"]
+        resp = fields["resp"]
+        mem = fields["mem"]
+        errs = fields["errs"]
+        trigger = fields["trigger"]
+        detail_excerpt = fields["detail_excerpt"]
+        deps_str = fields["deps_str"]
         return (
-            "Your application's processing time grows with input size. At "
-            "large inputs, this becomes the bottleneck.",
-            "Use chunked or streaming processing instead of loading all "
-            "data into memory, add pagination for large result sets, and "
-            "consider caching intermediate results for repeated queries.",
+            f"{loc + ' — processing' if loc else 'Processing'} time grows "
+            f"with input size"
+            f"{': reached ' + resp + ' at load level ' + fields['load'] if resp else ''}"
+            f"{' (' + trigger + ')' if trigger else ''}. "
+            f"{'Peak memory: ' + mem + 'MB. ' if mem not in ('', 'high') else ''}"
+            f"{errs + ' errors occurred. ' if errs else ''}"
+            f"{detail_excerpt if detail_excerpt else 'At large inputs, this becomes the bottleneck.'}"
+            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}",
+            f"{loc + ': use' if loc else 'Use'} chunked or streaming "
+            f"processing instead of loading all data into memory. Add "
+            f"pagination for large result sets. Cache intermediate results "
+            f"for repeated queries."
+            f"{' For ' + deps_str + ', check for in-memory collection operations (groupby, sort, join) that could be offloaded to the database.' if deps_str else ''}",
         )
     return None
 

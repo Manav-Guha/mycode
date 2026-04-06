@@ -1820,9 +1820,9 @@ class TestBuildRemediation:
         )
         diagnosis = _build_diagnosis(f)
         assert "54MB" in diagnosis
-        assert "not a memory leak" in diagnosis
+        assert "not a leak" in diagnosis
         fix = _build_fix(f)
-        assert "lazy imports" in fix
+        assert "module-level" in fix
 
     def test_data_volume_scaling(self):
         """data_volume_scaling category → diagnosis + fix."""
@@ -1834,7 +1834,7 @@ class TestBuildRemediation:
             affected_dependencies=["pandas"],
         )
         diagnosis = _build_diagnosis(f)
-        assert "processing time grows" in diagnosis
+        assert "time grows" in diagnosis
         fix = _build_fix(f)
         assert "chunked" in fix or "streaming" in fix
         assert "pagination" in fix
@@ -2049,3 +2049,817 @@ class TestIntegrateDetails:
         result = _integrate_details(desc, detail)
         # "at first iteration" is already in desc, so should be skipped
         assert result == desc
+
+
+# ── Enriched & new pattern quality tests ──
+
+
+def _assert_prompt_quality(diagnosis: str, fix: str, label: str):
+    """Assert no None, no empty parens, no broken sentences, no trailing artifacts."""
+    import re as _re
+    for name, text in [("diagnosis", diagnosis), ("fix", fix)]:
+        assert text, f"{label} {name} is empty"
+        # Strip backtick-quoted spans (and surrounding parens if present)
+        stripped = _re.sub(r"\(`[^`]*`\)", "", text)
+        stripped = _re.sub(r"`[^`]*`", "", stripped)
+        # Check for bare "None" as standalone word (not NoneType, not in error messages)
+        # Allow NoneType and None inside known error patterns
+        no_errors = _re.sub(r"\w+Error:.*", "", stripped)
+        no_errors = _re.sub(r"\w+Exception:.*", "", no_errors)
+        assert not _re.search(r"\bNone\b", no_errors), (
+            f"{label} {name} contains bare 'None': {text!r}"
+        )
+        # Check for empty "()" — sign of failed interpolation
+        # Remove function-call-like patterns (word followed by parens with content)
+        no_calls = _re.sub(r"\w+\([^)]*\)", "", stripped)
+        assert "()" not in no_calls, f"{label} {name} contains '()': {text!r}"
+        # No broken sentences: ". ." or ".." at non-ellipsis positions
+        assert ". ." not in text, f"{label} {name} has broken sentence: {text!r}"
+        # No trailing punctuation artifacts: multiple punctuation at end
+        assert not _re.search(r"[.!?]{2,}$", text.rstrip()), (
+            f"{label} {name} trailing punctuation artifact: {text!r}"
+        )
+        # No empty conditional fragments like " — " at start or "  " double-space
+        assert "  " not in text, f"{label} {name} has double space: {text!r}"
+        # No dangling " —" at very start
+        assert not text.startswith(" —"), f"{label} {name} starts with ' —': {text!r}"
+        assert not text.startswith(" "), f"{label} {name} starts with space: {text!r}"
+
+
+class TestEnrichedPatternQuality:
+    """Each of the 15 patterns tested with fully-populated AND minimal findings.
+
+    Asserts: no None, no empty (), no broken sentences, no trailing
+    punctuation artifacts in diagnosis and fix output.
+    """
+
+    # ── 1. _pat_fastapi_concurrency ──
+
+    def test_fastapi_concurrency_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Endpoint /api/data degrades under concurrent load",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["fastapi", "uvicorn"],
+            source_file="main.py",
+            source_function="get_data",
+            details="ConnectionError: pool exhausted",
+        )
+        f.failure_domain = "concurrency_failure"
+        f._load_level = 50
+        f._execution_time_ms = 8500.0
+        f._error_count = 12
+        f.operational_trigger = "sustained_load"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "fastapi_concurrency_full")
+        assert "main.py" in d
+        assert "get_data" in d
+        assert "8500ms" in d
+        assert "12 errors" in d
+        assert "sustained load" in d
+        assert "ThreadPoolExecutor" in fix
+
+    def test_fastapi_concurrency_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Endpoint /api degrades",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["fastapi"],
+        )
+        f.failure_domain = "concurrency_failure"
+        f._load_level = 10
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "fastapi_concurrency_minimal")
+        assert "thread pool" in d
+        assert "10 concurrent" in d
+
+    # ── 2. _pat_startup_failure (5 sub-patterns) ──
+
+    def test_startup_missing_dep_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+            source_file="app.py",
+            details="Traceback (most recent call last):\n  File \"app.py\", line 1\nModuleNotFoundError: No module named 'flask_cors'",
+        )
+        f.failure_pattern = "missing_server_dependency"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_missing_dep_full")
+        assert "app.py" in d
+        assert "ModuleNotFoundError" in d
+        assert "app.py" in fix
+
+    def test_startup_missing_dep_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+        )
+        f.failure_pattern = "missing_server_dependency"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_missing_dep_minimal")
+        assert "missing" in d.lower()
+
+    def test_startup_missing_env_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+            source_file="config.py",
+            details="KeyError: 'DATABASE_URL'",
+        )
+        f.failure_pattern = "missing_env_config"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_missing_env_full")
+        assert "environment" in d.lower()
+        assert "config.py" in d
+
+    def test_startup_missing_env_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["express"],
+        )
+        f.failure_pattern = "missing_env_config"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_missing_env_minimal")
+
+    def test_startup_missing_service_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask", "sqlalchemy"],
+            source_file="app.py",
+            details="OperationalError: could not connect to server",
+        )
+        f.failure_pattern = "missing_external_service"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_missing_service_full")
+        assert "external service" in d.lower()
+        assert "app.py" in d
+
+    def test_startup_missing_service_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+        )
+        f.failure_pattern = "missing_external_service"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_missing_service_minimal")
+
+    def test_startup_syntax_error_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+            source_file="views.py",
+            details="SyntaxError: invalid syntax (views.py, line 42)",
+        )
+        f.failure_pattern = "server_syntax_error"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_syntax_error_full")
+        assert "syntax" in d.lower()
+        assert "views.py" in d
+
+    def test_startup_syntax_error_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+        )
+        f.failure_pattern = "server_syntax_error"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_syntax_error_minimal")
+
+    def test_startup_generic_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask", "redis"],
+            source_file="run.py",
+            details="RuntimeError: unexpected failure on boot",
+        )
+        f.failure_pattern = "unknown_reason"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_generic_full")
+        assert "run.py" in d
+
+    def test_startup_generic_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application could not start",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+        )
+        f.failure_pattern = "unknown_reason"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "startup_generic_minimal")
+
+    # ── 3. _pat_streamlit_memory ──
+
+    def test_streamlit_memory_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Memory accumulation over sessions",
+            severity="warning",
+            category="memory_profiling",
+            description="Uses 80MB per session",
+            affected_dependencies=["streamlit", "pandas"],
+            source_file="dashboard.py",
+            source_function="load_data",
+            details="Memory keeps growing with each new session.",
+        )
+        f.failure_pattern = "memory_accumulation_over_sessions"
+        f._peak_memory_mb = 80.0
+        f._load_level = 10
+        f.operational_trigger = "sustained_load"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "streamlit_memory_full")
+        assert "dashboard.py" in d
+        assert "load_data" in d
+        assert "80MB" in d
+        assert "~800MB" in d
+        assert "@st.cache_data" in fix
+
+    def test_streamlit_memory_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Memory baseline limits concurrent capacity",
+            severity="warning",
+            category="http_load_testing",
+            description="Your application uses 65MB per process.",
+            affected_dependencies=["streamlit"],
+        )
+        f.failure_pattern = "memory_accumulation_over_sessions"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "streamlit_memory_minimal")
+        assert "65MB" in d
+        assert "Streamlit" in d
+
+    # ── 4. _pat_streamlit_response_time ──
+
+    def test_streamlit_response_time_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Response time degradation under load",
+            severity="warning",
+            category="http_load_testing",
+            affected_dependencies=["streamlit", "plotly"],
+            source_file="app.py",
+            source_function="render_chart",
+            details="Slow chart rendering under concurrent sessions.",
+        )
+        f.failure_domain = "concurrency_failure"
+        f._load_level = 20
+        f._execution_time_ms = 5000.0
+        f._error_count = 3
+        f.operational_trigger = "burst_traffic"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "streamlit_response_time_full")
+        assert "Streamlit reruns" in d
+        assert "app.py" in d
+        assert "5000ms" in d
+        assert "3 errors" in d
+        assert "@st.cache_data" in fix
+
+    def test_streamlit_response_time_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Response time degradation on your application",
+            severity="warning",
+            category="http_load_testing",
+            affected_dependencies=["streamlit"],
+        )
+        f.failure_domain = "unclassified"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "streamlit_response_time_minimal")
+        assert "Streamlit reruns" in d
+        assert "@st.cache_resource" in fix
+
+    # ── 5. _pat_flask_concurrency ──
+
+    def test_flask_concurrency_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application degrades under concurrent load",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask", "sqlalchemy"],
+            source_file="views.py",
+            source_function="get_users",
+            details="All workers busy, requests queuing.",
+        )
+        f._load_level = 25
+        f._execution_time_ms = 4200.0
+        f._error_count = 5
+        f.operational_trigger = "sustained_load"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "flask_concurrency_full")
+        assert "synchronously" in d
+        assert "views.py" in d
+        assert "4200ms" in d
+        assert "gunicorn" in fix
+
+    def test_flask_concurrency_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Application degrades under concurrent load",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["flask"],
+        )
+        f._load_level = 25
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "flask_concurrency_minimal")
+        assert "synchronously" in d
+        assert "25 concurrent" in d
+
+    # ── 6. _pat_response_time_cliff_generic (NEW) ──
+
+    def test_response_time_cliff_generic_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Response time cliff at 25 connections",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["express"],
+            source_file="server.js",
+            source_function="handleRequest",
+            details="Latency spike from 50ms to 8500ms.",
+        )
+        f.failure_pattern = "response_time_cliff"
+        f._load_level = 25
+        f._execution_time_ms = 8500.0
+        f._error_count = 7
+        f.operational_trigger = "burst_traffic"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "response_time_cliff_generic_full")
+        assert "server.js" in d
+        assert "handleRequest" in d
+        assert "8500ms" in d
+        assert "burst traffic" in d
+        assert "25 concurrent" in fix
+
+    def test_response_time_cliff_generic_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Response time cliff",
+            severity="warning",
+            category="http_load_testing",
+            affected_dependencies=[],
+        )
+        f.failure_pattern = "response_time_cliff"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "response_time_cliff_generic_minimal")
+        assert "degrades sharply" in d
+        assert "bottleneck" in d
+
+    # ── 7. _pat_memory_baseline ──
+
+    def test_memory_baseline_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Memory baseline limits concurrent capacity",
+            severity="warning",
+            category="memory_profiling",
+            description="54MB per process.",
+            affected_dependencies=["fastapi", "numpy"],
+            source_file="app.py",
+            source_function="create_app",
+            details="numpy alone contributes 40MB.",
+        )
+        f._peak_memory_mb = 54.0
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "memory_baseline_full")
+        assert "54MB" in d
+        assert "app.py" in d
+        assert "not a leak" in d
+
+    def test_memory_baseline_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Memory baseline limits concurrent capacity",
+            severity="warning",
+            category="http_load_testing",
+            description="Your application uses 54MB per process.",
+            affected_dependencies=["fastapi", "uvicorn"],
+        )
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "memory_baseline_minimal")
+        assert "54MB" in d
+
+    # ── 8. _pat_unbounded_cache_growth (NEW) ──
+
+    def test_unbounded_cache_growth_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Cache memory grows without bound",
+            severity="critical",
+            category="memory_profiling",
+            affected_dependencies=["requests"],
+            source_file="utils.py",
+            source_function="fetch_user_profile",
+            details="Dict cache grows with every unique user ID.",
+        )
+        f.failure_pattern = "unbounded_cache_growth"
+        f._peak_memory_mb = 450.0
+        f._load_level = 50
+        f.operational_trigger = "sustained_load"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "unbounded_cache_growth_full")
+        assert "utils.py" in d
+        assert "fetch_user_profile" in d
+        assert "450MB" in d
+        assert "lru_cache" in fix
+
+    def test_unbounded_cache_growth_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Cache grows",
+            severity="warning",
+            category="memory_profiling",
+            affected_dependencies=[],
+        )
+        f.failure_pattern = "unbounded_cache_growth"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "unbounded_cache_growth_minimal")
+        assert "never evicted" in d
+        assert "eviction" in fix
+
+    # ── 9. _pat_http_endpoint_blocking ──
+
+    def test_http_endpoint_blocking_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Endpoint /health slow response",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["requests"],
+            source_file="routes.py",
+            source_function="health_check",
+            details="Handler calls external API without timeout.",
+        )
+        f._load_level = 2
+        f._execution_time_ms = 15000.0
+        f._error_count = 1
+        f.operational_trigger = "sustained_load"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "http_endpoint_blocking_full")
+        assert "routes.py" in d
+        assert "15000ms" in d
+        assert "2 concurrent" in d
+
+    def test_http_endpoint_blocking_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Endpoint /api slow",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=[],
+        )
+        f._load_level = 1
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "http_endpoint_blocking_minimal")
+        assert "1 concurrent" in d
+        assert "blocking" in d.lower() or "thread" in d.lower()
+
+    # ── 10. _pat_external_timeout ──
+
+    def test_external_timeout_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Endpoint /data skipped due to slow response",
+            severity="warning",
+            category="http_load_testing",
+            affected_dependencies=["requests"],
+            source_file="api.py",
+            source_function="fetch_data",
+            details="Timeout waiting for upstream service.",
+        )
+        f._execution_time_ms = 12000.0
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "external_timeout_full")
+        assert "api.py" in d
+        assert "12000ms" in d
+        assert "timeout" in fix.lower()
+
+    def test_external_timeout_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Endpoint /x skipped due to slow response",
+            severity="warning",
+            category="http_load_testing",
+            affected_dependencies=[],
+        )
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "external_timeout_minimal")
+        assert "external service" in d.lower()
+
+    # ── 11. _pat_cascading_timeout (NEW) ──
+
+    def test_cascading_timeout_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Cascading timeout in request chain",
+            severity="critical",
+            category="http_load_testing",
+            affected_dependencies=["requests", "httpx"],
+            source_file="app.py",
+            source_function="get_dashboard",
+            details="Chain: get_dashboard -> fetch_user -> external API.",
+        )
+        f.failure_pattern = "cascading_timeout"
+        f._load_level = 10
+        f._execution_time_ms = 12500.0
+        f.operational_trigger = "sustained_load"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "cascading_timeout_full")
+        assert "app.py" in d
+        assert "get_dashboard" in d
+        assert "12500ms" in d
+        assert "circuit breakers" in fix
+
+    def test_cascading_timeout_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Cascading timeout",
+            severity="warning",
+            category="http_load_testing",
+            affected_dependencies=[],
+        )
+        f.failure_pattern = "cascading_timeout"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "cascading_timeout_minimal")
+        assert "cascading" in d.lower()
+        assert "timeout" in fix.lower()
+
+    # ── 12. _pat_pandas_silent_dtypes ──
+
+    def test_pandas_silent_dtypes_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Silent dtype conversion in data pipeline",
+            severity="warning",
+            category="edge_case_input",
+            affected_dependencies=["pandas", "numpy"],
+            source_file="etl.py",
+            source_function="clean_data",
+            details="Column 'age' converted from int64 to object.",
+        )
+        f.failure_pattern = "silent_data_type_changes"
+        f._peak_memory_mb = 120.0
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "pandas_silent_dtypes_full")
+        assert "etl.py" in d
+        assert "120MB" in d
+        assert "read_csv" in fix
+
+    def test_pandas_silent_dtypes_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Pandas dtype issue",
+            severity="warning",
+            category="edge_case_input",
+            affected_dependencies=["pandas"],
+        )
+        f.failure_pattern = "silent_data_type_changes"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "pandas_silent_dtypes_minimal")
+        assert "Pandas" in d
+        assert "object" in d
+
+    # ── 13. _pat_unvalidated_type_crash (NEW) ──
+
+    def test_unvalidated_type_crash_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Type crash on user input",
+            severity="critical",
+            category="edge_case_inputs",
+            affected_dependencies=["flask", "pydantic"],
+            source_file="routes.py",
+            source_function="create_user",
+            details="TypeError: int() argument must be a string, not NoneType",
+        )
+        f.failure_pattern = "unvalidated_type_crash"
+        f._load_level = 1
+        f._error_count = 12
+        f.operational_trigger = "format_variation"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "unvalidated_type_crash_full")
+        assert "routes.py" in d
+        assert "create_user" in d
+        assert "12 errors" in d
+        assert "TypeError" in d
+        assert "Pydantic" in fix or "pydantic" in fix.lower()
+
+    def test_unvalidated_type_crash_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Type crash",
+            severity="warning",
+            category="edge_case_inputs",
+            affected_dependencies=[],
+        )
+        f.failure_pattern = "unvalidated_type_crash"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "unvalidated_type_crash_minimal")
+        assert "unexpected type" in d
+        assert "validation" in fix.lower()
+
+    # ── 14. _pat_requests_concurrent ──
+
+    def test_requests_concurrent_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Concurrent request bottleneck",
+            severity="warning",
+            category="concurrent_execution",
+            affected_dependencies=["requests", "httpx"],
+            source_file="client.py",
+            source_function="fetch_all",
+            details="All 20 threads blocked waiting for responses.",
+        )
+        f.failure_domain = "concurrency_failure"
+        f._load_level = 20
+        f._execution_time_ms = 6000.0
+        f._error_count = 4
+        f.operational_trigger = "concurrent_access"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "requests_concurrent_full")
+        assert "client.py" in d
+        assert "6000ms" in d
+        assert "httpx" in fix
+
+    def test_requests_concurrent_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Concurrent bottleneck",
+            severity="warning",
+            category="concurrent_execution",
+            affected_dependencies=["requests"],
+        )
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "requests_concurrent_minimal")
+        assert "synchronous" in d
+        assert "requests" in d.lower()
+
+    # ── 15. _pat_data_volume ──
+
+    def test_data_volume_full(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Data scaling degradation",
+            severity="warning",
+            category="data_volume_scaling",
+            affected_dependencies=["pandas", "sqlalchemy"],
+            source_file="pipeline.py",
+            source_function="process_batch",
+            details="Processing 100k rows takes 45s.",
+        )
+        f._load_level = 5
+        f._execution_time_ms = 45000.0
+        f._peak_memory_mb = 512.0
+        f._error_count = 2
+        f.operational_trigger = "large_input"
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "data_volume_full")
+        assert "pipeline.py" in d
+        assert "45000ms" in d
+        assert "512MB" in d
+        assert "pagination" in fix
+
+    def test_data_volume_minimal(self):
+        from mycode.documents import _build_diagnosis, _build_fix
+        f = Finding(
+            title="Data scaling issue",
+            severity="warning",
+            category="data_volume_scaling",
+            affected_dependencies=[],
+        )
+        d = _build_diagnosis(f)
+        fix = _build_fix(f)
+        _assert_prompt_quality(d, fix, "data_volume_minimal")
+        assert "time grows" in d.lower()
+        assert "chunked" in fix or "streaming" in fix
+
+
+class TestDetailExcerptErrorExtraction:
+    """Verify detail_excerpt extracts error type+message from tracebacks."""
+
+    def test_traceback_extracts_error_line(self):
+        from mycode.documents import _remediation_fields
+        f = Finding(
+            title="Test",
+            severity="warning",
+            details=(
+                "Traceback (most recent call last):\n"
+                "  File \"app.py\", line 42, in handler\n"
+                "    result = int(value)\n"
+                "TypeError: int() argument must be a string, not NoneType"
+            ),
+        )
+        fields = _remediation_fields(f)
+        assert fields["detail_excerpt"] == "TypeError: int() argument must be a string, not NoneType"
+
+    def test_error_colon_extracts_line(self):
+        from mycode.documents import _remediation_fields
+        f = Finding(
+            title="Test",
+            severity="warning",
+            details="ConnectionError: Connection refused to localhost:5432",
+        )
+        fields = _remediation_fields(f)
+        assert "ConnectionError" in fields["detail_excerpt"]
+
+    def test_exception_extracts_line(self):
+        from mycode.documents import _remediation_fields
+        f = Finding(
+            title="Test",
+            severity="warning",
+            details=(
+                "Traceback (most recent call last):\n"
+                "  File \"db.py\", line 10\n"
+                "OperationalException: database locked"
+            ),
+        )
+        fields = _remediation_fields(f)
+        assert fields["detail_excerpt"] == "OperationalException: database locked"
+
+    def test_no_error_uses_truncation(self):
+        from mycode.documents import _remediation_fields
+        long_text = "Memory keeps growing with each session. " * 10
+        f = Finding(
+            title="Test",
+            severity="warning",
+            details=long_text,
+        )
+        fields = _remediation_fields(f)
+        assert len(fields["detail_excerpt"]) <= 200
+        assert fields["detail_excerpt"].endswith(".")
+
+    def test_empty_details(self):
+        from mycode.documents import _remediation_fields
+        f = Finding(title="Test", severity="warning", details="")
+        fields = _remediation_fields(f)
+        assert fields["detail_excerpt"] == ""
