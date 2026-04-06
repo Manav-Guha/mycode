@@ -1222,11 +1222,60 @@ def _remediation_fields(f: Finding) -> dict[str, str]:
         }
         trigger = _trigger_labels.get(f.operational_trigger, f.operational_trigger)
 
+    # Version-aware dependency string
+    # e.g. "flask 2.0.1 (outdated — latest 3.1.0), pandas 1.5.3"
+    deps_parts = []
+    for d in (f.affected_dependencies or [])[:4]:
+        ver = f.dep_versions.get(d, "")
+        latest = f.dep_latest_versions.get(d, "")
+        if ver and d in f.dep_outdated and latest:
+            deps_parts.append(f"{d} {ver} (outdated — latest {latest})")
+        elif ver:
+            deps_parts.append(f"{d} {ver}")
+        else:
+            deps_parts.append(d)
+    deps_versioned = ", ".join(deps_parts)
+
+    # Outdated note
+    outdated_count = len(f.dep_outdated)
+    total_deps = len(f.affected_dependencies) if f.affected_dependencies else 0
+    if outdated_count and total_deps:
+        deps_outdated_note = (
+            f"{outdated_count} of {total_deps} "
+            f"{'dependency is' if outdated_count == 1 else 'dependencies are'} "
+            f"outdated"
+        )
+    else:
+        deps_outdated_note = ""
+
+    # Call chain (e.g. "index() → get_data() → requests.get()")
+    call_chain = " → ".join(f"{c}()" for c in f.call_chain) if f.call_chain else ""
+
+    # Decorator awareness for cache patterns.
+    # The ingester stores decorator names using the source-level alias:
+    #   @st.cache_data → "st.cache_data"
+    #   @cache         → "cache"
+    #   @lru_cache     → "lru_cache"
+    # We match against all common aliases for caching decorators.
+    _CACHE_DECORATORS = {
+        "cache", "lru_cache", "functools.cache", "functools.lru_cache",
+        "st.cache_data", "st.cache_resource",
+        "cache_data", "cache_resource",
+    }
+    has_cache_decorator = bool(
+        set(f.source_decorators) & _CACHE_DECORATORS
+    ) if f.source_decorators else False
+
     return {
         "load": load, "mem": mem, "endpoint": endpoint,
         "loc": loc, "resp": resp, "errs": errs,
         "detail_excerpt": detail_excerpt, "deps_str": deps_str,
         "trigger": trigger,
+        "deps_versioned": deps_versioned,
+        "deps_outdated_note": deps_outdated_note,
+        "has_outdated": bool(outdated_count),
+        "call_chain": call_chain,
+        "has_cache_decorator": has_cache_decorator,
     }
 
 
@@ -1255,24 +1304,35 @@ def _pat_fastapi_concurrency(f, framework, fields):
         errs = fields["errs"]
         trigger = fields["trigger"]
         detail_excerpt = fields["detail_excerpt"]
-        deps_str = fields["deps_str"]
-        return (
+        deps_versioned = fields["deps_versioned"]
+        call_chain = fields["call_chain"]
+        diag = (
             f"{loc + ' delegates' if loc else 'Your FastAPI endpoint delegates'} "
-            f"blocking work to the default thread pool. At {fields['load']} "
-            f"concurrent requests"
+            f"blocking work to the default thread pool. "
+        )
+        if call_chain:
+            diag += f"Call chain: {call_chain}. "
+        diag += (
+            f"At {fields['load']} concurrent requests"
             f"{' (' + trigger + ')' if trigger else ''}, the pool saturates "
             f"and requests queue — response time reached "
             f"{resp if resp else 'unacceptable levels'}"
             f"{', with ' + errs + ' errors' if errs else ''}. New requests "
             f"wait for a thread, causing cascading timeouts."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+        )
+        fix = (
             f"{loc + ': convert' if loc else 'Convert'} the handler from "
             f"`def` to `async def` with `await` for I/O operations. If "
             f"wrapping sync code, create a dedicated "
             f"`ThreadPoolExecutor(max_workers={fields['load']})` instead of "
             f"relying on the default pool."
-            f"{' Dependencies involved: ' + deps_str + '.' if deps_str else ''}",
         )
+        if deps_versioned:
+            fix += f" Dependencies: {deps_versioned}."
+        if fields["deps_outdated_note"]:
+            fix += f" Note: {fields['deps_outdated_note']}."
+        return (diag, fix)
     return None
 
 
@@ -1282,20 +1342,29 @@ def _pat_startup_failure(f, framework, fields):
         return None
     fp = f.failure_pattern or ""
     detail_excerpt = fields["detail_excerpt"]
+    deps_versioned = fields["deps_versioned"]
     deps_str = fields["deps_str"]
     src = f.source_file
     if fp == "missing_server_dependency":
-        return (
-            f"Your {framework} app failed to start because a required "
-            f"dependency is missing."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}"
-            f"{' Entry point: `' + src + '`.' if src else ''}",
+        fix = (
             f"{('Check `' + src + '` for') if src else 'Check your entry point for'} "
             f"import statements that reference packages not in your "
             f"requirements.txt or package.json. Run the app locally to see "
             f"the exact ImportError, then `pip install` or `npm install` "
             f"the missing package."
-            f"{' Dependencies listed: ' + deps_str + '.' if deps_str else ''}",
+        )
+        if deps_versioned:
+            fix += f" Dependencies: {deps_versioned}."
+        elif deps_str:
+            fix += f" Dependencies listed: {deps_str}."
+        if fields["deps_outdated_note"]:
+            fix += f" Note: {fields['deps_outdated_note']}."
+        return (
+            f"Your {framework} app failed to start because a required "
+            f"dependency is missing."
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+            f"{' Entry point: `' + src + '`.' if src else ''}",
+            fix,
         )
     if fp == "missing_env_config":
         return (
@@ -1355,7 +1424,9 @@ def _pat_streamlit_memory(f, framework, fields):
         loc = fields["loc"]
         trigger = fields["trigger"]
         detail_excerpt = fields["detail_excerpt"]
+        deps_versioned = fields["deps_versioned"]
         deps_str = fields["deps_str"]
+        has_cache = fields["has_cache_decorator"]
         mem_val = fields["mem"]
         load_val = fields["load"]
         # Compute projected total if both are numeric
@@ -1364,19 +1435,35 @@ def _pat_streamlit_memory(f, framework, fields):
             total_str = f"~{total}MB"
         except (ValueError, TypeError):
             total_str = "dangerously high levels"
-        return (
+        diag = (
             f"Streamlit creates a new Python process per user session. "
             f"{loc + ' uses' if loc else 'Your app uses'} {mem_val}MB per "
             f"session{' (' + trigger + ')' if trigger else ''}. At "
             f"{load_val} concurrent users, total memory reaches "
             f"{total_str}."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}",
-            f"{loc + ': wrap' if loc else 'Wrap'} expensive computations "
-            f"with `@st.cache_data` and database connections or ML models "
-            f"with `@st.cache_resource`. Move module-level data loading "
-            f"inside functions so it can be cached."
-            f"{' Dependencies to check: ' + deps_str + '.' if deps_str else ''}",
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
         )
+        if has_cache:
+            fix = (
+                f"{loc + ': caching' if loc else 'Caching'} is already "
+                f"applied but memory still grows. Add `max_entries` or "
+                f"`ttl` parameters to `@st.cache_data` to bound cache "
+                f"size, and use `@st.cache_resource` for singleton objects "
+                f"like database connections."
+            )
+        else:
+            fix = (
+                f"{loc + ': wrap' if loc else 'Wrap'} expensive computations "
+                f"with `@st.cache_data` and database connections or ML models "
+                f"with `@st.cache_resource`. Move module-level data loading "
+                f"inside functions so it can be cached."
+            )
+        dep_label = deps_versioned or deps_str
+        if dep_label:
+            fix += f" Dependencies: {dep_label}."
+        if fields["deps_outdated_note"]:
+            fix += f" Note: {fields['deps_outdated_note']}."
+        return (diag, fix)
     return None
 
 
@@ -1396,8 +1483,10 @@ def _pat_streamlit_response_time(f, framework, fields):
         errs = fields["errs"]
         trigger = fields["trigger"]
         detail_excerpt = fields["detail_excerpt"]
+        deps_versioned = fields["deps_versioned"]
         deps_str = fields["deps_str"]
-        return (
+        has_cache = fields["has_cache_decorator"]
+        diag = (
             f"Streamlit reruns the entire script on each user interaction. "
             f"{loc + ' was' if loc else 'The app was'} measured at "
             f"{resp if resp else 'degraded'} response time at "
@@ -1405,13 +1494,29 @@ def _pat_streamlit_response_time(f, framework, fields):
             f"{' (' + trigger + ')' if trigger else ''}"
             f"{', with ' + errs + ' errors' if errs else ''}. Each session "
             f"triggers a full re-execution, compounding under load."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}",
-            f"{loc + ': identify' if loc else 'Identify'} the heaviest "
-            f"operations in the script (data loading, API calls, model "
-            f"inference) and wrap with `@st.cache_data`. Use "
-            f"`@st.cache_resource` for database connections and ML models."
-            f"{' Dependencies to check: ' + deps_str + '.' if deps_str else ''}",
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
         )
+        if has_cache:
+            fix = (
+                f"{loc + ': caching' if loc else 'Caching'} is already "
+                f"applied but response time still degrades under load. "
+                f"Check that all expensive operations are cached, add "
+                f"`ttl` to prevent stale data, and use "
+                f"`@st.cache_resource` for singleton resources."
+            )
+        else:
+            fix = (
+                f"{loc + ': identify' if loc else 'Identify'} the heaviest "
+                f"operations in the script (data loading, API calls, model "
+                f"inference) and wrap with `@st.cache_data`. Use "
+                f"`@st.cache_resource` for database connections and ML models."
+            )
+        dep_label = deps_versioned or deps_str
+        if dep_label:
+            fix += f" Dependencies: {dep_label}."
+        if fields["deps_outdated_note"]:
+            fix += f" Note: {fields['deps_outdated_note']}."
+        return (diag, fix)
     return None
 
 
@@ -1428,23 +1533,34 @@ def _pat_flask_concurrency(f, framework, fields):
         errs = fields["errs"]
         trigger = fields["trigger"]
         detail_excerpt = fields["detail_excerpt"]
-        deps_str = fields["deps_str"]
-        return (
+        deps_versioned = fields["deps_versioned"]
+        call_chain = fields["call_chain"]
+        diag = (
             f"Flask handles requests synchronously — each request blocks a "
             f"worker thread. "
+        )
+        if call_chain:
+            diag += f"Call chain: {call_chain}. "
+        diag += (
             f"{loc + ' reached' if loc else 'Response time reached'} "
             f"{resp if resp else 'degraded levels'} at {fields['load']} "
             f"concurrent requests"
             f"{' (' + trigger + ')' if trigger else ''}"
             f"{', with ' + errs + ' errors' if errs else ''}. All threads "
             f"are occupied and new requests queue."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+            f"{' ' + detail_excerpt if detail_excerpt else ''}"
+        )
+        fix = (
             f"{loc + ': add' if loc else 'Add'} database connection "
             f"pooling (`SQLAlchemy(pool_size=10)`), deploy with "
             f"`gunicorn -w 4` for multiple workers, or add timeouts to "
             f"blocking calls (`requests.get(url, timeout=5)`)."
-            f"{' Dependencies involved: ' + deps_str + '.' if deps_str else ''}",
         )
+        if deps_versioned:
+            fix += f" Dependencies: {deps_versioned}."
+        if fields["deps_outdated_note"]:
+            fix += f" Note: {fields['deps_outdated_note']}."
+        return (diag, fix)
     return None
 
 

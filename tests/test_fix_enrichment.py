@@ -413,3 +413,248 @@ class TestConstants:
 
     def test_max_response_words(self):
         assert _MAX_RESPONSE_WORDS == 100
+
+
+# ── _enrich_findings_from_ingestion ──
+
+from mycode.ingester import DependencyInfo, FunctionFlow
+from mycode.report import _enrich_findings_from_ingestion, _build_call_chain
+
+
+class TestEnrichFindingsFromIngestion:
+    """Tests for deterministic ingestion-level enrichment."""
+
+    def _ingestion(self, tmp_path, **kwargs):
+        ing = IngestionResult(project_path=str(tmp_path))
+        for key, val in kwargs.items():
+            setattr(ing, key, val)
+        # Ensure defaults for fields used by enrichment
+        if not hasattr(ing, "dependencies") or ing.dependencies is None:
+            ing.dependencies = []
+        if not hasattr(ing, "function_flows") or ing.function_flows is None:
+            ing.function_flows = []
+        return ing
+
+    # ── Version enrichment ──
+
+    def test_version_enrichment_basic(self, tmp_path):
+        deps = [
+            DependencyInfo(name="flask", installed_version="2.0.1",
+                           latest_version="3.1.0", is_outdated=True),
+            DependencyInfo(name="pandas", installed_version="2.2.0",
+                           latest_version="2.2.0", is_outdated=False),
+        ]
+        ingestion = self._ingestion(tmp_path, dependencies=deps)
+        finding = _make_finding(affected_dependencies=["flask", "pandas"])
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.dep_versions == {"flask": "2.0.1", "pandas": "2.2.0"}
+        assert finding.dep_latest_versions == {"flask": "3.1.0", "pandas": "2.2.0"}
+        assert finding.dep_outdated == ["flask"]
+
+    def test_version_enrichment_missing_dep(self, tmp_path):
+        deps = [DependencyInfo(name="flask", installed_version="2.0.1")]
+        ingestion = self._ingestion(tmp_path, dependencies=deps)
+        finding = _make_finding(affected_dependencies=["flask", "unknown_lib"])
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert "flask" in finding.dep_versions
+        assert "unknown_lib" not in finding.dep_versions
+
+    def test_version_enrichment_no_installed_version(self, tmp_path):
+        deps = [DependencyInfo(name="flask", installed_version=None)]
+        ingestion = self._ingestion(tmp_path, dependencies=deps)
+        finding = _make_finding(affected_dependencies=["flask"])
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.dep_versions == {}
+
+    # ── Call chain enrichment ──
+
+    def test_call_chain_basic(self, tmp_path):
+        flows = [
+            FunctionFlow(caller="app.index", callee="app.get_data", file_path="app.py", lineno=10),
+            FunctionFlow(caller="app.get_data", callee="app.fetch_api", file_path="app.py", lineno=20),
+        ]
+        ingestion = self._ingestion(tmp_path, function_flows=flows)
+        finding = _make_finding(source_file="app.py", source_function="index")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.call_chain == ["index", "get_data", "fetch_api"]
+
+    def test_call_chain_cycle_detection(self, tmp_path):
+        """Circular call graph must not cause infinite loop."""
+        flows = [
+            FunctionFlow(caller="app.a", callee="app.b", file_path="app.py", lineno=1),
+            FunctionFlow(caller="app.b", callee="app.c", file_path="app.py", lineno=2),
+            FunctionFlow(caller="app.c", callee="app.a", file_path="app.py", lineno=3),
+        ]
+        ingestion = self._ingestion(tmp_path, function_flows=flows)
+        finding = _make_finding(source_file="app.py", source_function="a")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        # Should not loop forever; chain should stop before revisiting 'a'
+        assert len(finding.call_chain) <= 4
+        assert finding.call_chain[0] == "a"
+        # 'a' should not appear again in the chain
+        assert finding.call_chain.count("a") == 1
+
+    def test_call_chain_depth_limit(self, tmp_path):
+        flows = [
+            FunctionFlow(caller="app.f1", callee="app.f2", file_path="app.py", lineno=1),
+            FunctionFlow(caller="app.f2", callee="app.f3", file_path="app.py", lineno=2),
+            FunctionFlow(caller="app.f3", callee="app.f4", file_path="app.py", lineno=3),
+            FunctionFlow(caller="app.f4", callee="app.f5", file_path="app.py", lineno=4),
+            FunctionFlow(caller="app.f5", callee="app.f6", file_path="app.py", lineno=5),
+        ]
+        ingestion = self._ingestion(tmp_path, function_flows=flows)
+        finding = _make_finding(source_file="app.py", source_function="f1")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert len(finding.call_chain) <= 4
+
+    def test_call_chain_no_match(self, tmp_path):
+        flows = [
+            FunctionFlow(caller="app.other", callee="app.thing", file_path="app.py", lineno=1),
+        ]
+        ingestion = self._ingestion(tmp_path, function_flows=flows)
+        finding = _make_finding(source_file="app.py", source_function="handle_request")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.call_chain == []
+
+    def test_call_chain_single_callee_no_chain(self, tmp_path):
+        """A function with no callees should not get a call chain (length 1 = not useful)."""
+        flows = [
+            FunctionFlow(caller="app.index", callee="app.helper", file_path="app.py", lineno=1),
+        ]
+        # helper has no outgoing edges, so index → helper (length 2) is useful
+        ingestion = self._ingestion(tmp_path, function_flows=flows)
+        finding = _make_finding(source_file="app.py", source_function="index")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.call_chain == ["index", "helper"]
+
+    def test_call_chain_disambiguates_by_source_file(self, tmp_path):
+        """When same function name in multiple files, prefer matching source_file."""
+        flows = [
+            FunctionFlow(caller="app.handler", callee="app.do_work", file_path="app.py", lineno=1),
+            FunctionFlow(caller="other.handler", callee="other.other_work", file_path="other.py", lineno=1),
+        ]
+        ingestion = self._ingestion(tmp_path, function_flows=flows)
+        finding = _make_finding(source_file="app.py", source_function="handler")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert "do_work" in finding.call_chain
+
+    # ── Decorator enrichment ──
+
+    def test_decorator_enrichment_basic(self, tmp_path):
+        fi = FunctionInfo(
+            name="handle_request", file_path="app.py",
+            lineno=1, end_lineno=5,
+            decorators=["app.route", "st.cache_data"],
+        )
+        fa = FileAnalysis(file_path="app.py", functions=[fi])
+        ingestion = self._ingestion(tmp_path, file_analyses=[fa])
+        finding = _make_finding(source_file="app.py", source_function="handle_request")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.source_decorators == ["app.route", "st.cache_data"]
+
+    def test_decorator_enrichment_no_match(self, tmp_path):
+        fi = FunctionInfo(name="other_func", file_path="app.py", lineno=1, end_lineno=5)
+        fa = FileAnalysis(file_path="app.py", functions=[fi])
+        ingestion = self._ingestion(tmp_path, file_analyses=[fa])
+        finding = _make_finding(source_file="app.py", source_function="handle_request")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.source_decorators == []
+
+    def test_decorator_enrichment_no_source_file(self, tmp_path):
+        ingestion = self._ingestion(tmp_path)
+        finding = _make_finding(source_file="", source_function="handle_request")
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.source_decorators == []
+
+    # ── Combined enrichment ──
+
+    def test_all_enrichments_together(self, tmp_path):
+        deps = [
+            DependencyInfo(name="flask", installed_version="2.0.1",
+                           latest_version="3.1.0", is_outdated=True),
+        ]
+        flows = [
+            FunctionFlow(caller="app.handle_request", callee="app.query_db",
+                         file_path="app.py", lineno=10),
+        ]
+        fi = FunctionInfo(
+            name="handle_request", file_path="app.py",
+            lineno=1, end_lineno=5,
+            decorators=["app.route"],
+        )
+        fa = FileAnalysis(file_path="app.py", functions=[fi])
+
+        ingestion = self._ingestion(
+            tmp_path, dependencies=deps, function_flows=flows, file_analyses=[fa],
+        )
+        finding = _make_finding(
+            source_file="app.py", source_function="handle_request",
+            affected_dependencies=["flask"],
+        )
+        _enrich_findings_from_ingestion([finding], ingestion)
+
+        assert finding.dep_versions == {"flask": "2.0.1"}
+        assert finding.dep_outdated == ["flask"]
+        assert finding.call_chain == ["handle_request", "query_db"]
+        assert finding.source_decorators == ["app.route"]
+
+
+class TestBuildCallChain:
+    """Direct tests for _build_call_chain with visited set."""
+
+    def test_simple_chain(self):
+        graph = {
+            "app.a": ["app.b"],
+            "app.b": ["app.c"],
+        }
+        chain = _build_call_chain("app.a", graph, max_depth=4)
+        assert chain == ["a", "b", "c"]
+
+    def test_cycle_terminates(self):
+        graph = {
+            "app.a": ["app.b"],
+            "app.b": ["app.a"],
+        }
+        chain = _build_call_chain("app.a", graph, max_depth=4)
+        assert len(chain) <= 4
+        assert chain[0] == "a"
+        assert chain.count("a") == 1
+
+    def test_depth_limit(self):
+        graph = {
+            "a": ["b"], "b": ["c"], "c": ["d"],
+            "d": ["e"], "e": ["f"],
+        }
+        chain = _build_call_chain("a", graph, max_depth=3)
+        assert len(chain) <= 3
+
+    def test_branching_picks_longest(self):
+        graph = {
+            "a": ["b", "c"],
+            "b": ["d"],
+            # c has no outgoing edges
+        }
+        chain = _build_call_chain("a", graph, max_depth=4)
+        assert chain == ["a", "b", "d"]
+
+    def test_no_edges(self):
+        chain = _build_call_chain("a", {}, max_depth=4)
+        assert chain == ["a"]
+
+    def test_self_loop(self):
+        graph = {"a": ["a"]}
+        chain = _build_call_chain("a", graph, max_depth=4)
+        # 'a' is in visited from the start, so the self-edge is skipped
+        assert chain == ["a"]

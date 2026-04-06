@@ -115,6 +115,12 @@ class Finding:
     _failure_reason: str = ""
     _finding_type: str = ""  # scenario_failed, resource_limit_hit, errors_during, failure_indicators
     llm_fix_suggestion: str = ""
+    # Ingestion-level enrichment (populated by _enrich_findings_from_ingestion)
+    dep_versions: dict[str, str] = field(default_factory=dict)
+    dep_latest_versions: dict[str, str] = field(default_factory=dict)
+    dep_outdated: list[str] = field(default_factory=list)
+    call_chain: list[str] = field(default_factory=list)
+    source_decorators: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -703,6 +709,10 @@ class DiagnosticReport:
                 "diagnosis": _build_diagnosis(f),
                 "prompt": generate_finding_prompt(f),
                 "llm_fix_suggestion": f.llm_fix_suggestion or None,
+                "dep_versions": dict(f.dep_versions) if f.dep_versions else None,
+                "dep_outdated": list(f.dep_outdated) if f.dep_outdated else None,
+                "call_chain": list(f.call_chain) if f.call_chain else None,
+                "source_decorators": list(f.source_decorators) if f.source_decorators else None,
             }
             if f.grouped_findings:
                 d["grouped_findings"] = [
@@ -1033,6 +1043,121 @@ def _resolve_source_file(
     return ""
 
 
+# ── Ingestion Enrichment ──
+
+
+def _enrich_findings_from_ingestion(
+    findings: list["Finding"],
+    ingestion: IngestionResult,
+) -> None:
+    """Attach ingestion-level data to findings in-place.
+
+    Wires four categories of data into Finding objects:
+    1. dep_versions / dep_latest_versions / dep_outdated — from DependencyInfo
+    2. call_chain — DFS traversal of FunctionFlow edges (depth ≤ 4)
+    3. source_decorators — from FunctionInfo.decorators
+
+    All lookups are best-effort: missing data leaves fields at their defaults.
+    """
+    from collections import defaultdict
+
+    # 1. Dependency version lookup
+    dep_lookup: dict[str, DependencyInfo] = {d.name: d for d in ingestion.dependencies}
+
+    # 2. Call graph adjacency list (caller → [callee, ...])
+    call_graph: dict[str, list[str]] = defaultdict(list)
+    # Reverse lookup: simple function name → qualified name(s)
+    simple_to_qualified: dict[str, list[str]] = defaultdict(list)
+    for flow in ingestion.function_flows:
+        call_graph[flow.caller].append(flow.callee)
+        # Register the simple name for the caller
+        simple_name = flow.caller.rsplit(".", 1)[-1] if "." in flow.caller else flow.caller
+        if flow.caller not in simple_to_qualified.get(simple_name, []):
+            simple_to_qualified[simple_name].append(flow.caller)
+
+    # 3. Function decorator index: (file_path, func_name) → [decorators]
+    decorator_index: dict[tuple[str, str], list[str]] = {}
+    for fa in ingestion.file_analyses:
+        for fi in fa.functions:
+            decorator_index[(fa.file_path, fi.name)] = fi.decorators
+
+    # Enrich each finding
+    for f in findings:
+        # ── Version enrichment ──
+        for dep_name in f.affected_dependencies:
+            dep = dep_lookup.get(dep_name)
+            if not dep:
+                continue
+            if dep.installed_version:
+                f.dep_versions[dep_name] = dep.installed_version
+            if dep.latest_version:
+                f.dep_latest_versions[dep_name] = dep.latest_version
+            if dep.is_outdated:
+                f.dep_outdated.append(dep_name)
+
+        # ── Call chain enrichment ──
+        if f.source_function and call_graph:
+            # Resolve simple function name to qualified name.
+            # Prefer the qualified name whose module matches source_file.
+            qualified = None
+            candidates = simple_to_qualified.get(f.source_function, [])
+            if len(candidates) == 1:
+                qualified = candidates[0]
+            elif len(candidates) > 1 and f.source_file:
+                # Derive module prefix from source_file (e.g. "app.py" → "app")
+                module_prefix = f.source_file.replace("/", ".").removesuffix(".py")
+                for c in candidates:
+                    if c.startswith(module_prefix):
+                        qualified = c
+                        break
+                if not qualified:
+                    qualified = candidates[0]  # best guess
+
+            if qualified:
+                chain = _build_call_chain(qualified, call_graph, max_depth=4)
+                if len(chain) > 1:  # only useful if there's at least one callee
+                    f.call_chain = chain
+
+        # ── Decorator enrichment ──
+        if f.source_file and f.source_function:
+            decorators = decorator_index.get((f.source_file, f.source_function))
+            if decorators:
+                f.source_decorators = list(decorators)
+
+
+def _build_call_chain(
+    start: str,
+    call_graph: dict[str, list[str]],
+    max_depth: int = 4,
+) -> list[str]:
+    """DFS traversal of the call graph from *start*, returning the longest chain.
+
+    Uses an explicit ``visited`` set to prevent infinite loops on circular
+    call graphs.  Returns a list of simple function names (stripped of
+    module prefixes) representing the deepest path, up to *max_depth*.
+    """
+    best: list[str] = []
+
+    def _dfs(node: str, path: list[str], visited: set[str]) -> None:
+        nonlocal best
+        if len(path) > len(best):
+            best = list(path)
+        if len(path) >= max_depth:
+            return
+        for callee in call_graph.get(node, []):
+            if callee not in visited:
+                visited.add(callee)
+                simple = callee.rsplit(".", 1)[-1] if "." in callee else callee
+                path.append(simple)
+                _dfs(callee, path, visited)
+                path.pop()
+                visited.discard(callee)
+
+    simple_start = start.rsplit(".", 1)[-1] if "." in start else start
+    _dfs(start, [simple_start], {start})
+    return best
+
+
 # ── Report Generator ──
 
 
@@ -1263,7 +1388,10 @@ class ReportGenerator:
                 if constraints.max_users is not None:
                     dp.user_ceiling = constraints.max_users
 
-        # 4b. Enrich findings with LLM fix suggestions (silent fallback)
+        # 4b. Attach ingestion-level data to findings (versions, call graph, decorators)
+        _enrich_findings_from_ingestion(report.findings, ingestion)
+
+        # 4c. Enrich findings with LLM fix suggestions (silent fallback)
         if not self._offline and self._llm_config and self._llm_config.api_key:
             from mycode.fix_enrichment import enrich_finding
 
