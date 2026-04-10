@@ -688,7 +688,7 @@ class DiagnosticReport:
         grouped sub-items.
         """
 
-        def _finding_dict(f: Finding) -> dict:
+        def _finding_dict(f: Finding, is_incomplete: bool = False) -> dict:
             # Lazy import to avoid circular dependency (documents imports report)
             from mycode.documents import generate_finding_prompt, _build_diagnosis
             d: dict = {
@@ -706,7 +706,11 @@ class DiagnosticReport:
                 "failure_reason": f._failure_reason,
                 "source_file": f.source_file,
                 "source_function": f.source_function,
-                "diagnosis": _build_diagnosis(f),
+                "diagnosis": (
+                    "Test did not complete — no diagnosis available. See failure reason for details."
+                    if is_incomplete
+                    else _build_diagnosis(f)
+                ),
                 "prompt": generate_finding_prompt(f),
                 "llm_fix_suggestion": f.llm_fix_suggestion or None,
                 "dep_versions": dict(f.dep_versions) if f.dep_versions else None,
@@ -716,7 +720,7 @@ class DiagnosticReport:
             }
             if f.grouped_findings:
                 d["grouped_findings"] = [
-                    _finding_dict(gf) for gf in f.grouped_findings
+                    _finding_dict(gf, is_incomplete=is_incomplete) for gf in f.grouped_findings
                 ]
             return d
 
@@ -762,7 +766,7 @@ class DiagnosticReport:
                 "low_coverage": self.scenarios_run <= 3,
             },
             "findings": [_finding_dict(f) for f in self.findings],
-            "incomplete_tests": [_finding_dict(f) for f in self.incomplete_tests],
+            "incomplete_tests": [_finding_dict(f, is_incomplete=True) for f in self.incomplete_tests],
             "degradation_curves": [
                 _degradation_dict(dp) for dp in self.degradation_points
             ],
