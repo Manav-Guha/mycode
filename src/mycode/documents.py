@@ -1156,14 +1156,20 @@ def _remediation_fields(f: Finding) -> dict[str, str]:
         parts = f.title.split("Endpoint ", 1)
         if len(parts) == 2:
             endpoint = parts[1].split(" ")[0]
+    if not endpoint and " on " in title_lower:
+        # "Response time degradation on /api/users" → "/api/users"
+        # "Elevated error rate on /api/users" → "/api/users"
+        after_on = f.title.rsplit(" on ", 1)
+        if len(after_on) == 2 and after_on[1].startswith("/"):
+            endpoint = after_on[1]
     if not endpoint:
-        endpoint = f.source_function or "endpoint"
+        endpoint = f.source_function or "this endpoint"
 
     # Location string
     if f.source_file and f.source_function:
         loc = f"In `{f.source_file}`, the `{f.source_function}()` function"
     elif f.source_file:
-        loc = f"In `{f.source_file}`"
+        loc = f"The code in `{f.source_file}`"
     elif f.source_function:
         loc = f"The `{f.source_function}()` function"
     else:
