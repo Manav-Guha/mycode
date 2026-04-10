@@ -1,7 +1,7 @@
 # myCode — Product Specification (CLAUDE.md)
-# Version: 3.5 — March 26, 2026
+# Version: 3.6 — April 10, 2026
 # This is the authoritative build specification. Do not override architectural decisions without explicit human approval.
-# Current state (test counts, corpus numbers, infrastructure, completed tracks) is in MEMORY.md. Read BOTH at session start.
+# Current state (test counts, corpus numbers, infrastructure, completed tracks) is in MEMORY.md. Read all three at session start: CLAUDE.md, MEMORY.md, and known_issues.md
 
 ---
 
@@ -45,7 +45,7 @@ A stress-testing tool that lets non-engineer builders verify their AI-generated 
 
 ### FREEMIUM TIER
 - **Distribution:** Account required. Stripe via ADGM.
-- **LLM Backend:** TBD — quality testing required across Gemini 2.5 Pro, GPT-5, Claude Sonnet. BYOK dual-pricing structure.
+- **LLM Backend:** Approved backends: Gemini 2.5 Pro, GPT-5, Claude Sonnet. BYOK supports any OpenAI-compatible endpoint. BYOK dual-pricing structure.
 - **Pricing:** Monthly subscription with included runs + per-run overage. Exact pricing set post-build using real token consumption data.
 - **Languages:** Python AND JavaScript/Node.js
 - **Additions over free tier:**
@@ -323,9 +323,9 @@ myCode NEVER shows raw errors to the user. Every failure is caught, translated i
 ---
 
 ## Current Build State
-- Test baseline: 2,368 passing
+- Test baseline: 2,570 passing, 5 skipped
 - E1-E4 constraint wiring: COMPLETE (commit 357c58c)
-- New module: prediction.py (corpus-backed prediction)
+- New module: prediction.py — corpus-backed failure prediction using XGBoost. Runs before stress tests to provide a predictive analysis panel in the web dashboard, estimating which failure patterns are most likely for the user's dependency combination. Trained on corpus mining data. Model metrics (AUC, F1, recall) and target counts are tracked in MEMORY.md per the file division convention.
 - Web frontend: grouped intake form replacing sequential Q&A
 - New endpoints: /api/submit-intent, /api/predict
 - OperationalConstraints new fields: current_users, max_users, per_user_data, max_total_data, project_description
