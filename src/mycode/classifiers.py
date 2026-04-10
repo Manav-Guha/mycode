@@ -138,6 +138,7 @@ _CATEGORY_DOMAIN_MAP: dict[str, str] = {
     "async_failures": "concurrency_failure",
     "event_listener_accumulation": "resource_exhaustion",
     "state_management_degradation": "resource_exhaustion",
+    "http_load_testing": "concurrency_failure",
 }
 
 # Error type → domain overrides (these take priority)
@@ -275,6 +276,7 @@ _PATTERN_RULES: list[tuple[str, list[str], str]] = [
     ("concurrency_failure", ["race"], "race_condition"),
     ("concurrency_failure", ["thread_pool", "worker"], "thread_pool_exhaustion"),
     ("concurrency_failure", ["gil"], "gil_contention"),
+    ("concurrency_failure", ["concurrent load", "degrades", "saturate"], "thread_pool_exhaustion"),
 
     # Scaling Collapse
     ("scaling_collapse", ["exponential", "nonlinear", "n_squared"], "linear_to_exponential_transition"),
