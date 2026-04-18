@@ -1163,7 +1163,7 @@ def _remediation_fields(f: Finding) -> dict[str, str]:
         if len(after_on) == 2 and after_on[1].startswith("/"):
             endpoint = after_on[1]
     if not endpoint:
-        endpoint = f.source_function or "this endpoint"
+        endpoint = f.source_function or ""
 
     # Location string
     if f.source_file and f.source_function:
@@ -1674,9 +1674,9 @@ def _pat_http_endpoint_blocking(f, framework, fields):
     trigger = fields["trigger"]
     detail_excerpt = fields["detail_excerpt"]
     deps_str = fields["deps_str"]
-    endpoint = fields.get("endpoint", "this endpoint")
+    endpoint = fields.get("endpoint", "")
     return (
-        f"{loc + ' took' if loc else 'Your ' + endpoint + ' endpoint took'} "
+        f"{loc + ' took' if loc else ('Your ' + endpoint + ' endpoint took' if endpoint else 'The endpoint took')} "
         f"{resp if resp else 'over 10 seconds'} to respond at just "
         f"{f._load_level} concurrent connection(s)"
         f"{' (' + trigger + ')' if trigger else ''}. The route handler "
@@ -1702,7 +1702,7 @@ def _pat_external_timeout(f, framework, fields):
         deps_str = fields["deps_str"]
         detail_excerpt = fields["detail_excerpt"]
         return (
-            f"{loc + ' took' if loc else 'Your ' + fields['endpoint'] + ' endpoint took'} "
+            f"{loc + ' took' if loc else ('Your ' + fields['endpoint'] + ' endpoint took' if fields.get('endpoint') else 'The endpoint took')} "
             f"{resp if resp else 'over 10 seconds'} at 1 concurrent "
             f"connection — it is waiting on an external service that is "
             f"not configured or reachable in the test environment."
