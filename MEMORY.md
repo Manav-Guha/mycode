@@ -29,6 +29,7 @@
 1. **Fix prompt pipeline enrichment** — ingestion data not yet flowing into prompts (installed_version, call graph, is_outdated flag).
 2. **44.6% of corpus findings have failure_pattern=None** — fall through to generic fallback.
 3. **Codex CLI broken on Darwin 25.3.0** — Rust panic in system-configuration.
+4. **"Could not test:" label misleads on HTTP-deferred scenarios (2026-04-19)** — 6 of 7 "incomplete tests" in self-test carry failure_reason="http_tested" — they were deferred from the scenario engine to the HTTP phase, not failed. User-facing label "Could not test:" misleads readers into thinking myCode failed to test them when the HTTP phase actually did the work and produced findings. Clarity/labelling issue, not an engine bug. Log for Phase 8 narrative regeneration. Surfaced during Phase 2 verification run.
 
 ---
 
