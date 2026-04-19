@@ -2098,11 +2098,13 @@ class TestBuildRemediation:
             category="data_volume_scaling",
             affected_dependencies=["pandas"],
         )
+        f._peak_memory_mb = 100.0
         diagnosis = _build_diagnosis(f)
         assert "time grows" in diagnosis
         fix = _build_fix(f)
         assert "chunked" in fix or "streaming" in fix
         assert "pagination" in fix
+        assert "How this threshold was set:" in diagnosis
 
     def test_unknown_framework_falls_back(self):
         """Unknown framework + HTTP → empty diagnosis, generic fix."""
@@ -2775,13 +2777,15 @@ class TestEnrichedPatternQuality:
         f._peak_memory_mb = 450.0
         f._load_level = 50
         f.operational_trigger = "sustained_load"
+        f.source_decorators = ["lru_cache"]
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "unbounded_cache_growth_full")
         assert "utils.py" in d
         assert "fetch_user_profile" in d
-        assert "450MB" in d
+        assert "450" in d
         assert "lru_cache" in fix
+        assert "How this threshold was set:" in d
 
     def test_unbounded_cache_growth_minimal(self):
         from mycode.documents import _build_diagnosis, _build_fix
@@ -2792,11 +2796,14 @@ class TestEnrichedPatternQuality:
             affected_dependencies=[],
         )
         f.failure_pattern = "unbounded_cache_growth"
+        f.source_decorators = ["cache"]
+        f._peak_memory_mb = 100.0
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "unbounded_cache_growth_minimal")
-        assert "never evicted" in d
+        assert "cache" in d.lower()
         assert "eviction" in fix
+        assert "How this threshold was set:" in d
 
     # ── 9. _pat_http_endpoint_blocking ──
 
@@ -2887,7 +2894,9 @@ class TestEnrichedPatternQuality:
         f.failure_pattern = "cascading_timeout"
         f._load_level = 10
         f._execution_time_ms = 12500.0
+        f._error_count = 5
         f.operational_trigger = "sustained_load"
+        f.call_chain = ["get_dashboard", "fetch_user"]
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "cascading_timeout_full")
@@ -2895,6 +2904,7 @@ class TestEnrichedPatternQuality:
         assert "get_dashboard" in d
         assert "12500ms" in d
         assert "circuit breakers" in fix
+        assert "How this threshold was set:" in d
 
     def test_cascading_timeout_minimal(self):
         from mycode.documents import _build_diagnosis, _build_fix
@@ -2906,11 +2916,13 @@ class TestEnrichedPatternQuality:
         )
         f.failure_pattern = "cascading_timeout"
         f._load_level = 10
+        f._error_count = 5
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "cascading_timeout_minimal")
-        assert "cascading" in d.lower()
+        assert "timed out" in d.lower()
         assert "timeout" in fix.lower()
+        assert "How this threshold was set:" in d
 
     # ── 12. _pat_pandas_silent_dtypes ──
 
@@ -3064,11 +3076,13 @@ class TestEnrichedPatternQuality:
             category="data_volume_scaling",
             affected_dependencies=[],
         )
+        f._peak_memory_mb = 100.0
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "data_volume_minimal")
         assert "time grows" in d.lower()
         assert "chunked" in fix or "streaming" in fix
+        assert "How this threshold was set:" in d
 
 
 class TestDetailExcerptErrorExtraction:

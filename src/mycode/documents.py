@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+from mycode.thresholds import describe_calibration, get_thresholds
 from mycode.report import (
     DegradationPoint,
     DiagnosticReport,
@@ -1633,20 +1634,41 @@ def _pat_memory_baseline(f, framework, fields):
 @_register_pattern
 def _pat_unbounded_cache_growth(f, framework, fields):
     if f.failure_pattern == "unbounded_cache_growth":
+        t = get_thresholds("unbounded_cache_growth")
+        has_cache = fields["has_cache_decorator"]
+        if not (has_cache and f._peak_memory_mb >= t["peak_memory_mb"]):
+            return None
         loc = fields["loc"]
         mem = fields["mem"]
         trigger = fields["trigger"]
         detail_excerpt = fields["detail_excerpt"]
         deps_str = fields["deps_str"]
+        # Identify the specific cache decorator for the narrative
+        cache_decorator = ""
+        if f.source_decorators:
+            _CACHE_DECORATORS = {
+                "cache", "lru_cache", "functools.cache", "functools.lru_cache",
+                "st.cache_data", "st.cache_resource",
+                "cache_data", "cache_resource",
+            }
+            for dec in f.source_decorators:
+                if dec in _CACHE_DECORATORS:
+                    cache_decorator = dec
+                    break
+        calibration = describe_calibration("unbounded_cache_growth")
         return (
-            f"{loc + ' — memory' if loc else 'Memory'} grows without "
-            f"bound because cached data is never evicted. "
-            f"{'Peak memory reached ' + mem + 'MB. ' if mem not in ('', 'high') else ''}"
+            f"{loc + ' — memory' if loc else 'Memory'} reached "
+            f"{mem}MB during testing. The code uses a `{cache_decorator}` "
+            f"cache decorator, and memory grew as the cache accumulated "
+            f"entries. This correlation suggests the cache may lack an "
+            f"eviction bound — but myCode cannot confirm this is the sole "
+            f"cause of the growth."
             f"{'At load level ' + fields['load'] + ', ' if fields['load'] != 'high' else ''}"
-            f"the cache accumulates entries with every unique request, "
-            f"eventually exhausting available memory."
+            f"if the cache grows with every unique input, it will eventually "
+            f"exhaust available memory."
             f"{' ' + detail_excerpt if detail_excerpt else ''}"
-            f"{' (' + trigger + ')' if trigger else ''}",
+            f"{' (' + trigger + ')' if trigger else ''}"
+            f" How this threshold was set: {calibration}",
             f"{loc + ': add' if loc else 'Add'} an eviction policy to "
             f"every in-memory cache. Use "
             f"`functools.lru_cache(maxsize=1024)` for function "
@@ -1720,20 +1742,42 @@ def _pat_external_timeout(f, framework, fields):
 @_register_pattern
 def _pat_cascading_timeout(f, framework, fields):
     if f.failure_pattern == "cascading_timeout":
+        t = get_thresholds("cascading_timeout")
+        if f._error_count < t["error_count"]:
+            return None
         loc = fields["loc"]
         resp = fields["resp"]
         trigger = fields["trigger"]
         detail_excerpt = fields["detail_excerpt"]
         deps_str = fields["deps_str"]
+        calibration = describe_calibration("cascading_timeout")
+        # Cascade vs single-point branching based on call_chain depth
+        if len(f.call_chain) >= 2:
+            diag = (
+                f"{loc + ' — a' if loc else 'A'} slow dependency call "
+                f"triggers cascading timeouts in downstream functions. "
+                f"{'Response time reached ' + resp + '. ' if resp else ''}"
+                f"{'At load level ' + fields['load'] + ', ' if fields['load'] != 'high' else ''}"
+                f"the slow call blocks its caller, which blocks its caller, "
+                f"until the entire request chain times out."
+                f"{' ' + detail_excerpt if detail_excerpt else ''}"
+                f"{' (' + trigger + ')' if trigger else ''}"
+                f" How this threshold was set: {calibration}"
+            )
+        else:
+            diag = (
+                f"{loc + ' — a' if loc else 'A'} dependency call timed out"
+                f"{', taking ' + resp if resp else ''}"
+                f"{'at load level ' + fields['load'] + ' ' if fields['load'] != 'high' else ''}. "
+                f"The slow response blocked the request handler, but myCode did not "
+                f"detect a multi-layer call chain — this appears to be a single-point "
+                f"timeout rather than a cascading failure."
+                f"{' ' + detail_excerpt if detail_excerpt else ''}"
+                f"{' (' + trigger + ')' if trigger else ''}"
+                f" How this threshold was set: {calibration}"
+            )
         return (
-            f"{loc + ' — a' if loc else 'A'} slow dependency call "
-            f"triggers cascading timeouts in downstream functions. "
-            f"{'Response time reached ' + resp + '. ' if resp else ''}"
-            f"{'At load level ' + fields['load'] + ', ' if fields['load'] != 'high' else ''}"
-            f"the slow call blocks its caller, which blocks its caller, "
-            f"until the entire request chain times out."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}"
-            f"{' (' + trigger + ')' if trigger else ''}",
+            diag,
             f"{loc + ': add' if loc else 'Add'} timeouts to every "
             f"external call in the chain (`timeout=5` for HTTP, "
             f"`connect_timeout` for DB). Use circuit breakers (e.g. "
@@ -1842,6 +1886,10 @@ def _pat_requests_concurrent(f, framework, fields):
 @_register_pattern
 def _pat_data_volume(f, framework, fields):
     if f.category == "data_volume_scaling":
+        t = get_thresholds("data_volume")
+        if not (f._peak_memory_mb >= t["peak_memory_mb"]
+                or f._error_count >= t["error_count"]):
+            return None
         loc = fields["loc"]
         resp = fields["resp"]
         mem = fields["mem"]
@@ -1849,6 +1897,7 @@ def _pat_data_volume(f, framework, fields):
         trigger = fields["trigger"]
         detail_excerpt = fields["detail_excerpt"]
         deps_str = fields["deps_str"]
+        calibration = describe_calibration("data_volume")
         return (
             f"{loc + ' — processing' if loc else 'Processing'} time grows "
             f"with input size"
@@ -1857,7 +1906,8 @@ def _pat_data_volume(f, framework, fields):
             f"{'Peak memory: ' + mem + 'MB. ' if mem not in ('', 'high') else ''}"
             f"{errs + ' errors occurred. ' if errs else ''}"
             f"{detail_excerpt if detail_excerpt else 'At large inputs, this becomes the bottleneck.'}"
-            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}",
+            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}"
+            f" How this threshold was set: {calibration}",
             f"{loc + ': use' if loc else 'Use'} chunked or streaming "
             f"processing instead of loading all data into memory. Add "
             f"pagination for large result sets. Cache intermediate results "
