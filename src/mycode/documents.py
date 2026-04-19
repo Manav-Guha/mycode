@@ -1749,9 +1749,15 @@ def _pat_unbounded_cache_growth(f, framework, fields):
 
 @_register_pattern
 def _pat_http_endpoint_blocking(f, framework, fields):
-    """Match HTTP endpoint findings that failed at very low concurrency."""
+    """Match HTTP endpoint findings that failed at very low concurrency.
+
+    Generic catch-all — defers to classifier-assigned failure_pattern
+    patterns registered later (e.g. cascading_timeout, response_time_cliff).
+    """
     if f.category != "http_load_testing":
         return None
+    if f.failure_pattern:
+        return None  # defer to the specific pattern registered for this failure_pattern
     if f._load_level is None or f._load_level > 5:
         return None
     if "could not start" in f.title.lower():
