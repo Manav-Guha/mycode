@@ -2976,16 +2976,17 @@ class TestEnrichedPatternQuality:
         )
         f.failure_pattern = "unvalidated_type_crash"
         f._load_level = 1
-        f._error_count = 12
+        f._error_count = 45
         f.operational_trigger = "format_variation"
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "unvalidated_type_crash_full")
         assert "routes.py" in d
         assert "create_user" in d
-        assert "12 errors" in d
+        assert "45 errors" in d
         assert "TypeError" in d
         assert "Pydantic" in fix or "pydantic" in fix.lower()
+        assert "How this threshold was set:" in d
 
     def test_unvalidated_type_crash_minimal(self):
         from mycode.documents import _build_diagnosis, _build_fix
@@ -2996,11 +2997,14 @@ class TestEnrichedPatternQuality:
             affected_dependencies=[],
         )
         f.failure_pattern = "unvalidated_type_crash"
+        f._error_count = 50
+        f.details = "TypeError: cannot convert None to int"
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "unvalidated_type_crash_minimal")
-        assert "unexpected type" in d
-        assert "validation" in fix.lower()
+        assert "TypeError" in d
+        assert "type" in fix.lower()
+        assert "How this threshold was set:" in d
 
     # ── 14. _pat_requests_concurrent ──
 
@@ -3013,12 +3017,12 @@ class TestEnrichedPatternQuality:
             affected_dependencies=["requests", "httpx"],
             source_file="client.py",
             source_function="fetch_all",
-            details="All 20 threads blocked waiting for responses.",
+            details="All 20 threads blocked waiting for responses. Timeout: read timed out",
         )
         f.failure_domain = "concurrency_failure"
         f._load_level = 20
         f._execution_time_ms = 6000.0
-        f._error_count = 4
+        f._error_count = 95
         f.operational_trigger = "concurrent_access"
         d = _build_diagnosis(f)
         fix = _build_fix(f)
@@ -3026,6 +3030,7 @@ class TestEnrichedPatternQuality:
         assert "client.py" in d
         assert "6000ms" in d
         assert "httpx" in fix
+        assert "How this threshold was set:" in d
 
     def test_requests_concurrent_minimal(self):
         from mycode.documents import _build_diagnosis, _build_fix
@@ -3036,11 +3041,13 @@ class TestEnrichedPatternQuality:
             affected_dependencies=["requests"],
         )
         f._load_level = 5
+        f._error_count = 95
+        f.details = "ConnectionError: connection refused"
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "requests_concurrent_minimal")
-        assert "synchronous" in d
         assert "requests" in d.lower()
+        assert "How this threshold was set:" in d
 
     # ── 15. _pat_data_volume ──
 

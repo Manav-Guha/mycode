@@ -1527,6 +1527,88 @@ def _pat_streamlit_response_time(f, framework, fields):
     return None
 
 
+def _flask_concurrency_narrative(f, fields) -> str:
+    """Build 4-question narrative for Flask concurrency findings.
+
+    Structure follows the ADR-005 user-comprehension principle:
+    1. What happens to your users
+    2. At what point it matters
+    3. What to do about it
+    4. When it does not matter
+    Appends calibration disclosure as footer.
+    """
+    loc = fields["loc"]
+    resp = fields["resp"]
+    errs = fields["errs"]
+    trigger = fields["trigger"]
+    detail_excerpt = fields["detail_excerpt"]
+    call_chain = fields["call_chain"]
+    load = fields["load"]
+
+    sections = []
+
+    # Opening — what happened (measured fact)
+    opening = (
+        f"Flask handles requests synchronously — each request blocks "
+        f"a worker thread until it finishes."
+    )
+    if call_chain:
+        opening += f" Call chain: {call_chain}."
+    sections.append(opening)
+
+    # 1. What happens to your users
+    user_impact = (
+        f"What happens to your users: "
+        f"{loc + ' took' if loc else 'Response time reached'} "
+        f"{resp if resp else 'degraded levels'} at {load} concurrent "
+        f"requests"
+        f"{', with ' + errs + ' errors' if errs else ''}. "
+        f"When all worker threads are busy, new requests wait in a "
+        f"queue — users see either slow responses or timeouts."
+    )
+    sections.append(user_impact)
+
+    # 2. At what point it matters
+    threshold_context = (
+        f"At what point it matters: your application showed "
+        f"degradation at {load} concurrent users"
+        f"{' (' + trigger + ')' if trigger else ''}. "
+        f"The default Flask development server uses a single thread. "
+        f"A typical production deployment with gunicorn uses 2-4 "
+        f"workers × 2 threads = 4-8 concurrent requests before "
+        f"queuing begins — actual capacity depends on your "
+        f"configuration."
+    )
+    sections.append(threshold_context)
+
+    # 3. What to do about it — kept brief here, full detail in fix
+    action = (
+        f"What to do about it: deploy with a production server "
+        f"(gunicorn, waitress) and add connection pooling for "
+        f"database and HTTP calls. See the fix prompt below for "
+        f"specific code changes."
+    )
+    sections.append(action)
+
+    # 4. When it does not matter
+    escape = (
+        f"When this does not matter: if your application serves a "
+        f"small number of sequential users (internal tool, personal "
+        f"project) and {load} concurrent users is far above your "
+        f"actual usage, this finding is informational."
+    )
+    sections.append(escape)
+
+    # Calibration disclosure (Product Architecture Section 1.6)
+    calibration = describe_calibration("flask_concurrency")
+    sections.append(f"How this threshold was set: {calibration}")
+
+    if detail_excerpt:
+        sections.append(detail_excerpt)
+
+    return " ".join(sections)
+
+
 @_register_pattern
 def _pat_flask_concurrency(f, framework, fields):
     if (
@@ -1535,28 +1617,12 @@ def _pat_flask_concurrency(f, framework, fields):
             "http_load_testing", "blocking_io", "concurrent_execution",
         )
     ):
-        loc = fields["loc"]
-        resp = fields["resp"]
-        errs = fields["errs"]
-        trigger = fields["trigger"]
-        detail_excerpt = fields["detail_excerpt"]
+        t = get_thresholds("flask_concurrency")
+        if f._load_level is None or f._load_level < t["load_level"]:
+            return None
         deps_versioned = fields["deps_versioned"]
-        call_chain = fields["call_chain"]
-        diag = (
-            f"Flask handles requests synchronously — each request blocks a "
-            f"worker thread. "
-        )
-        if call_chain:
-            diag += f"Call chain: {call_chain}. "
-        diag += (
-            f"{loc + ' reached' if loc else 'Response time reached'} "
-            f"{resp if resp else 'degraded levels'} at {fields['load']} "
-            f"concurrent requests"
-            f"{' (' + trigger + ')' if trigger else ''}"
-            f"{', with ' + errs + ' errors' if errs else ''}. All threads "
-            f"are occupied and new requests queue."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}"
-        )
+        loc = fields["loc"]
+        diag = _flask_concurrency_narrative(f, fields)
         fix = (
             f"{loc + ': add' if loc else 'Add'} database connection "
             f"pooling (`SQLAlchemy(pool_size=10)`), deploy with "
@@ -1823,33 +1889,217 @@ def _pat_pandas_silent_dtypes(f, framework, fields):
     return None
 
 
+_EXCEPTION_MARKERS = (
+    "TypeError", "ValueError", "AttributeError", "KeyError",
+    "IndexError", "ValidationError", "JSONDecodeError",
+)
+
+_MARKER_EXPLANATIONS = {
+    "TypeError": (
+        "a value of the wrong type was passed to an operation — "
+        "for example, a string where an integer was expected, or "
+        "a null value where an object was required"
+    ),
+    "ValueError": (
+        "a value had the right type but was outside the expected range "
+        "or format — for example, a negative number where only "
+        "positive was valid, or an unrecognised enum value"
+    ),
+    "AttributeError": (
+        "the code tried to access a property or method on an object "
+        "that doesn't have it — typically because the object was None "
+        "or a different type than expected"
+    ),
+    "KeyError": (
+        "the code tried to access a dictionary key that doesn't exist "
+        "— the input structure was missing an expected field"
+    ),
+    "IndexError": (
+        "the code tried to access a list or array position that "
+        "doesn't exist — the input was shorter than expected"
+    ),
+    "ValidationError": (
+        "input failed schema validation — the data structure or "
+        "field types didn't match the expected Pydantic or "
+        "validation model"
+    ),
+    "JSONDecodeError": (
+        "the code received text that isn't valid JSON — this "
+        "typically happens when an API returns an error page, "
+        "empty response, or HTML instead of JSON"
+    ),
+}
+
+_MARKER_FIXES = {
+    "TypeError": (
+        "Add type checks (`isinstance(x, str)`) or use Pydantic "
+        "models for structured input. Wrap type-sensitive operations "
+        "in try/except TypeError."
+    ),
+    "ValueError": (
+        "Add value range validation before processing. Use "
+        "try/except ValueError for conversion operations like "
+        "int(), float(), or datetime parsing."
+    ),
+    "AttributeError": (
+        "Check for None before attribute access (`if obj is not None: "
+        "obj.method()`). Use `getattr(obj, 'attr', default)` for "
+        "optional attributes."
+    ),
+    "KeyError": (
+        "Use `dict.get('key', default)` instead of `dict['key']`. "
+        "For nested structures, validate key existence at each level "
+        "or use a schema validator."
+    ),
+    "IndexError": (
+        "Validate sequence length before indexing "
+        "(`if len(items) > i: items[i]`). Use `next(iter(items), None)` "
+        "for safe first-element access."
+    ),
+    "ValidationError": (
+        "Check that input data matches the Pydantic model constraints. "
+        "Add `try/except ValidationError` with a user-friendly error "
+        "message explaining which fields are invalid."
+    ),
+    "JSONDecodeError": (
+        "Wrap JSON parsing in try/except JSONDecodeError. Check "
+        "`response.status_code` before parsing. Log the raw response "
+        "body when parsing fails for debugging."
+    ),
+}
+
+
+def _input_handling_narrative(f, fields, matched_marker) -> str:
+    """Build exception-branched narrative for input handling findings.
+    Appends calibration disclosure as footer."""
+    loc = fields["loc"]
+    errs = fields["errs"]
+    trigger = fields["trigger"]
+    detail_excerpt = fields["detail_excerpt"]
+
+    explanation = _MARKER_EXPLANATIONS.get(matched_marker, "")
+
+    diag = (
+        f"{loc + ' raised' if loc else 'The application raised'} "
+        f"`{matched_marker}` — "
+    )
+    if explanation:
+        diag += f"{explanation}. "
+    diag += (
+        f"{errs + ' errors occurred' if errs else 'The error occurred'} "
+        f"{'at load level ' + fields['load'] + ' ' if fields['load'] != 'high' else ''}"
+        f"during stress testing"
+        f"{' (' + trigger + ')' if trigger else ''}."
+        f"{' ' + detail_excerpt if detail_excerpt else ''}"
+    )
+    # Calibration disclosure (Product Architecture Section 1.6)
+    calibration = describe_calibration("input_handling_failure")
+    diag += f" How this threshold was set: {calibration}"
+    return diag
+
+
 @_register_pattern
-def _pat_unvalidated_type_crash(f, framework, fields):
+def _pat_input_handling_failure(f, framework, fields):
     if f.failure_pattern == "unvalidated_type_crash":
+        t = get_thresholds("input_handling_failure")
+        if f._error_count < t["error_count"]:
+            return None
+        details = f.details or ""
+        matched_marker = None
+        for marker in _EXCEPTION_MARKERS:
+            if marker in details:
+                matched_marker = marker
+                break
+        if matched_marker is None:
+            return None
         loc = fields["loc"]
-        errs = fields["errs"]
-        trigger = fields["trigger"]
-        detail_excerpt = fields["detail_excerpt"]
         deps_str = fields["deps_str"]
-        return (
-            f"{loc + ' — the' if loc else 'The'} application crashes when "
-            f"it receives input of an unexpected type. "
-            f"{'At load level ' + fields['load'] + ', ' if fields['load'] != 'high' else ''}"
-            f"{errs + ' errors occurred' if errs else 'The crash occurred'} "
-            f"because the code assumes a specific input type (string, "
-            f"number, object) without validating."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}"
-            f"{' (' + trigger + ')' if trigger else ''}",
+        diag = _input_handling_narrative(f, fields, matched_marker)
+        fix = _MARKER_FIXES.get(matched_marker, (
             f"{loc + ': add' if loc else 'Add'} input validation at the "
-            f"entry point. For Python: use type checks "
-            f"(`isinstance(x, str)`), Pydantic models for structured "
-            f"input, or try/except with specific error types. For "
-            f"JavaScript: use Zod or joi for schema validation. Validate "
-            f"before processing — never pass unvalidated external input "
-            f"to business logic."
-            f"{' Dependencies: ' + deps_str + '.' if deps_str else ''}",
-        )
+            f"entry point. Validate before processing — never pass "
+            f"unvalidated external input to business logic."
+        ))
+        if deps_str:
+            fix += f" Dependencies: {deps_str}."
+        return (diag, fix)
     return None
+
+
+_IO_MARKERS = (
+    "ConnectionError", "Timeout", "ReadTimeout", "ConnectTimeout",
+    "requests.exceptions", "ConnectionResetError", "SSLError",
+)
+
+
+def _requests_concurrent_narrative(f, fields, io_marker) -> str:
+    """Build structured narrative for requests concurrent findings.
+
+    Includes: observable symptoms, capacity framing, remediation
+    options with effort/gain, and escape hatch.
+    Appends calibration disclosure as footer.
+    """
+    loc = fields["loc"]
+    resp = fields["resp"]
+    errs = fields["errs"]
+    trigger = fields["trigger"]
+    detail_excerpt = fields["detail_excerpt"]
+    load = fields["load"]
+
+    sections = []
+
+    # Observable production symptoms
+    symptoms = (
+        f"{loc + ' — the' if loc else 'The'} `requests` library is "
+        f"synchronous: each HTTP call blocks its thread until the "
+        f"response arrives. At {load} concurrent operations, "
+        f"{errs + ' I/O errors occurred' if errs else 'threads were blocked'}"
+        f"{' (' + io_marker + ')' if io_marker else ''}"
+        f"{' with response times reaching ' + resp if resp else ''}."
+    )
+    sections.append(symptoms)
+
+    # Capacity framing
+    capacity = (
+        f"In production, this means your application can handle at "
+        f"most {load} simultaneous outbound HTTP calls before new "
+        f"requests queue or fail. If your application makes external "
+        f"API calls on every user request, this limits your effective "
+        f"concurrency to {load} users."
+    )
+    sections.append(capacity)
+
+    # Remediation options with effort/gain tradeoff
+    remediation = (
+        f"Three options, from least to most effort: "
+        f"(1) Add `timeout=5` to every `requests.get/post` call — "
+        f"low effort, prevents indefinite blocking but doesn't "
+        f"increase throughput. "
+        f"(2) Use `requests.Session()` with "
+        f"`concurrent.futures.ThreadPoolExecutor(max_workers=N)` — "
+        f"moderate effort, adds bounded parallelism. "
+        f"(3) Replace `requests` with `httpx.AsyncClient` and "
+        f"`async/await` — highest effort, highest throughput gain."
+    )
+    sections.append(remediation)
+
+    # Escape hatch
+    escape = (
+        f"When this does not matter: if your application makes "
+        f"external calls infrequently (e.g., on startup, on admin "
+        f"action) rather than on every user request, the synchronous "
+        f"behaviour is acceptable and this finding is informational."
+    )
+    sections.append(escape)
+
+    # Calibration disclosure (Product Architecture Section 1.6)
+    calibration = describe_calibration("requests_concurrent")
+    sections.append(f"How this threshold was set: {calibration}")
+
+    if detail_excerpt:
+        sections.append(detail_excerpt)
+
+    return " ".join(sections)
 
 
 @_register_pattern
@@ -1858,28 +2108,33 @@ def _pat_requests_concurrent(f, framework, fields):
         f.failure_domain == "concurrency_failure"
         or f.category == "concurrent_execution"
     ):
+        t = get_thresholds("requests_concurrent")
+        if f._load_level is None or f._load_level < t["load_level"]:
+            return None
+        if f._error_count < t["error_count"]:
+            return None
+        details = f.details or ""
+        io_marker = None
+        for marker in _IO_MARKERS:
+            if marker in details:
+                io_marker = marker
+                break
+        if io_marker is None:
+            return None
         loc = fields["loc"]
-        resp = fields["resp"]
-        errs = fields["errs"]
-        trigger = fields["trigger"]
-        detail_excerpt = fields["detail_excerpt"]
         deps_str = fields["deps_str"]
-        return (
-            f"{loc + ' — the' if loc else 'The'} `requests` library is "
-            f"synchronous — each call blocks its thread until the response "
-            f"arrives. At {fields['load']} concurrent requests"
-            f"{' (' + trigger + ')' if trigger else ''}, all threads are "
-            f"occupied waiting on I/O"
-            f"{' (response time: ' + resp + ')' if resp else ''}"
-            f"{', with ' + errs + ' errors' if errs else ''}."
-            f"{' ' + detail_excerpt if detail_excerpt else ''}",
+        load = fields["load"]
+        diag = _requests_concurrent_narrative(f, fields, io_marker)
+        fix = (
             f"{loc + ': replace' if loc else 'Replace'} `requests.get/post` "
             f"with `httpx.AsyncClient` for async I/O, or use "
             f"`requests.Session()` for connection pooling with "
             f"`concurrent.futures.ThreadPoolExecutor"
-            f"(max_workers={fields['load']})` for bounded parallelism."
-            f"{' Other dependencies involved: ' + deps_str + '.' if deps_str else ''}",
+            f"(max_workers={load})` for bounded parallelism. "
+            f"Add `timeout=5` to every `requests` call as a minimum safety net."
+            f"{' Other dependencies involved: ' + deps_str + '.' if deps_str else ''}"
         )
+        return (diag, fix)
     return None
 
 
