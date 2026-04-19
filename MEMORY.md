@@ -50,16 +50,62 @@
 
 ---
 
+## Architecture Decision Records — Phase 4 Pattern Gates
+
+Six ADRs covering the weak-gate patterns from phase4-pattern-audit.md are now Active as of 2026-04-19. They are the authoritative specification for Phase 4 implementation.
+
+| ADR | Pattern | Gate summary |
+|---|---|---|
+| 001 | _pat_data_volume | peak_memory_mb ≥ 47 OR error_count ≥ 11 |
+| 002 | _pat_cascading_timeout | error_count ≥ 3, reframed narrative with cascade vs single-point branching |
+| 003 | _pat_unbounded_cache_growth | has_cache_decorator AND peak_memory_mb ≥ 50; fires only on post-71fa8e4 enriched runs |
+| 004 | _pat_unvalidated_type_crash → renamed _pat_input_handling_failure | error_count ≥ 39 AND ≥1 of 7 exception markers; exception-type branching |
+| 005 | _pat_flask_concurrency | load_level ≥ 5 AND non-null; 4-question user-comprehension narrative |
+| 006 | _pat_requests_concurrent | load_level ≥ 2 AND error_count ≥ 91 AND ≥1 I/O marker |
+
+Three blanket rules apply before any pattern-specific gate:
+- Rule 1: no pattern fires on severity == "info"
+- Rule 2: no pattern fires on _finding_type == "clean"
+- Rule 3: concurrency patterns (flask_concurrency, requests_concurrent, cascading_timeout) do not fire at _load_level < 2; null load_level also does not fire for these patterns
+
+The ADRs are stored at myCode-Architecture-Decision-Record.md in project files. They are living documents; revisions are tracked in each ADR's revision history. The threshold calibration mechanism they use is documented in myCode-Product-Architecture.md Sections 1 and 2.
+
+Reference artifacts (not committed, working artifacts in repo root):
+- phase4-pattern-audit.md — the original audit of weak gates
+- phase4-corpus-distributions.md — the corpus distribution analysis that informed Method B thresholds
+
+### ADR-004 pattern rename
+
+_pat_unvalidated_type_crash is renamed to _pat_input_handling_failure at the narrative layer. The failure_pattern classifier label stays as "unvalidated_type_crash" in classifiers.py for corpus continuity. The pattern-dispatch function maps the classifier label to the renamed narrative function.
+
+### Phase 4 implementation scope (next task)
+
+Phase 4 implementation covers:
+1. Threshold provider abstraction (per Product Architecture Section 1.10)
+2. Blanket rule application before any pattern-specific gate
+3. Gate logic for each of the six patterns per their ADRs
+4. Narrative template updates per ADR reference text
+5. Fix prompt template updates per ADR reference text
+6. Pattern rename for ADR-004
+
+Phase 4 does not commit until:
+- Full unit test suite passes (any test asserting on old narrative/gate shape is updated to match new correct shape)
+- Self-test completes against the new gates
+- Side-by-side comparison of pre/post report output confirms only the expected changes
+
+---
+
 ## Current Task List (priority order)
 
-1. Gemini integration — function-level code reading, line-specific fix suggestions, silent fallback
-2. Canary automation — Railway cron job every 4 hours
-3. Concurrent submission load test
-4. Large repo test
-5. Adversarial matrix — minimum 10 projects
-6. Scope-gating — non-Python repo detection
-7. README + HN post additions (edition tracking / no storage note)
-8. Live model target count confirmation (40 after DROP)
+1. **Phase 4 implementation** — implement measurement-based gates for six patterns per the ADR spec in myCode-Architecture-Decision-Record.md. Next immediate task.
+2. Gemini integration — function-level code reading, line-specific fix suggestions, silent fallback
+3. Canary automation — Railway cron job every 4 hours
+4. Concurrent submission load test
+5. Large repo test
+6. Adversarial matrix — minimum 10 projects
+7. Scope-gating — non-Python repo detection
+8. README + HN post additions (edition tracking / no storage note)
+9. Live model target count confirmation (40 after DROP)
 
 ---
 
