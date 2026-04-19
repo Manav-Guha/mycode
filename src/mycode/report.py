@@ -706,6 +706,12 @@ class DiagnosticReport:
                 "failure_reason": f._failure_reason,
                 "source_file": f.source_file,
                 "source_function": f.source_function,
+                # Measurement fields — private attrs on Finding (leading _),
+                # public keys in serialized JSON (underscore stripped).
+                "peak_memory_mb": f._peak_memory_mb,
+                "execution_time_ms": f._execution_time_ms,
+                "error_count": f._error_count,
+                "finding_type": f._finding_type or None,
                 "diagnosis": (
                     "Test did not complete — no diagnosis available. See failure reason for details."
                     if is_incomplete
