@@ -2905,6 +2905,7 @@ class TestEnrichedPatternQuality:
             affected_dependencies=[],
         )
         f.failure_pattern = "cascading_timeout"
+        f._load_level = 10
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "cascading_timeout_minimal")
@@ -3022,6 +3023,7 @@ class TestEnrichedPatternQuality:
             category="concurrent_execution",
             affected_dependencies=["requests"],
         )
+        f._load_level = 5
         d = _build_diagnosis(f)
         fix = _build_fix(f)
         _assert_prompt_quality(d, fix, "requests_concurrent_minimal")

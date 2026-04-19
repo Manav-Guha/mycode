@@ -1867,6 +1867,29 @@ def _pat_data_volume(f, framework, fields):
     return None
 
 
+# Patterns subject to concurrency blanket rule (Rule 3)
+_CONCURRENCY_PATTERNS = {
+    _pat_flask_concurrency,
+    _pat_requests_concurrent,
+    _pat_cascading_timeout,
+}
+
+
+def _blanket_rules_pass(f: Finding, pattern_fn) -> bool:
+    """Return False if blanket rules suppress this pattern for this finding."""
+    # Rule 1: no pattern fires on info severity
+    if f.severity == "info":
+        return False
+    # Rule 2: no pattern fires on clean findings
+    if f._finding_type == "clean":
+        return False
+    # Rule 3: concurrency patterns require load_level >= 2 and non-null
+    if pattern_fn in _CONCURRENCY_PATTERNS:
+        if f._load_level is None or f._load_level < 2:
+            return False
+    return True
+
+
 def _match_remediation(f: Finding) -> tuple[str, str] | None:
     """Try each remediation pattern against a finding.
 
@@ -1875,6 +1898,8 @@ def _match_remediation(f: Finding) -> tuple[str, str] | None:
     framework = _detect_framework(f.affected_dependencies)
     fields = _remediation_fields(f)
     for pattern_fn in _REMEDIATION_PATTERNS:
+        if not _blanket_rules_pass(f, pattern_fn):
+            continue
         result = pattern_fn(f, framework, fields)
         if result is not None:
             return result
