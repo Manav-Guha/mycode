@@ -6,7 +6,7 @@
 
 ## Current State
 
-- **Corpus:** 9,297 valid reports, wave 7 complete, mining done. Dedup policy: always deduplicate before mining.
+- **Corpus:** 9,297 valid reports out of 9,449 directories (152 dirs have no report file, 0 corrupt). 15,552 total findings. Wave 7 complete, mining done. Dedup policy: always deduplicate before mining.
 - **Model:** XGBoost, mean AUC 0.931, mean F1 0.392, mean recall 0.462, 40 targets in production (after dedup + 2 drops). Per-target thresholds calibrated via F1-optimized grid search. Class weighting applied.
 - **Tests:** 2,570 passing, 5 skipped.
 - **Infrastructure:** Railway Pro ("rare-tranquility", 4 vCPU / 8GB RAM). Vercel frontend. GitHub: github.com/Manav-Guha/mycode.git. PyPI: mycode-ai. Web: mycode-ai.vercel.app. Railway production URL: mycode-production-d3fa.up.railway.app.
