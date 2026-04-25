@@ -324,6 +324,9 @@ _MAX_PREDICTIONS = 5
 # Minimum confirmed_count to include in predictions.
 _MIN_CONFIRMED = 3
 
+# Default probability threshold for targets missing from per_target_thresholds.
+_DEFAULT_THRESHOLD = 0.5
+
 
 @dataclass
 class PredictionItem:
@@ -620,9 +623,14 @@ def _predict_with_model(
 
     scale_note = _build_scale_note(constraints)
 
+    # Per-target thresholds (F1-optimized during training)
+    thresholds = metadata.get("per_target_thresholds", {})
+    if not isinstance(thresholds, dict):
+        thresholds = {}
+
     predictions = []
     for prob, col, info in top:
-        if prob < 0.01:
+        if prob < thresholds.get(col, _DEFAULT_THRESHOLD):
             continue
         # Find which user deps overlap with this pattern's typical deps
         pattern_deps = set()
