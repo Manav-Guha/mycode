@@ -267,9 +267,13 @@ def detect_languages(project_path: Path) -> set[str]:
         detected.add("python")
 
     # JavaScript: indicator AND enough source files (not just build tooling)
-    if has_js_indicator and js_count >= _MIN_JS_SOURCE_FILES:
+    # When Python indicators are present, require 3+ JS files to avoid
+    # false positives from build-tooling package.json.  When no Python
+    # indicators exist, 1 JS file suffices.
+    min_js = _MIN_JS_SOURCE_FILES if has_python_indicator else 1
+    if has_js_indicator and js_count >= min_js:
         detected.add("javascript")
-    elif js_count >= _MIN_JS_SOURCE_FILES and not has_python_indicator:
+    elif js_count >= min_js and not has_python_indicator:
         # JS source files without indicator but no Python either
         detected.add("javascript")
 

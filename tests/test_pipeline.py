@@ -207,6 +207,26 @@ class TestDetectLanguage:
         (tmp_path / "utils.ts").write_text("export const y = 2;\n")
         assert detect_language(tmp_path) == "javascript"
 
+    def test_small_js_project_accepted(self, tmp_path):
+        """A Node.js project with <3 JS files should be detected when no Python indicators exist."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "package.json").write_text('{"name":"todo","dependencies":{"express":"4.18.0"}}\n')
+        (project / "server.js").write_text('const express = require("express");\nconst app = express();\n')
+        (project / "seed.js").write_text('// seed data\n')
+        assert detect_language(project) == "javascript"
+
+    def test_small_js_with_python_still_rejects(self, tmp_path):
+        """package.json + 1 JS file should NOT trigger JS when Python indicators are present."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "requirements.txt").write_text("flask\n")
+        (project / "package.json").write_text('{"name":"build"}\n')
+        (project / "app.py").write_text("print('hello')\n")
+        (project / "index.js").write_text("console.log('hi');\n")
+        result = detect_language(project)
+        assert result == "python"
+
 
 # ── PipelineResult ──
 
