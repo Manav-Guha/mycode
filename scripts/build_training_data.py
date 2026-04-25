@@ -151,22 +151,38 @@ def _extract_targets(report: dict, target_patterns: list[dict]) -> dict:
             if title_lower in ft or ft in title_lower:
                 matched = True
                 break
-            # Check significant word overlap (≥3 shared words)
+            # Check significant word overlap (≥3 shared words).
+            # If the pattern title contains a parenthesized qualifier
+            # like "(pandas)", require it to appear in the finding title
+            # to avoid matching "Concurrent Request Load (requests)"
+            # against a finding for "Concurrent Request Load (axios)".
             p_words = set(title_lower.split())
             f_words = set(ft.split())
             if len(p_words & f_words) >= 3:
-                matched = True
-                break
+                # Extract parenthesized qualifier if present
+                import re as _re
+                qual_match = _re.search(r"\(([^)]+)\)", title_lower)
+                if qual_match:
+                    qualifier = qual_match.group(1)
+                    if qualifier in ft:
+                        matched = True
+                        break
+                else:
+                    matched = True
+                    break
 
-        # Also match by category + failure_domain + failure_pattern combo
+        # Also match by category + failure_domain + failure_pattern combo.
+        # Require failure_pattern to be non-empty to avoid collapsing all
+        # targets that share the same category+domain into one label.
         if not matched:
             p_cat = pattern.get("category", "")
             p_domain = pattern.get("failure_domain", "")
             p_pattern = pattern.get("failure_pattern", "")
-            if p_cat and p_domain:
-                if p_cat in finding_categories and p_domain in finding_domains:
-                    if not p_pattern or p_pattern in finding_patterns:
-                        matched = True
+            if p_cat and p_domain and p_pattern:
+                if (p_cat in finding_categories
+                        and p_domain in finding_domains
+                        and p_pattern in finding_patterns):
+                    matched = True
 
         targets[col] = 1 if matched else 0
 

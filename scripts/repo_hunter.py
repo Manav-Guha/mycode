@@ -220,7 +220,8 @@ def _get_dep_count(
 
         # Content is base64-encoded
         import base64
-        encoded = data.get("content", "")
+        encoded = data.get("content", "") if isinstance(data, dict) else ""
+
         if not encoded:
             continue
         try:

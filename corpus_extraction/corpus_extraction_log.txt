@@ -1,10 +1,12 @@
 corpus_extract.py — Extraction Log
 ==================================================
-Directories scanned:     4
+Directories scanned:     6
   - /Users/Manav/Desktop/mycode/results
   - /Users/Manav/Desktop/mycode/corpus_results
   - /Users/Manav/Desktop/mycode/corpus_results_retry
   - /Users/Manav/Desktop/mycode/corpus_results_timeout
+  - /Users/Manav/Desktop/mycode/corpus_results_lovable
+  - /Users/Manav/Desktop/mycode/corpus_results_lovable2
 Total reports read:      2081
 Parse errors (skipped):  0
 Total findings extracted: 4056

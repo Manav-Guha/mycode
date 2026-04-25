@@ -65,7 +65,6 @@
     "target_computation_coupling_clear_timeout",
     "target_dependency_installation_failed",
     "target_cache_memory_growth_streamlit",
-    "target_array_size_scaling_numpy",
     "target_validation_throughput_pydantic",
     "target_get_root_http",
     "target_n_plus_one_detection_sqlalchemy",
@@ -77,7 +76,6 @@
     "target_env_validation_dotenv",
     "target_scenario_failed_pandas_edge_case_dtypes",
     "target_memory_crash_on_data_operations_pandas",
-    "target_validation_throughput_zod",
     "target_memory_profiling_over_time_pandas",
     "target_merge_memory_stress_pandas",
     "target_scenario_failed_pandas_iterrows_vs_vectorized",
@@ -95,20 +93,23 @@
     "target_memory_crash_on_array_allocation_numpy",
     "target_scenario_failed_unrecognized_deps_generic_stress",
     "target_silent_number_overflow_numpy",
-    "target_endpoint_health_degrades_under_concurrent_load",
-    "target_scenario_failed_numpy_dtype_edge_cases",
     "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check",
     "target_scenario_failed_pandas_concurrent_dataframe_access",
     "target_error_handling_coverage_zod",
     "target_rate_limit_stress_anthropic",
     "target_silent_data_corruption_risk_pandas",
-    "target_version_compatibility_react_dom",
     "target_js_realtime_subscription_load_supabase",
-    "target_js_large_result_handling_supabase",
-    "target_node_rate_limit_stress_openai",
     "target_js_client_side_key_exposure_supabase"
   ],
-  "dropped_targets": [],
+  "dropped_targets": [
+    "target_array_size_scaling_numpy",
+    "target_validation_throughput_zod",
+    "target_endpoint_health_degrades_under_concurrent_load",
+    "target_scenario_failed_numpy_dtype_edge_cases",
+    "target_version_compatibility_react_dom",
+    "target_js_large_result_handling_supabase",
+    "target_node_rate_limit_stress_openai"
+  ],
   "target_info": {
     "target_application_server_could_not_start": {
       "title": "Application server could not start",
@@ -151,12 +152,6 @@
       "severity": "warning",
       "category": "memory_profiling",
       "confirmed_count": 296
-    },
-    "target_array_size_scaling_numpy": {
-      "title": "Array Size Scaling (numpy)",
-      "severity": "critical",
-      "category": "data_volume_scaling",
-      "confirmed_count": 251
     },
     "target_validation_throughput_pydantic": {
       "title": "Validation Throughput (pydantic)",
@@ -223,12 +218,6 @@
       "severity": "warning",
       "category": "edge_case_input",
       "confirmed_count": 64
-    },
-    "target_validation_throughput_zod": {
-      "title": "Validation Throughput (zod)",
-      "severity": "warning",
-      "category": "data_volume_scaling",
-      "confirmed_count": 53
     },
     "target_memory_profiling_over_time_pandas": {
       "title": "Memory Profiling Over Time (pandas)",
@@ -332,18 +321,6 @@
       "category": "edge_case_input",
       "confirmed_count": 18
     },
-    "target_endpoint_health_degrades_under_concurrent_load": {
-      "title": "Endpoint /health degrades under concurrent load",
-      "severity": "critical",
-      "category": "http_load_testing",
-      "confirmed_count": 15
-    },
-    "target_scenario_failed_numpy_dtype_edge_cases": {
-      "title": "Scenario failed: numpy_dtype_edge_cases",
-      "severity": "critical",
-      "category": "edge_case_input",
-      "confirmed_count": 15
-    },
     "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check": {
       "title": "Failure indicators triggered: numpy_numpy_2_breaking_changes_check",
       "severity": "warning",
@@ -374,29 +351,11 @@
       "category": "edge_case_input",
       "confirmed_count": 13
     },
-    "target_version_compatibility_react_dom": {
-      "title": "Version Compatibility (react-dom)",
-      "severity": "warning",
-      "category": "edge_case_input",
-      "confirmed_count": 12
-    },
     "target_js_realtime_subscription_load_supabase": {
       "title": "Js Realtime Subscription Load (supabase)",
       "severity": "warning",
       "category": "memory_profiling",
       "confirmed_count": 11
-    },
-    "target_js_large_result_handling_supabase": {
-      "title": "Js Large Result Handling (supabase)",
-      "severity": "warning",
-      "category": "data_volume_scaling",
-      "confirmed_count": 11
-    },
-    "target_node_rate_limit_stress_openai": {
-      "title": "Node Rate Limit Stress (openai)",
-      "severity": "warning",
-      "category": "concurrent_execution",
-      "confirmed_count": 10
     },
     "target_js_client_side_key_exposure_supabase": {
       "title": "Js Client Side Key Exposure (supabase)",
@@ -405,58 +364,436 @@
       "confirmed_count": 10
     }
   },
-  "training_samples": 7507,
-  "mean_auc": 0.9078,
+  "training_samples": 9297,
+  "mean_auc": 0.9307,
+  "mean_precision": 0.3699,
+  "mean_recall": 0.4618,
+  "mean_f1": 0.3917,
   "per_target_auc": {
-    "target_application_server_could_not_start": 0.9355,
-    "target_response_time_degradation_on_your_application": 0.9138,
-    "target_data_volume_scaling_pandas": 0.9536,
-    "target_general_stress_test_unrecognized_dependencies": 0.8844,
-    "target_computation_coupling_clear_timeout": 0.9231,
-    "target_dependency_installation_failed": 0.8487,
-    "target_cache_memory_growth_streamlit": 0.9767,
-    "target_array_size_scaling_numpy": 0.9536,
-    "target_validation_throughput_pydantic": 0.9404,
-    "target_get_root_http": 0.9473,
-    "target_n_plus_one_detection_sqlalchemy": 0.8844,
-    "target_concurrent_request_load_requests": 0.8614,
-    "target_response_time_degradation_on_debug_email": 0.9131,
-    "target_application_degrades_under_concurrent_load": 0.8579,
-    "target_async_concurrent_load_httpx": 0.8614,
-    "target_concurrent_request_load_axios": 0.8614,
-    "target_env_validation_dotenv": 0.9778,
-    "target_scenario_failed_pandas_edge_case_dtypes": 0.94,
-    "target_memory_crash_on_data_operations_pandas": 0.9182,
-    "target_validation_throughput_zod": 0.9404,
-    "target_memory_profiling_over_time_pandas": 0.9102,
-    "target_merge_memory_stress_pandas": 0.9125,
-    "target_scenario_failed_pandas_iterrows_vs_vectorized": 0.8844,
-    "target_js_query_throughput_supabase": 0.8714,
-    "target_repeated_allocation_memory_numpy": 0.9237,
-    "target_rate_limit_stress_openai": 0.8614,
-    "target_version_compatibility_react": 0.8986,
-    "target_get_health_http": 0.9473,
-    "target_chain_length_scaling_langchain": 0.9859,
-    "target_scenario_failed_requests_large_download_memory": 0.8802,
-    "target_scenario_failed_requests_timeout_behavior": 0.929,
-    "target_connection_pool_stress_prisma": 0.7797,
-    "target_scenario_failed_requests_session_vs_individual_performance": 0.9116,
-    "target_numpy_2_0_compatibility_numpy": 0.9137,
-    "target_memory_crash_on_array_allocation_numpy": 0.9186,
-    "target_scenario_failed_unrecognized_deps_generic_stress": 0.8844,
-    "target_silent_number_overflow_numpy": 0.9137,
-    "target_endpoint_health_degrades_under_concurrent_load": 0.8579,
-    "target_scenario_failed_numpy_dtype_edge_cases": 0.94,
-    "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check": 0.9562,
-    "target_scenario_failed_pandas_concurrent_dataframe_access": 0.8614,
-    "target_error_handling_coverage_zod": 0.9137,
-    "target_rate_limit_stress_anthropic": 0.8614,
-    "target_silent_data_corruption_risk_pandas": 0.9672,
-    "target_version_compatibility_react_dom": 0.8986,
-    "target_js_realtime_subscription_load_supabase": 0.9476,
-    "target_js_large_result_handling_supabase": 0.8844,
-    "target_node_rate_limit_stress_openai": 0.8614,
-    "target_js_client_side_key_exposure_supabase": 0.9137
+    "target_application_server_could_not_start": 0.9325,
+    "target_response_time_degradation_on_your_application": 0.8982,
+    "target_data_volume_scaling_pandas": 0.9525,
+    "target_general_stress_test_unrecognized_dependencies": 0.9354,
+    "target_computation_coupling_clear_timeout": 0.9281,
+    "target_dependency_installation_failed": 0.9027,
+    "target_cache_memory_growth_streamlit": 0.9766,
+    "target_validation_throughput_pydantic": 0.9512,
+    "target_get_root_http": 0.8382,
+    "target_n_plus_one_detection_sqlalchemy": 0.9877,
+    "target_concurrent_request_load_requests": 0.9704,
+    "target_response_time_degradation_on_debug_email": 0.8953,
+    "target_application_degrades_under_concurrent_load": 0.8681,
+    "target_async_concurrent_load_httpx": 0.9842,
+    "target_concurrent_request_load_axios": 0.9826,
+    "target_env_validation_dotenv": 0.9783,
+    "target_scenario_failed_pandas_edge_case_dtypes": 0.9358,
+    "target_memory_crash_on_data_operations_pandas": 0.9254,
+    "target_memory_profiling_over_time_pandas": 0.8951,
+    "target_merge_memory_stress_pandas": 0.9063,
+    "target_scenario_failed_pandas_iterrows_vs_vectorized": 0.9772,
+    "target_js_query_throughput_supabase": 0.9258,
+    "target_repeated_allocation_memory_numpy": 0.919,
+    "target_rate_limit_stress_openai": 0.9792,
+    "target_version_compatibility_react": 0.9345,
+    "target_get_health_http": 0.8975,
+    "target_chain_length_scaling_langchain": 0.9691,
+    "target_scenario_failed_requests_large_download_memory": 0.9191,
+    "target_scenario_failed_requests_timeout_behavior": 0.9601,
+    "target_connection_pool_stress_prisma": 0.7723,
+    "target_scenario_failed_requests_session_vs_individual_performance": 0.8983,
+    "target_numpy_2_0_compatibility_numpy": 0.956,
+    "target_memory_crash_on_array_allocation_numpy": 0.9147,
+    "target_scenario_failed_unrecognized_deps_generic_stress": 0.9223,
+    "target_silent_number_overflow_numpy": 0.9811,
+    "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check": 0.9409,
+    "target_scenario_failed_pandas_concurrent_dataframe_access": 0.9431,
+    "target_error_handling_coverage_zod": 0.9146,
+    "target_rate_limit_stress_anthropic": 0.9043,
+    "target_silent_data_corruption_risk_pandas": 0.9563,
+    "target_js_realtime_subscription_load_supabase": 0.9063,
+    "target_js_client_side_key_exposure_supabase": 0.952
+  },
+  "per_target_thresholds": {
+    "target_application_server_could_not_start": 0.43,
+    "target_response_time_degradation_on_your_application": 0.56,
+    "target_data_volume_scaling_pandas": 0.79,
+    "target_general_stress_test_unrecognized_dependencies": 0.78,
+    "target_computation_coupling_clear_timeout": 0.83,
+    "target_dependency_installation_failed": 0.86,
+    "target_cache_memory_growth_streamlit": 0.79,
+    "target_validation_throughput_pydantic": 0.87,
+    "target_get_root_http": 0.73,
+    "target_n_plus_one_detection_sqlalchemy": 0.89,
+    "target_concurrent_request_load_requests": 0.71,
+    "target_response_time_degradation_on_debug_email": 0.59,
+    "target_application_degrades_under_concurrent_load": 0.63,
+    "target_async_concurrent_load_httpx": 0.83,
+    "target_concurrent_request_load_axios": 0.87,
+    "target_env_validation_dotenv": 0.44,
+    "target_scenario_failed_pandas_edge_case_dtypes": 0.81,
+    "target_memory_crash_on_data_operations_pandas": 0.75,
+    "target_memory_profiling_over_time_pandas": 0.9,
+    "target_merge_memory_stress_pandas": 0.91,
+    "target_scenario_failed_pandas_iterrows_vs_vectorized": 0.48,
+    "target_js_query_throughput_supabase": 0.49,
+    "target_repeated_allocation_memory_numpy": 0.85,
+    "target_rate_limit_stress_openai": 0.94,
+    "target_version_compatibility_react": 0.94,
+    "target_get_health_http": 0.75,
+    "target_chain_length_scaling_langchain": 0.82,
+    "target_scenario_failed_requests_large_download_memory": 0.71,
+    "target_scenario_failed_requests_timeout_behavior": 0.32,
+    "target_connection_pool_stress_prisma": 0.77,
+    "target_scenario_failed_requests_session_vs_individual_performance": 0.89,
+    "target_numpy_2_0_compatibility_numpy": 0.84,
+    "target_memory_crash_on_array_allocation_numpy": 0.85,
+    "target_scenario_failed_unrecognized_deps_generic_stress": 0.24,
+    "target_silent_number_overflow_numpy": 0.91,
+    "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check": 0.92,
+    "target_scenario_failed_pandas_concurrent_dataframe_access": 0.36,
+    "target_error_handling_coverage_zod": 0.84,
+    "target_rate_limit_stress_anthropic": 0.58,
+    "target_silent_data_corruption_risk_pandas": 0.88,
+    "target_js_realtime_subscription_load_supabase": 0.16,
+    "target_js_client_side_key_exposure_supabase": 0.12
+  },
+  "per_target_metrics": {
+    "target_application_server_could_not_start": {
+      "auc": 0.9325,
+      "precision": 0.7935,
+      "recall": 0.9065,
+      "f1": 0.8462,
+      "threshold": 0.43,
+      "n_positive": 3958
+    },
+    "target_response_time_degradation_on_your_application": {
+      "auc": 0.8982,
+      "precision": 0.4951,
+      "recall": 0.803,
+      "f1": 0.6126,
+      "threshold": 0.56,
+      "n_positive": 1584
+    },
+    "target_data_volume_scaling_pandas": {
+      "auc": 0.9525,
+      "precision": 0.6076,
+      "recall": 0.7766,
+      "f1": 0.6818,
+      "threshold": 0.79,
+      "n_positive": 1007
+    },
+    "target_general_stress_test_unrecognized_dependencies": {
+      "auc": 0.9354,
+      "precision": 0.5529,
+      "recall": 0.6782,
+      "f1": 0.6091,
+      "threshold": 0.78,
+      "n_positive": 609
+    },
+    "target_computation_coupling_clear_timeout": {
+      "auc": 0.9281,
+      "precision": 0.5072,
+      "recall": 0.5604,
+      "f1": 0.5325,
+      "threshold": 0.83,
+      "n_positive": 439
+    },
+    "target_dependency_installation_failed": {
+      "auc": 0.9027,
+      "precision": 0.5721,
+      "recall": 0.3716,
+      "f1": 0.4505,
+      "threshold": 0.86,
+      "n_positive": 619
+    },
+    "target_cache_memory_growth_streamlit": {
+      "auc": 0.9766,
+      "precision": 0.4907,
+      "recall": 0.7067,
+      "f1": 0.5792,
+      "threshold": 0.79,
+      "n_positive": 300
+    },
+    "target_validation_throughput_pydantic": {
+      "auc": 0.9512,
+      "precision": 0.4759,
+      "recall": 0.4825,
+      "f1": 0.4792,
+      "threshold": 0.87,
+      "n_positive": 286
+    },
+    "target_get_root_http": {
+      "auc": 0.8382,
+      "precision": 0.0775,
+      "recall": 0.1493,
+      "f1": 0.102,
+      "threshold": 0.73,
+      "n_positive": 134
+    },
+    "target_n_plus_one_detection_sqlalchemy": {
+      "auc": 0.9877,
+      "precision": 0.5896,
+      "recall": 0.651,
+      "f1": 0.6188,
+      "threshold": 0.89,
+      "n_positive": 192
+    },
+    "target_concurrent_request_load_requests": {
+      "auc": 0.9704,
+      "precision": 0.3139,
+      "recall": 0.6108,
+      "f1": 0.4147,
+      "threshold": 0.71,
+      "n_positive": 185
+    },
+    "target_response_time_degradation_on_debug_email": {
+      "auc": 0.8953,
+      "precision": 0.4998,
+      "recall": 0.7764,
+      "f1": 0.6081,
+      "threshold": 0.59,
+      "n_positive": 1574
+    },
+    "target_application_degrades_under_concurrent_load": {
+      "auc": 0.8681,
+      "precision": 0.1437,
+      "recall": 0.446,
+      "f1": 0.2174,
+      "threshold": 0.63,
+      "n_positive": 278
+    },
+    "target_async_concurrent_load_httpx": {
+      "auc": 0.9842,
+      "precision": 0.4599,
+      "recall": 0.5584,
+      "f1": 0.5044,
+      "threshold": 0.83,
+      "n_positive": 154
+    },
+    "target_concurrent_request_load_axios": {
+      "auc": 0.9826,
+      "precision": 0.5104,
+      "recall": 0.5506,
+      "f1": 0.5297,
+      "threshold": 0.87,
+      "n_positive": 89
+    },
+    "target_env_validation_dotenv": {
+      "auc": 0.9783,
+      "precision": 0.3544,
+      "recall": 0.84,
+      "f1": 0.4985,
+      "threshold": 0.44,
+      "n_positive": 100
+    },
+    "target_scenario_failed_pandas_edge_case_dtypes": {
+      "auc": 0.9358,
+      "precision": 0.2406,
+      "recall": 0.36,
+      "f1": 0.2885,
+      "threshold": 0.81,
+      "n_positive": 125
+    },
+    "target_memory_crash_on_data_operations_pandas": {
+      "auc": 0.9254,
+      "precision": 0.2903,
+      "recall": 0.5062,
+      "f1": 0.369,
+      "threshold": 0.75,
+      "n_positive": 160
+    },
+    "target_memory_profiling_over_time_pandas": {
+      "auc": 0.8951,
+      "precision": 0.3827,
+      "recall": 0.2719,
+      "f1": 0.3179,
+      "threshold": 0.9,
+      "n_positive": 114
+    },
+    "target_merge_memory_stress_pandas": {
+      "auc": 0.9063,
+      "precision": 0.3889,
+      "recall": 0.2692,
+      "f1": 0.3182,
+      "threshold": 0.91,
+      "n_positive": 104
+    },
+    "target_scenario_failed_pandas_iterrows_vs_vectorized": {
+      "auc": 0.9772,
+      "precision": 0.2347,
+      "recall": 0.5,
+      "f1": 0.3194,
+      "threshold": 0.48,
+      "n_positive": 46
+    },
+    "target_js_query_throughput_supabase": {
+      "auc": 0.9258,
+      "precision": 0.1429,
+      "recall": 0.3077,
+      "f1": 0.1951,
+      "threshold": 0.49,
+      "n_positive": 65
+    },
+    "target_repeated_allocation_memory_numpy": {
+      "auc": 0.919,
+      "precision": 0.3356,
+      "recall": 0.3788,
+      "f1": 0.3559,
+      "threshold": 0.85,
+      "n_positive": 132
+    },
+    "target_rate_limit_stress_openai": {
+      "auc": 0.9792,
+      "precision": 0.4182,
+      "recall": 0.3239,
+      "f1": 0.3651,
+      "threshold": 0.94,
+      "n_positive": 71
+    },
+    "target_version_compatibility_react": {
+      "auc": 0.9345,
+      "precision": 0.9091,
+      "recall": 0.5,
+      "f1": 0.6452,
+      "threshold": 0.94,
+      "n_positive": 40
+    },
+    "target_get_health_http": {
+      "auc": 0.8975,
+      "precision": 0.1453,
+      "recall": 0.2394,
+      "f1": 0.1809,
+      "threshold": 0.75,
+      "n_positive": 71
+    },
+    "target_chain_length_scaling_langchain": {
+      "auc": 0.9691,
+      "precision": 0.4167,
+      "recall": 0.4651,
+      "f1": 0.4396,
+      "threshold": 0.82,
+      "n_positive": 43
+    },
+    "target_scenario_failed_requests_large_download_memory": {
+      "auc": 0.9191,
+      "precision": 0.1522,
+      "recall": 0.1556,
+      "f1": 0.1538,
+      "threshold": 0.71,
+      "n_positive": 45
+    },
+    "target_scenario_failed_requests_timeout_behavior": {
+      "auc": 0.9601,
+      "precision": 0.1325,
+      "recall": 0.3143,
+      "f1": 0.1864,
+      "threshold": 0.32,
+      "n_positive": 35
+    },
+    "target_connection_pool_stress_prisma": {
+      "auc": 0.7723,
+      "precision": 0.1111,
+      "recall": 0.0513,
+      "f1": 0.0702,
+      "threshold": 0.77,
+      "n_positive": 39
+    },
+    "target_scenario_failed_requests_session_vs_individual_performance": {
+      "auc": 0.8983,
+      "precision": 0.3667,
+      "recall": 0.3084,
+      "f1": 0.335,
+      "threshold": 0.89,
+      "n_positive": 107
+    },
+    "target_numpy_2_0_compatibility_numpy": {
+      "auc": 0.956,
+      "precision": 0.3281,
+      "recall": 0.5,
+      "f1": 0.3962,
+      "threshold": 0.84,
+      "n_positive": 42
+    },
+    "target_memory_crash_on_array_allocation_numpy": {
+      "auc": 0.9147,
+      "precision": 0.3523,
+      "recall": 0.4106,
+      "f1": 0.3792,
+      "threshold": 0.85,
+      "n_positive": 151
+    },
+    "target_scenario_failed_unrecognized_deps_generic_stress": {
+      "auc": 0.9223,
+      "precision": 0.1,
+      "recall": 0.2632,
+      "f1": 0.1449,
+      "threshold": 0.24,
+      "n_positive": 19
+    },
+    "target_silent_number_overflow_numpy": {
+      "auc": 0.9811,
+      "precision": 0.32,
+      "recall": 0.4444,
+      "f1": 0.3721,
+      "threshold": 0.91,
+      "n_positive": 36
+    },
+    "target_failure_indicators_triggered_numpy_numpy_2_breaking_changes_check": {
+      "auc": 0.9409,
+      "precision": 0.5301,
+      "recall": 0.4272,
+      "f1": 0.4731,
+      "threshold": 0.92,
+      "n_positive": 103
+    },
+    "target_scenario_failed_pandas_concurrent_dataframe_access": {
+      "auc": 0.9431,
+      "precision": 0.1935,
+      "recall": 0.4286,
+      "f1": 0.2667,
+      "threshold": 0.36,
+      "n_positive": 14
+    },
+    "target_error_handling_coverage_zod": {
+      "auc": 0.9146,
+      "precision": 0.75,
+      "recall": 0.4,
+      "f1": 0.5217,
+      "threshold": 0.84,
+      "n_positive": 15
+    },
+    "target_rate_limit_stress_anthropic": {
+      "auc": 0.9043,
+      "precision": 0.3077,
+      "recall": 0.4286,
+      "f1": 0.3582,
+      "threshold": 0.58,
+      "n_positive": 28
+    },
+    "target_silent_data_corruption_risk_pandas": {
+      "auc": 0.9563,
+      "precision": 0.3117,
+      "recall": 0.4,
+      "f1": 0.3504,
+      "threshold": 0.88,
+      "n_positive": 60
+    },
+    "target_js_realtime_subscription_load_supabase": {
+      "auc": 0.9063,
+      "precision": 0.1282,
+      "recall": 0.4167,
+      "f1": 0.1961,
+      "threshold": 0.16,
+      "n_positive": 12
+    },
+    "target_js_client_side_key_exposure_supabase": {
+      "auc": 0.952,
+      "precision": 0.102,
+      "recall": 0.4545,
+      "f1": 0.1667,
+      "threshold": 0.12,
+      "n_positive": 11
+    }
   },
   "xgb_params": {
     "n_estimators": 200,
@@ -471,5 +808,5 @@
   },
   "sklearn_version": "1.8.0",
   "xgboost_version": "3.2.0",
-  "trained_at": "2026-04-03T05:24:42.233494+00:00"
+  "trained_at": "2026-04-05T13:45:28.336479+00:00"
 }

@@ -85,50 +85,125 @@ def main():
     if dropped_cols:
         print(f"  Dropped targets (<{MIN_POSITIVE_SAMPLES} positives): {len(dropped_cols)}")
 
+    # Deduplicate targets with identical label vectors — these are
+    # artefacts of the label extraction (different pattern titles
+    # matching the same set of findings).  Keep the one with the
+    # highest confirmed_count.
+    seen_vectors: dict[bytes, int] = {}  # hash → index in viable_cols
+    dedup_keep: list[int] = []
+    dedup_dropped: list[str] = []
+    for i, col in enumerate(viable_cols):
+        key = Y_viable[:, i].tobytes()
+        if key in seen_vectors:
+            existing_idx = seen_vectors[key]
+            existing_col = viable_cols[existing_idx]
+            # Keep the one with higher confirmed_count
+            existing_count = target_info.get(existing_col, {}).get("confirmed_count", 0)
+            this_count = target_info.get(col, {}).get("confirmed_count", 0)
+            if this_count > existing_count:
+                # Replace existing with this one
+                dedup_dropped.append(existing_col)
+                dedup_keep = [j if j != existing_idx else i for j in dedup_keep]
+                seen_vectors[key] = i
+            else:
+                dedup_dropped.append(col)
+        else:
+            seen_vectors[key] = i
+            dedup_keep.append(i)
+
+    if dedup_dropped:
+        print(f"  Deduplicated (identical label vectors): {len(dedup_dropped)} targets removed")
+        for dc in dedup_dropped:
+            print(f"    - {dc}")
+        dropped_cols.extend(dedup_dropped)
+        viable_cols = [viable_cols[i] for i in dedup_keep]
+        Y_viable = Y_viable[:, dedup_keep]
+        print(f"  Remaining targets after dedup: {len(viable_cols)}")
+
     if len(viable_cols) == 0:
         print("ERROR: No viable targets. Aborting.")
         sys.exit(1)
 
-    # Train model
-    print("\nTraining XGBoost multi-label model...")
-    base = XGBClassifier(**XGB_PARAMS)
-    model = MultiOutputClassifier(base)
-    model.fit(X, Y_viable)
+    # Train with per-target class weighting: scale_pos_weight compensates
+    # for class imbalance so the model doesn't default to predicting 0.
+    print("\nTraining XGBoost multi-label model (class-weighted)...")
+    n_samples = X.shape[0]
+    estimators = []
+    for i in range(Y_viable.shape[1]):
+        n_pos = int(Y_viable[:, i].sum())
+        n_neg = n_samples - n_pos
+        spw = n_neg / max(n_pos, 1)
+        est = XGBClassifier(**XGB_PARAMS, scale_pos_weight=spw)
+        estimators.append(est)
+
+    # MultiOutputClassifier doesn't support per-target params, so we
+    # train each estimator individually.
+    for i, est in enumerate(estimators):
+        est.fit(X, Y_viable[:, i])
+
+    # Wrap into a compatible object for saving
+    model = MultiOutputClassifier(XGBClassifier(**XGB_PARAMS))
+    model.estimators_ = estimators
+    model.classes_ = [np.array([0, 1])] * len(estimators)
     print("  Training complete.")
 
-    # Cross-validated evaluation
-    print("\nRunning 5-fold cross-validation...")
-    # predict_proba returns list of (n_samples, 2) arrays
-    Y_proba_cv = cross_val_predict(
-        MultiOutputClassifier(XGBClassifier(**XGB_PARAMS)),
-        X, Y_viable, cv=5, method="predict_proba",
-    )
+    # Cross-validated evaluation (also class-weighted)
+    print("\nRunning 5-fold cross-validation (class-weighted)...")
+    from sklearn.model_selection import StratifiedKFold
+    kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    Y_scores = np.zeros((n_samples, Y_viable.shape[1]), dtype=np.float64)
 
-    # Extract probability of positive class from each target's (n, 2) array
-    if isinstance(Y_proba_cv, list):
-        # MultiOutputClassifier returns list of arrays
-        Y_scores = np.column_stack([p[:, 1] for p in Y_proba_cv])
-    else:
-        Y_scores = Y_proba_cv
+    for i in range(Y_viable.shape[1]):
+        y_col = Y_viable[:, i]
+        n_pos = int(y_col.sum())
+        n_neg = n_samples - n_pos
+        spw = n_neg / max(n_pos, 1)
+        for train_idx, test_idx in kf.split(X, y_col):
+            est = XGBClassifier(**XGB_PARAMS, scale_pos_weight=spw)
+            est.fit(X[train_idx], y_col[train_idx])
+            Y_scores[test_idx, i] = est.predict_proba(X[test_idx])[:, 1]
 
-    # Binary predictions at 0.5 threshold for precision/recall/F1
-    Y_pred_cv = (Y_scores >= 0.5).astype(int)
+    # Per-target threshold calibration: find the threshold maximising F1
+    # on the CV probabilities, rather than assuming 0.5.
+    per_target_thresholds = {}
+    for i, col in enumerate(viable_cols):
+        y_true = Y_viable[:, i]
+        y_score = Y_scores[:, i]
+        best_f1, best_thresh = 0.0, 0.5
+        for thresh in np.arange(0.05, 0.96, 0.01):
+            pred = (y_score >= thresh).astype(int)
+            tp = int(((pred == 1) & (y_true == 1)).sum())
+            fp = int(((pred == 1) & (y_true == 0)).sum())
+            fn = int(((pred == 0) & (y_true == 1)).sum())
+            p = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            r = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            f = 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+            if f > best_f1:
+                best_f1, best_thresh = f, float(thresh)
+        per_target_thresholds[col] = round(best_thresh, 2)
+
+    # Binary predictions using calibrated thresholds
+    Y_pred_cv = np.zeros_like(Y_viable)
+    for i, col in enumerate(viable_cols):
+        Y_pred_cv[:, i] = (Y_scores[:, i] >= per_target_thresholds[col]).astype(int)
 
     # Compute per-target AUC, precision, recall, F1
     per_target_auc = {}
+    per_target_metrics = {}
     aucs = []
     precisions = []
     recalls = []
     f1s = []
-    print("\n  Per-target metrics:")
-    print(f"  {'':2s} {'AUC':>5s}  {'Prec':>5s}  {'Rec':>5s}  {'F1':>5s}  {'Pos':>5s}  {'Title'}")
+    print("\n  Per-target metrics (calibrated thresholds):")
+    print(f"  {'':2s} {'AUC':>5s}  {'Prec':>5s}  {'Rec':>5s}  {'F1':>5s}  {'Thr':>5s}  {'Pos':>5s}  {'Title'}")
     for i, col in enumerate(viable_cols):
         y_true = Y_viable[:, i]
         y_score = Y_scores[:, i]
         y_pred = Y_pred_cv[:, i]
         n_pos = int(y_true.sum())
         n_neg = len(y_true) - n_pos
-        title = target_info.get(col, {}).get("title", col)[:45]
+        title = target_info.get(col, {}).get("title", col)[:40]
+        thresh = per_target_thresholds[col]
         if n_pos < 2 or n_neg < 2:
             print(f"    {col}: SKIP (n_pos={n_pos})")
             continue
@@ -145,8 +220,16 @@ def main():
         recalls.append(rec)
         f1s.append(f1)
         per_target_auc[col] = round(auc, 4)
+        per_target_metrics[col] = {
+            "auc": round(auc, 4),
+            "precision": round(prec, 4),
+            "recall": round(rec, 4),
+            "f1": round(f1, 4),
+            "threshold": thresh,
+            "n_positive": n_pos,
+        }
         marker = "  " if auc >= 0.60 else "!!"
-        print(f"  {marker} {auc:.3f}  {prec:.3f}  {rec:.3f}  {f1:.3f}  {n_pos:5d}  {title}")
+        print(f"  {marker} {auc:.3f}  {prec:.3f}  {rec:.3f}  {f1:.3f}  {thresh:.2f}  {n_pos:5d}  {title}")
 
     mean_auc = float(np.mean(aucs)) if aucs else 0.0
     mean_prec = float(np.mean(precisions)) if precisions else 0.0
@@ -163,7 +246,7 @@ def main():
     model_size_mb = MODEL_OUTPUT.stat().st_size / (1024 * 1024)
     print(f"  Model size: {model_size_mb:.1f} MB")
 
-    # Save metadata
+    # Save metadata (includes per-target calibrated thresholds)
     metadata = {
         "feature_columns": feature_columns,
         "target_columns": viable_cols,
@@ -175,7 +258,12 @@ def main():
         },
         "training_samples": len(df),
         "mean_auc": round(mean_auc, 4),
+        "mean_precision": round(mean_prec, 4),
+        "mean_recall": round(mean_rec, 4),
+        "mean_f1": round(mean_f1, 4),
         "per_target_auc": per_target_auc,
+        "per_target_thresholds": per_target_thresholds,
+        "per_target_metrics": per_target_metrics,
         "xgb_params": XGB_PARAMS,
         "sklearn_version": __import__("sklearn").__version__,
         "xgboost_version": __import__("xgboost").__version__,

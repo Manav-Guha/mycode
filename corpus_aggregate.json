@@ -1,397 +1,884 @@
 {
-  "total_repos": 938,
+  "total_repos": 2081,
   "verticals": {
     "api_service": {
-      "repo_count": 11,
-      "repos_with_issues": 11,
-      "repos_clean": 0,
-      "failure_rate": 1.0,
+      "repo_count": 49,
+      "repos_with_issues": 44,
+      "repos_clean": 5,
+      "failure_rate": 0.898,
       "top_failure_signatures": [
         {
           "signature": "critical:http_load_testing:Application server could not start",
-          "count": 6
+          "count": 24
+        },
+        {
+          "signature": "warning::1 missing dependency",
+          "count": 7
         },
         {
           "signature": "critical:data_volume_scaling:N Plus One Detection (sqlalchemy)",
-          "count": 2
+          "count": 6
         },
         {
-          "signature": "warning:concurrent_execution:API Coupling (App analyzers package fetcher  fetch from github)",
-          "count": 2
+          "signature": "warning:data_volume_scaling:N Plus One Detection (sqlalchemy)",
+          "count": 4
         },
         {
-          "signature": "critical:http_load_testing:Application degrades under concurrent load",
-          "count": 1
-        },
-        {
-          "signature": "warning:http_load_testing:Get Root (http)",
-          "count": 1
+          "signature": "critical:data_volume_scaling:Validation Throughput (pydantic)",
+          "count": 3
         }
       ],
       "top_dependencies": [
         {
           "dependency": "fastapi",
-          "failure_count": 7
+          "failure_count": 33
         },
         {
           "dependency": "uvicorn",
-          "failure_count": 7
-        },
-        {
-          "dependency": "http",
-          "failure_count": 4
-        },
-        {
-          "dependency": "npm-start",
-          "failure_count": 4
+          "failure_count": 33
         },
         {
           "dependency": "sqlalchemy",
-          "failure_count": 3
+          "failure_count": 10
+        },
+        {
+          "dependency": "http",
+          "failure_count": 9
+        },
+        {
+          "dependency": "psycopg2-binary",
+          "failure_count": 6
         }
       ],
-      "dependency_failure_rate": 0.056,
-      "total_dependencies_seen": 124,
-      "dependencies_with_failures": 7
+      "dependency_failure_rate": 0.095,
+      "total_dependencies_seen": 315,
+      "dependencies_with_failures": 30
     },
     "chatbot": {
-      "repo_count": 14,
-      "repos_with_issues": 13,
-      "repos_clean": 1,
-      "failure_rate": 0.929,
+      "repo_count": 92,
+      "repos_with_issues": 80,
+      "repos_clean": 12,
+      "failure_rate": 0.87,
       "top_failure_signatures": [
-        {
-          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
-          "count": 4
-        },
         {
           "signature": "critical:http_load_testing:Application server could not start",
-          "count": 4
+          "count": 27
         },
-        {
-          "signature": "critical:http_load_testing:Dependency installation failed",
-          "count": 3
-        },
-        {
-          "signature": "warning:concurrent_execution:Rate Limit Stress (openai)",
-          "count": 2
-        },
-        {
-          "signature": "warning:data_volume_scaling:Computation Coupling (Clear timeout)",
-          "count": 2
-        }
-      ],
-      "top_dependencies": [
-        {
-          "dependency": "streamlit",
-          "failure_count": 4
-        },
-        {
-          "dependency": "express",
-          "failure_count": 3
-        },
-        {
-          "dependency": "fastapi",
-          "failure_count": 3
-        },
-        {
-          "dependency": "uvicorn",
-          "failure_count": 3
-        },
-        {
-          "dependency": "anthropic",
-          "failure_count": 2
-        }
-      ],
-      "dependency_failure_rate": 0.037,
-      "total_dependencies_seen": 564,
-      "dependencies_with_failures": 21
-    },
-    "dashboard": {
-      "repo_count": 157,
-      "repos_with_issues": 152,
-      "repos_clean": 5,
-      "failure_rate": 0.968,
-      "top_failure_signatures": [
         {
           "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
-          "count": 150
-        },
-        {
-          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
-          "count": 50
-        },
-        {
-          "signature": "critical:data_volume_scaling:Array Size Scaling (numpy)",
-          "count": 19
-        },
-        {
-          "signature": "warning:data_volume_scaling:Data Volume Scaling (pandas)",
           "count": 14
         },
         {
           "signature": "warning::1 missing dependency",
-          "count": 13
-        }
-      ],
-      "top_dependencies": [
-        {
-          "dependency": "streamlit",
-          "failure_count": 180
-        },
-        {
-          "dependency": "pandas",
-          "failure_count": 86
-        },
-        {
-          "dependency": "numpy",
-          "failure_count": 36
-        },
-        {
-          "dependency": "requests",
-          "failure_count": 18
-        },
-        {
-          "dependency": "pyarrow",
-          "failure_count": 5
-        }
-      ],
-      "dependency_failure_rate": 0.096,
-      "total_dependencies_seen": 519,
-      "dependencies_with_failures": 50
-    },
-    "data_pipeline": {
-      "repo_count": 49,
-      "repos_with_issues": 39,
-      "repos_clean": 10,
-      "failure_rate": 0.796,
-      "top_failure_signatures": [
-        {
-          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
-          "count": 27
-        },
-        {
-          "signature": "critical:data_volume_scaling:Array Size Scaling (numpy)",
           "count": 12
         },
         {
-          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
-          "count": 8
-        },
-        {
-          "signature": "warning::1 missing dependency",
-          "count": 6
+          "signature": "warning:http_load_testing:Response time degradation on your application",
+          "count": 7
         },
         {
           "signature": "warning::2 missing dependencies",
-          "count": 3
+          "count": 6
         }
       ],
       "top_dependencies": [
         {
-          "dependency": "streamlit",
+          "dependency": "fastapi",
           "failure_count": 32
         },
         {
-          "dependency": "pandas",
-          "failure_count": 15
+          "dependency": "uvicorn",
+          "failure_count": 31
         },
-        {
-          "dependency": "numpy",
-          "failure_count": 14
-        },
-        {
-          "dependency": "requests",
-          "failure_count": 3
-        },
-        {
-          "dependency": "seaborn",
-          "failure_count": 2
-        }
-      ],
-      "dependency_failure_rate": 0.058,
-      "total_dependencies_seen": 310,
-      "dependencies_with_failures": 18
-    },
-    "ml_model": {
-      "repo_count": 25,
-      "repos_with_issues": 23,
-      "repos_clean": 2,
-      "failure_rate": 0.92,
-      "top_failure_signatures": [
-        {
-          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
-          "count": 17
-        },
-        {
-          "signature": "critical:http_load_testing:Application server could not start",
-          "count": 6
-        },
-        {
-          "signature": "warning::1 missing dependency",
-          "count": 4
-        },
-        {
-          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
-          "count": 4
-        },
-        {
-          "signature": "warning::4 missing dependencies",
-          "count": 3
-        }
-      ],
-      "top_dependencies": [
         {
           "dependency": "streamlit",
-          "failure_count": 20
+          "failure_count": 24
+        },
+        {
+          "dependency": "openai",
+          "failure_count": 21
         },
         {
           "dependency": "pandas",
           "failure_count": 13
+        }
+      ],
+      "dependency_failure_rate": 0.1,
+      "total_dependencies_seen": 789,
+      "dependencies_with_failures": 79
+    },
+    "dashboard": {
+      "repo_count": 468,
+      "repos_with_issues": 430,
+      "repos_clean": 38,
+      "failure_rate": 0.919,
+      "top_failure_signatures": [
+        {
+          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
+          "count": 154
+        },
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 129
+        },
+        {
+          "signature": "warning:memory_profiling:Failure indicators triggered: streamlit_cache_memory_growth",
+          "count": 58
+        },
+        {
+          "signature": "critical:data_volume_scaling:Array Size Scaling (numpy)",
+          "count": 52
+        },
+        {
+          "signature": "warning::1 missing dependency",
+          "count": 50
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "pandas",
+          "failure_count": 450
+        },
+        {
+          "dependency": "streamlit",
+          "failure_count": 255
         },
         {
           "dependency": "numpy",
-          "failure_count": 11
+          "failure_count": 179
         },
         {
-          "dependency": "tensorflow",
-          "failure_count": 5
+          "dependency": "requests",
+          "failure_count": 115
+        },
+        {
+          "dependency": "uvicorn",
+          "failure_count": 30
+        }
+      ],
+      "dependency_failure_rate": 0.215,
+      "total_dependencies_seen": 998,
+      "dependencies_with_failures": 215
+    },
+    "data_pipeline": {
+      "repo_count": 131,
+      "repos_with_issues": 102,
+      "repos_clean": 29,
+      "failure_rate": 0.779,
+      "top_failure_signatures": [
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 33
+        },
+        {
+          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
+          "count": 24
+        },
+        {
+          "signature": "critical:data_volume_scaling:Array Size Scaling (numpy)",
+          "count": 20
+        },
+        {
+          "signature": "warning:memory_profiling:Failure indicators triggered: streamlit_cache_memory_growth",
+          "count": 19
+        },
+        {
+          "signature": "warning::2 missing dependencies",
+          "count": 14
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "pandas",
+          "failure_count": 134
+        },
+        {
+          "dependency": "numpy",
+          "failure_count": 92
+        },
+        {
+          "dependency": "streamlit",
+          "failure_count": 67
+        },
+        {
+          "dependency": "requests",
+          "failure_count": 28
+        },
+        {
+          "dependency": "scipy",
+          "failure_count": 13
+        }
+      ],
+      "dependency_failure_rate": 0.154,
+      "total_dependencies_seen": 532,
+      "dependencies_with_failures": 82
+    },
+    "ml_model": {
+      "repo_count": 90,
+      "repos_with_issues": 72,
+      "repos_clean": 18,
+      "failure_rate": 0.8,
+      "top_failure_signatures": [
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 23
+        },
+        {
+          "signature": "warning:memory_profiling:Failure indicators triggered: streamlit_cache_memory_growth",
+          "count": 15
+        },
+        {
+          "signature": "warning::2 missing dependencies",
+          "count": 12
+        },
+        {
+          "signature": "critical:http_load_testing:Application server could not start",
+          "count": 12
+        },
+        {
+          "signature": "warning::3 missing dependencies",
+          "count": 9
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "pandas",
+          "failure_count": 81
+        },
+        {
+          "dependency": "streamlit",
+          "failure_count": 48
+        },
+        {
+          "dependency": "numpy",
+          "failure_count": 47
         },
         {
           "dependency": "scikit-learn",
-          "failure_count": 3
+          "failure_count": 19
+        },
+        {
+          "dependency": "joblib",
+          "failure_count": 9
         }
       ],
-      "dependency_failure_rate": 0.125,
-      "total_dependencies_seen": 168,
-      "dependencies_with_failures": 21
+      "dependency_failure_rate": 0.162,
+      "total_dependencies_seen": 328,
+      "dependencies_with_failures": 53
     },
     "portfolio": {
-      "repo_count": 23,
-      "repos_with_issues": 23,
-      "repos_clean": 0,
-      "failure_rate": 1.0,
+      "repo_count": 142,
+      "repos_with_issues": 141,
+      "repos_clean": 1,
+      "failure_rate": 0.993,
       "top_failure_signatures": [
         {
           "signature": "critical:http_load_testing:Application server could not start",
-          "count": 18
-        },
-        {
-          "signature": "warning:http_load_testing:Response time degradation on your application",
-          "count": 3
+          "count": 134
         },
         {
           "signature": "critical:http_load_testing:Dependency installation failed",
+          "count": 4
+        },
+        {
+          "signature": "warning:http_load_testing:Response time degradation on your application",
+          "count": 2
+        },
+        {
+          "signature": "warning::1 missing dependency",
           "count": 1
         },
         {
-          "signature": "warning:data_volume_scaling:Computation Coupling (Abort signal timeout)",
-          "count": 1
-        },
-        {
-          "signature": "warning:concurrent_execution:API Coupling (Src components projects submission wizard submit project)",
+          "signature": "warning:concurrent_execution:Ssr Concurrent Load (nextjs)",
           "count": 1
         }
       ],
       "top_dependencies": [
         {
           "dependency": "npm-start",
-          "failure_count": 19
+          "failure_count": 136
         },
         {
           "dependency": "nextjs",
-          "failure_count": 7
+          "failure_count": 6
+        },
+        {
+          "dependency": "express",
+          "failure_count": 2
+        },
+        {
+          "dependency": "fletzxing",
+          "failure_count": 1
         },
         {
           "dependency": "react",
           "failure_count": 1
+        }
+      ],
+      "dependency_failure_rate": 0.026,
+      "total_dependencies_seen": 268,
+      "dependencies_with_failures": 7
+    },
+    "utility": {
+      "repo_count": 39,
+      "repos_with_issues": 23,
+      "repos_clean": 16,
+      "failure_rate": 0.59,
+      "top_failure_signatures": [
+        {
+          "signature": "critical:http_load_testing:Application server could not start",
+          "count": 9
         },
         {
-          "dependency": "react-dom",
+          "signature": "critical:data_volume_scaling:General Stress Test (unrecognized dependencies)",
+          "count": 4
+        },
+        {
+          "signature": "critical:concurrent_execution:Concurrent Request Load (requests)",
+          "count": 3
+        },
+        {
+          "signature": "warning:data_volume_scaling:Computation Coupling (Clear timeout)",
+          "count": 3
+        },
+        {
+          "signature": "critical:http_load_testing:Dependency installation failed",
+          "count": 2
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "npm-start",
+          "failure_count": 10
+        },
+        {
+          "dependency": "requests",
+          "failure_count": 5
+        },
+        {
+          "dependency": "dotenv",
+          "failure_count": 4
+        },
+        {
+          "dependency": "express",
           "failure_count": 1
         },
         {
-          "dependency": "tailwindcss",
+          "dependency": "tomli",
           "failure_count": 1
         }
       ],
-      "dependency_failure_rate": 0.04,
-      "total_dependencies_seen": 125,
-      "dependencies_with_failures": 5
+      "dependency_failure_rate": 0.053,
+      "total_dependencies_seen": 131,
+      "dependencies_with_failures": 7
     },
-    "unclassified": {
-      "repo_count": 110,
-      "repos_with_issues": 99,
-      "repos_clean": 11,
-      "failure_rate": 0.9,
+    "web_app": {
+      "repo_count": 1070,
+      "repos_with_issues": 1032,
+      "repos_clean": 38,
+      "failure_rate": 0.964,
       "top_failure_signatures": [
         {
+          "signature": "critical:http_load_testing:Application server could not start",
+          "count": 961
+        },
+        {
+          "signature": "warning:http_load_testing:Response time degradation on your application",
+          "count": 34
+        },
+        {
+          "signature": "warning:data_volume_scaling:General Stress Test (unrecognized dependencies)",
+          "count": 18
+        },
+        {
+          "signature": "critical:data_volume_scaling:General Stress Test (unrecognized dependencies)",
+          "count": 13
+        },
+        {
+          "signature": "warning::1 missing dependency",
+          "count": 11
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "npm-start",
+          "failure_count": 924
+        },
+        {
+          "dependency": "nextjs",
+          "failure_count": 40
+        },
+        {
+          "dependency": "flask",
+          "failure_count": 34
+        },
+        {
+          "dependency": "requests",
+          "failure_count": 20
+        },
+        {
+          "dependency": "express",
+          "failure_count": 16
+        }
+      ],
+      "dependency_failure_rate": 0.045,
+      "total_dependencies_seen": 1302,
+      "dependencies_with_failures": 59
+    }
+  },
+  "architectural_patterns": {
+    "api_service": {
+      "repo_count": 107
+    },
+    "chatbot": {
+      "repo_count": 5
+    },
+    "dashboard": {
+      "repo_count": 503
+    },
+    "data_pipeline": {
+      "repo_count": 40
+    },
+    "ml_model": {
+      "repo_count": 51
+    },
+    "portfolio": {
+      "repo_count": 1
+    },
+    "utility": {
+      "repo_count": 73
+    },
+    "web_app": {
+      "repo_count": 1301
+    }
+  },
+  "cross_tabulation": {
+    "api_service": {
+      "api_service": 39,
+      "utility": 1,
+      "web_app": 9
+    },
+    "chatbot": {
+      "api_service": 30,
+      "chatbot": 5,
+      "dashboard": 22,
+      "data_pipeline": 1,
+      "ml_model": 7,
+      "utility": 6,
+      "web_app": 21
+    },
+    "dashboard": {
+      "api_service": 27,
+      "dashboard": 364,
+      "data_pipeline": 5,
+      "ml_model": 14,
+      "portfolio": 1,
+      "utility": 8,
+      "web_app": 49
+    },
+    "data_pipeline": {
+      "api_service": 2,
+      "dashboard": 71,
+      "data_pipeline": 31,
+      "ml_model": 3,
+      "utility": 13,
+      "web_app": 11
+    },
+    "ml_model": {
+      "api_service": 2,
+      "dashboard": 46,
+      "data_pipeline": 3,
+      "ml_model": 27,
+      "utility": 5,
+      "web_app": 7
+    },
+    "portfolio": {
+      "utility": 1,
+      "web_app": 141
+    },
+    "utility": {
+      "api_service": 1,
+      "utility": 37,
+      "web_app": 1
+    },
+    "web_app": {
+      "api_service": 6,
+      "utility": 2,
+      "web_app": 1062
+    }
+  },
+  "business_domains": {
+    "ai_assistant": {
+      "repo_count": 112,
+      "repos_with_issues": 95,
+      "repos_clean": 17,
+      "failure_rate": 0.848,
+      "top_failure_signatures": [
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 25
+        },
+        {
+          "signature": "critical:http_load_testing:Application server could not start",
+          "count": 23
+        },
+        {
+          "signature": "warning:http_load_testing:Response time degradation on your application",
+          "count": 12
+        },
+        {
+          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
+          "count": 12
+        },
+        {
           "signature": "warning:memory_profiling:Failure indicators triggered: streamlit_cache_memory_growth",
-          "count": 96
+          "count": 11
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "streamlit",
+          "failure_count": 52
         },
         {
-          "signature": "critical:data_volume_scaling:Scenario failed: pandas_iterrows_vs_vectorized",
-          "count": 49
+          "dependency": "pandas",
+          "failure_count": 50
         },
         {
-          "signature": "critical:data_volume_scaling:Scenario failed: numpy_matrix_operation_scaling",
-          "count": 40
+          "dependency": "openai",
+          "failure_count": 40
         },
         {
-          "signature": "critical:data_volume_scaling:Scenario failed: pandas_merge_memory_stress",
-          "count": 38
+          "dependency": "fastapi",
+          "failure_count": 25
         },
         {
-          "signature": "critical:edge_case_input:Scenario failed: pandas_edge_case_dtypes",
-          "count": 37
+          "dependency": "uvicorn",
+          "failure_count": 25
+        }
+      ],
+      "dependency_failure_rate": 0.149,
+      "total_dependencies_seen": 577,
+      "dependencies_with_failures": 86
+    },
+    "climate": {
+      "repo_count": 2,
+      "repos_with_issues": 1,
+      "repos_clean": 1,
+      "failure_rate": 0.5,
+      "top_failure_signatures": [
+        {
+          "signature": "critical:data_volume_scaling:Array Size Scaling (numpy)",
+          "count": 1
+        },
+        {
+          "signature": "critical:http_load_testing:Application server could not start",
+          "count": 1
+        },
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 1
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "streamlit",
+          "failure_count": 2
+        },
+        {
+          "dependency": "numpy",
+          "failure_count": 1
+        }
+      ],
+      "dependency_failure_rate": 0.027,
+      "total_dependencies_seen": 75,
+      "dependencies_with_failures": 2
+    },
+    "data_science": {
+      "repo_count": 265,
+      "repos_with_issues": 244,
+      "repos_clean": 21,
+      "failure_rate": 0.921,
+      "top_failure_signatures": [
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 76
+        },
+        {
+          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
+          "count": 71
+        },
+        {
+          "signature": "warning:memory_profiling:Failure indicators triggered: streamlit_cache_memory_growth",
+          "count": 39
+        },
+        {
+          "signature": "critical:http_load_testing:Application server could not start",
+          "count": 33
+        },
+        {
+          "signature": "warning::1 missing dependency",
+          "count": 31
         }
       ],
       "top_dependencies": [
         {
           "dependency": "pandas",
-          "failure_count": 370
+          "failure_count": 285
         },
         {
           "dependency": "numpy",
-          "failure_count": 174
-        },
-        {
-          "dependency": "requests",
-          "failure_count": 119
+          "failure_count": 158
         },
         {
           "dependency": "streamlit",
-          "failure_count": 96
+          "failure_count": 148
         },
         {
-          "dependency": "plotly",
-          "failure_count": 36
+          "dependency": "scikit-learn",
+          "failure_count": 55
+        },
+        {
+          "dependency": "requests",
+          "failure_count": 37
         }
       ],
-      "dependency_failure_rate": 0.437,
-      "total_dependencies_seen": 423,
-      "dependencies_with_failures": 185
+      "dependency_failure_rate": 0.188,
+      "total_dependencies_seen": 746,
+      "dependencies_with_failures": 140
     },
-    "utility": {
-      "repo_count": 10,
-      "repos_with_issues": 7,
-      "repos_clean": 3,
-      "failure_rate": 0.7,
+    "developer_tools": {
+      "repo_count": 67,
+      "repos_with_issues": 57,
+      "repos_clean": 10,
+      "failure_rate": 0.851,
       "top_failure_signatures": [
         {
           "signature": "critical:http_load_testing:Application server could not start",
-          "count": 4
+          "count": 22
+        },
+        {
+          "signature": "warning::1 missing dependency",
+          "count": 13
+        },
+        {
+          "signature": "warning::2 missing dependencies",
+          "count": 7
         },
         {
           "signature": "critical:data_volume_scaling:General Stress Test (unrecognized dependencies)",
-          "count": 2
+          "count": 6
         },
         {
-          "signature": "warning:concurrent_execution:API Coupling (Src cursorx download and extract)",
+          "signature": "warning:memory_profiling:Failure indicators triggered: streamlit_cache_memory_growth",
+          "count": 5
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "pandas",
+          "failure_count": 30
+        },
+        {
+          "dependency": "uvicorn",
+          "failure_count": 16
+        },
+        {
+          "dependency": "fastapi",
+          "failure_count": 15
+        },
+        {
+          "dependency": "httpx",
+          "failure_count": 15
+        },
+        {
+          "dependency": "requests",
+          "failure_count": 15
+        }
+      ],
+      "dependency_failure_rate": 0.097,
+      "total_dependencies_seen": 784,
+      "dependencies_with_failures": 76
+    },
+    "entertainment": {
+      "repo_count": 9,
+      "repos_with_issues": 8,
+      "repos_clean": 1,
+      "failure_rate": 0.889,
+      "top_failure_signatures": [
+        {
+          "signature": "warning::1 missing dependency",
+          "count": 5
+        },
+        {
+          "signature": "critical:http_load_testing:Application server could not start",
+          "count": 3
+        },
+        {
+          "signature": "warning::3 missing dependencies",
           "count": 1
         },
         {
-          "signature": "warning:edge_case_input:Env Validation (dotenv)",
+          "signature": "warning::2 missing dependencies",
+          "count": 1
+        },
+        {
+          "signature": "critical:data_volume_scaling:General Stress Test (unrecognized dependencies)",
+          "count": 1
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "pygame",
+          "failure_count": 4
+        },
+        {
+          "dependency": "PyAudio",
+          "failure_count": 3
+        },
+        {
+          "dependency": "streamlit",
+          "failure_count": 2
+        },
+        {
+          "dependency": "playsound",
+          "failure_count": 1
+        },
+        {
+          "dependency": "threading-timeout",
+          "failure_count": 1
+        }
+      ],
+      "dependency_failure_rate": 0.076,
+      "total_dependencies_seen": 184,
+      "dependencies_with_failures": 14
+    },
+    "fintech": {
+      "repo_count": 36,
+      "repos_with_issues": 30,
+      "repos_clean": 6,
+      "failure_rate": 0.833,
+      "top_failure_signatures": [
+        {
+          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
+          "count": 11
+        },
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 10
+        },
+        {
+          "signature": "warning:http_load_testing:Response time degradation on your application",
+          "count": 6
+        },
+        {
+          "signature": "critical:data_volume_scaling:Array Size Scaling (numpy)",
+          "count": 5
+        },
+        {
+          "signature": "warning::3 missing dependencies",
+          "count": 4
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "pandas",
+          "failure_count": 36
+        },
+        {
+          "dependency": "streamlit",
+          "failure_count": 22
+        },
+        {
+          "dependency": "numpy",
+          "failure_count": 8
+        },
+        {
+          "dependency": "requests",
+          "failure_count": 8
+        },
+        {
+          "dependency": "plotly",
+          "failure_count": 4
+        }
+      ],
+      "dependency_failure_rate": 0.081,
+      "total_dependencies_seen": 308,
+      "dependencies_with_failures": 25
+    },
+    "general": {
+      "repo_count": 1582,
+      "repos_with_issues": 1482,
+      "repos_clean": 100,
+      "failure_rate": 0.937,
+      "top_failure_signatures": [
+        {
+          "signature": "critical:http_load_testing:Application server could not start",
+          "count": 1132
+        },
+        {
+          "signature": "critical:data_volume_scaling:Data Volume Scaling (pandas)",
+          "count": 90
+        },
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 80
+        },
+        {
+          "signature": "warning:http_load_testing:Response time degradation on your application",
+          "count": 56
+        },
+        {
+          "signature": "warning::1 missing dependency",
+          "count": 40
+        }
+      ],
+      "top_dependencies": [
+        {
+          "dependency": "npm-start",
+          "failure_count": 1072
+        },
+        {
+          "dependency": "pandas",
+          "failure_count": 279
+        },
+        {
+          "dependency": "streamlit",
+          "failure_count": 156
+        },
+        {
+          "dependency": "numpy",
+          "failure_count": 130
+        },
+        {
+          "dependency": "requests",
+          "failure_count": 107
+        }
+      ],
+      "dependency_failure_rate": 0.101,
+      "total_dependencies_seen": 1791,
+      "dependencies_with_failures": 180
+    },
+    "healthcare": {
+      "repo_count": 5,
+      "repos_with_issues": 4,
+      "repos_clean": 1,
+      "failure_rate": 0.8,
+      "top_failure_signatures": [
+        {
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
+          "count": 2
+        },
+        {
+          "signature": "critical:data_volume_scaling:Array Size Scaling (numpy)",
+          "count": 1
+        },
+        {
+          "signature": "warning:http_load_testing:Response time degradation on your application",
+          "count": 1
+        },
+        {
+          "signature": "warning::7 missing dependencies",
           "count": 1
         },
         {
@@ -401,158 +888,146 @@
       ],
       "top_dependencies": [
         {
-          "dependency": "npm-start",
-          "failure_count": 4
+          "dependency": "streamlit",
+          "failure_count": 5
         },
         {
-          "dependency": "dotenv",
+          "dependency": "numpy",
           "failure_count": 1
         },
         {
-          "dependency": "requests",
+          "dependency": "fastapi",
+          "failure_count": 1
+        },
+        {
+          "dependency": "uvicorn",
+          "failure_count": 1
+        },
+        {
+          "dependency": "pydicom",
           "failure_count": 1
         }
       ],
-      "dependency_failure_rate": 0.094,
-      "total_dependencies_seen": 32,
-      "dependencies_with_failures": 3
+      "dependency_failure_rate": 0.133,
+      "total_dependencies_seen": 105,
+      "dependencies_with_failures": 14
     },
-    "web_app": {
-      "repo_count": 539,
-      "repos_with_issues": 528,
-      "repos_clean": 11,
-      "failure_rate": 0.98,
+    "social_media": {
+      "repo_count": 3,
+      "repos_with_issues": 3,
+      "repos_clean": 0,
+      "failure_rate": 1.0,
       "top_failure_signatures": [
         {
-          "signature": "critical:http_load_testing:Application server could not start",
-          "count": 510
-        },
-        {
-          "signature": "warning:http_load_testing:Response time degradation on your application",
-          "count": 9
-        },
-        {
-          "signature": "critical:http_load_testing:Dependency installation failed",
-          "count": 5
-        },
-        {
-          "signature": "warning:edge_case_input:Env Validation (dotenv)",
+          "signature": "warning:memory_profiling:Cache Memory Growth (streamlit)",
           "count": 2
         },
         {
-          "signature": "warning:data_volume_scaling:Computation Coupling (App wait for timeout)",
+          "signature": "critical:data_volume_scaling:Array Size Scaling (numpy)",
+          "count": 1
+        },
+        {
+          "signature": "critical:http_load_testing:Endpoint /narratives/1 degrades under concurrent load",
+          "count": 1
+        },
+        {
+          "signature": "warning:http_load_testing:Get Narratives 1 (http)",
+          "count": 1
+        },
+        {
+          "signature": "warning:http_load_testing:Get Trends 1 (http)",
           "count": 1
         }
       ],
       "top_dependencies": [
         {
-          "dependency": "npm-start",
-          "failure_count": 509
-        },
-        {
-          "dependency": "nextjs",
-          "failure_count": 17
-        },
-        {
-          "dependency": "express",
-          "failure_count": 4
-        },
-        {
-          "dependency": "dotenv",
-          "failure_count": 3
-        },
-        {
           "dependency": "http",
           "failure_count": 2
+        },
+        {
+          "dependency": "streamlit",
+          "failure_count": 2
+        },
+        {
+          "dependency": "numpy",
+          "failure_count": 1
+        },
+        {
+          "dependency": "fastapi",
+          "failure_count": 1
+        },
+        {
+          "dependency": "uvicorn",
+          "failure_count": 1
         }
       ],
-      "dependency_failure_rate": 0.037,
-      "total_dependencies_seen": 405,
-      "dependencies_with_failures": 15
+      "dependency_failure_rate": 0.079,
+      "total_dependencies_seen": 76,
+      "dependencies_with_failures": 6
     }
   },
-  "architectural_patterns": {
-    "api_service": {
-      "repo_count": 20
-    },
-    "chatbot": {
-      "repo_count": 1
-    },
-    "dashboard": {
-      "repo_count": 178
-    },
-    "data_pipeline": {
-      "repo_count": 20
-    },
-    "ml_model": {
-      "repo_count": 17
-    },
-    "portfolio": {
-      "repo_count": 2
-    },
-    "unclassified": {
-      "repo_count": 110
-    },
-    "utility": {
-      "repo_count": 15
-    },
-    "web_app": {
-      "repo_count": 575
-    }
-  },
-  "cross_tabulation": {
-    "api_service": {
-      "api_service": 7,
-      "data_pipeline": 1,
-      "web_app": 3
-    },
-    "chatbot": {
-      "api_service": 3,
-      "chatbot": 1,
-      "dashboard": 2,
-      "ml_model": 2,
-      "portfolio": 1,
-      "utility": 1,
+  "business_domain_vertical_cross": {
+    "ai_assistant": {
+      "chatbot": 53,
+      "dashboard": 49,
+      "data_pipeline": 5,
+      "ml_model": 1,
       "web_app": 4
     },
-    "dashboard": {
-      "api_service": 6,
-      "dashboard": 143,
-      "data_pipeline": 2,
-      "ml_model": 3,
+    "climate": {
+      "dashboard": 1,
+      "data_pipeline": 1
+    },
+    "data_science": {
+      "api_service": 2,
+      "chatbot": 16,
+      "dashboard": 127,
+      "data_pipeline": 41,
+      "ml_model": 76,
       "web_app": 3
     },
-    "data_pipeline": {
-      "api_service": 1,
-      "dashboard": 24,
-      "data_pipeline": 15,
+    "developer_tools": {
+      "api_service": 11,
+      "chatbot": 8,
+      "dashboard": 20,
+      "data_pipeline": 12,
       "ml_model": 2,
-      "utility": 5,
-      "web_app": 2
+      "utility": 3,
+      "web_app": 11
     },
-    "ml_model": {
-      "dashboard": 9,
+    "entertainment": {
+      "chatbot": 1,
+      "dashboard": 3,
       "data_pipeline": 2,
-      "ml_model": 10,
+      "ml_model": 1,
       "utility": 1,
-      "web_app": 3
-    },
-    "portfolio": {
-      "web_app": 23
-    },
-    "unclassified": {
-      "unclassified": 110
-    },
-    "utility": {
-      "api_service": 1,
-      "portfolio": 1,
-      "utility": 7,
       "web_app": 1
     },
-    "web_app": {
-      "api_service": 2,
+    "fintech": {
+      "api_service": 1,
+      "dashboard": 17,
+      "data_pipeline": 11,
       "utility": 1,
-      "web_app": 536
+      "web_app": 6
+    },
+    "general": {
+      "api_service": 35,
+      "chatbot": 13,
+      "dashboard": 246,
+      "data_pipeline": 58,
+      "ml_model": 9,
+      "portfolio": 142,
+      "utility": 34,
+      "web_app": 1045
+    },
+    "healthcare": {
+      "dashboard": 3,
+      "data_pipeline": 1,
+      "ml_model": 1
+    },
+    "social_media": {
+      "chatbot": 1,
+      "dashboard": 2
     }
   }
 }
