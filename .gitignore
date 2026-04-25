@@ -231,3 +231,4 @@ corpus_results_timeout/
 discovered_repos*.json
 failed_repos.json
 timeout_repos.json
+session-logs/
