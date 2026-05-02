@@ -1,5 +1,5 @@
 # MEMORY.md — CC Knowledge Base
-# Updated: May 2, 2026
+# Updated: May 2, 2026 (evening)
 # Read this at session start. Update at session end.
 # Per discipline 3.11, read alongside CLAUDE.md and known_issues.md.
 
@@ -163,6 +163,9 @@ The full discipline list is also in CLAUDE.md and the CC Session Workflow docume
 - **Plan-review gate mandatory for all CC sessions.** CC writes plan.md → Manav annotates → CC revises → Manav approves → CC implements. Never skip.
 - **3.10 — Full test suite required, no silent substitution.** `pytest -x -q` with NO exclusions for pre-commit verification. ~52 minutes wall-clock acceptable. Subset substitution without explicit approval is a violation. If too slow, REPORT and ASK.
 - **3.11 — CC reads CLAUDE.md, MEMORY.md, and known_issues.md at start of every action.** Both CLAUDE.md self-references this AND per-prompt reminders enforce.
+- **3.12 — Branch operations require explicit announcement.** Any command that creates, deletes, or switches branches — local or remote — must be flagged explicitly before issuing, with branch name, source HEAD, reason, and lifecycle. Burying branch operations in a checklist is a violation.
+- **3.13 — File-system creation outside the repo root requires explicit announcement.** Any new top-level directory under user's home, any folder created outside `~/Desktop/mycode/`, requires announcement and confirmation before the command. Complements 3.12.
+- **3.14 — Planning-folder location is `~/Desktop/mycode/myCode-plans/[YYYY-MM-DD]-[task-slug]/`.** PLAN.md and EXECUTION.md files for every CC session live there. In-repo, gitignored. Old dated subfolders accumulate as a genealogical record. The earlier external `~/projects/myCode-plans/` location is superseded.
 - **3.3 — Pre-commit scrutiny.** Explicit `git add` scope (never `git add .` or `git add -A`). Paste `git status` and `git diff --staged` for review before commit.
 - Earlier disciplines (3.1, 3.2, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9) are documented in CLAUDE.md.
 
@@ -185,5 +188,6 @@ cd ~/Desktop/mycode && caffeinate -s python3 scripts/batch_mine.py --input corpu
 
 ## Revision History
 
+- 2026-05-02 (evening) — Disciplines 3.12 (branch announcement), 3.13 (filesystem-creation announcement), 3.14 (in-repo myCode-plans/ planning-folder location) added. CC Session Workflow document v1's external planning-folder location superseded by 3.14. Trigger: Session 37 CC session for test_empty_project_raises wrote PLAN.md to wrong external location, surfacing the gap.
 - 2026-05-02 — Updated for Session 37: ADRs 011 and 012 added; ADR table extended to twelve entries; gate summaries refreshed; Phase 4 implementation queue documented; test count updated 2,570 → 2,862; AUC corrected 0.931 → 0.9307; targets corrected 40 → 42; known issues consolidated and pointer added to known_issues.md; current task list reset to Session 36+37 priorities; LLM policy reframed as policy-not-architecture per CLAUDE.md v3.7; disciplines 3.10/3.11 added.
 - 2026-04-06 — Original.

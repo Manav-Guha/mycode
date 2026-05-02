@@ -1,5 +1,5 @@
 # myCode — Product Specification (CLAUDE.md)
-# Version: 3.7 — May 2, 2026
+# Version: 3.8 — May 2, 2026 (evening)
 # This is the authoritative build specification. Do not override architectural decisions without explicit human approval.
 # Current state (test counts, corpus numbers, infrastructure, completed tracks) is in MEMORY.md.
 # Read all three at session start: CLAUDE.md, MEMORY.md, and known_issues.md (per discipline 3.11).
@@ -372,6 +372,9 @@ These are the disciplines CC must observe at every session. They are summarised 
 - **3.9 — User-facing path goes first.** Don't lead with methodological framings that delay user-experience problems.
 - **3.10 — Full test suite required, no silent substitution.** `pytest -x -q` with NO exclusions for pre-commit verification. Subset substitution without explicit approval is a violation. If too slow, REPORT and ASK.
 - **3.11 — CC reads CLAUDE.md, MEMORY.md, and known_issues.md at start of every action.** Both this self-reference and per-prompt reminders enforce.
+- **3.12 — Branch operations require explicit announcement.** Any command that creates, deletes, or switches branches — local or remote — must be flagged explicitly before issuing, with: branch name, what HEAD it branches from, why it is being created or switched, and the lifecycle (when it merges, when it gets deleted). The `git checkout -b`, `git branch`, `git push --delete`, and `git branch -d/-D` commands are the visible markers. Burying branch operations in a checklist is a violation. Applies to Claude.ai issuing instructions, to CC writing or executing prompts, and to any future automation.
+- **3.13 — File-system creation outside the repo root, or any new top-level directory under the user's home, requires explicit announcement and confirmation before the command is issued.** Complements 3.12. Operations covered include `mkdir` of a new parent directory, `mv` of a folder out of the repo, and any tool-side or CC-side directory creation. Applies symmetrically to Claude.ai-issued and CC-issued operations.
+- **3.14 — Planning-folder location is `~/Desktop/mycode/myCode-plans/[YYYY-MM-DD]-[task-slug]/`.** PLAN.md and EXECUTION.md files for every CC session are written into this in-repo, gitignored directory. The dated subfolder is created per session; old subfolders are never deleted, accumulating as a genealogical record. CC must use this exact path. The earlier-drafted external `~/projects/myCode-plans/` location (from CC Session Workflow document v1) is superseded and must not be used.
 
 The plan-review gate is non-negotiable: CC writes plan.md → Manav annotates → CC revises → Manav approves → CC implements. No implementation without plan review. See the CC Session Workflow document for the full session-orchestration protocol.
 
@@ -397,6 +400,7 @@ The plan-review gate is non-negotiable: CC writes plan.md → Manav annotates �
 
 ## Revision History
 
+- v3.8 — 2026-05-02 (evening). Three disciplines added: 3.12 (branch operations require explicit announcement), 3.13 (filesystem creation outside repo root requires explicit announcement), 3.14 (planning-folder location is in-repo `~/Desktop/mycode/myCode-plans/[YYYY-MM-DD]-[task-slug]/`, gitignored). The 3.14 location supersedes the external `~/projects/myCode-plans/` location specified in CC Session Workflow v1; that document is revised. Trigger for these additions: Session 37 CC session for `test_empty_project_raises` fix wrote PLAN.md to the wrong external location (per the v1 workflow document), surfacing the gap.
 - v3.7 — 2026-05-02. Sonnet/Opus model references corrected to Gemini 2.5 Flash. DeepSeek prohibition reframed as policy (not architectural) restriction. v1 LOCAL-ONLY claim updated to reflect shipped public GitHub URL ingestion; tier boundary deferred pending pricing decision. known_issues.md created and referenced. Disciplines 3.10 and 3.11 added explicitly. Test count updated from 2,570 to 2,862. ADR cross-reference added (decision 23). CI-gate-in-OSS-repo flagged as known issue requiring guard layer pre-billing-launch. JSON-for-Coding-Agent claim corrected to optional --json-output. Two-turn conversational interface clarified (was 3-5 minute exchange). ADR-011 (dependency-free project support) and ADR-012 (Stage 0 smoke test) referenced inline.
 - v3.6 — 2026-04-10. Test counts and prediction.py module documented.
 - Earlier versions in git history.
