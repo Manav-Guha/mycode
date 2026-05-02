@@ -10,12 +10,7 @@
 
 ### Test-suite issues
 
-1. **`test_empty_project_raises` pre-existing failure**
-   - File: `tests/test_pipeline.py`
-   - Symptom: stale test regex causes failure cross-platform.
-   - Source: surfaced in Session 35–36 full-suite verification (April 25).
-   - Resolution: small test-only patch. Sunday Priority 3 (carried over).
-   - Next action: Manav's queue, this week.
+(No active test-suite issues.)
 
 ### Documentation drift (caught by clean-instance audit, 2026-05-01)
 
@@ -158,7 +153,10 @@
 
 ## Resolved (chronological)
 
-(none yet)
+1. **`test_empty_project_raises` pre-existing failure** — RESOLVED 2026-05-02
+   - File: `tests/test_pipeline.py`
+   - Fix: test regex updated from `"Could not determine"` to `"doesn't appear to use a supported language"` to match production error message in this commit.
+   - Source: surfaced in Session 35–36 full-suite verification (April 25).
 
 ---
 

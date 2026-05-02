@@ -182,7 +182,7 @@ class TestDetectLanguage:
         assert detect_language(js_project) == "javascript"
 
     def test_empty_project_raises(self, empty_project):
-        with pytest.raises(LanguageDetectionError, match="Could not determine"):
+        with pytest.raises(LanguageDetectionError, match="doesn't appear to use a supported language"):
             detect_language(empty_project)
 
     def test_not_a_directory(self, tmp_path):
